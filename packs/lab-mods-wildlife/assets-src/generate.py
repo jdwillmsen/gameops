@@ -14,7 +14,7 @@ import build_textures  # noqa: E402
 from species import SPECIES, Species  # noqa: E402
 
 PACK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("tiger", "cheetah")
+GENERATED = ("tiger", "cheetah", "lion", "black_leopard")
 
 
 def dump(doc) -> bytes:
@@ -46,6 +46,9 @@ def client_entity(s: Species) -> dict:
 
 def render_controller(s: Species) -> dict:
     ctl = {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}]}
+    if s.id == "lion":
+        # The female shares the male's geometry, so her mane bone is hidden rather than absent.
+        ctl["part_visibility"] = [{"*": True}, {"mane": f"query.variant == {s.variants.index('male')}"}]
     if s.variants:
         ctl["arrays"] = {"textures": {"Array.skins": [f"Texture.{v}" for v in s.variants]}}
         ctl["textures"] = ["Array.skins[query.variant]"]

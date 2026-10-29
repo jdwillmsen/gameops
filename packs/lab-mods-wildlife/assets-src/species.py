@@ -19,12 +19,14 @@ class Species:
     # Movement while the ability is active and while the animal is recovering; 0 where it has none.
     active_speed: float = 0.0
     tired_speed: float = 0.0
+    # Leaps at its target instead of only walking up to it.
+    pounce: bool = False
 
 
 def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg,
-       active_speed=0.0, tired_speed=0.0):
+       active_speed=0.0, tired_speed=0.0, pounce=False):
     return Species(id, f"gameops_{id}", health, damage, speed, tame_item, prey, rivals, variants, ability, rig,
-                   box, egg, active_speed, tired_speed)
+                   box, egg, active_speed, tired_speed, pounce)
 
 
 SMALL = ("rabbit", "chicken")
@@ -38,7 +40,7 @@ SPECIES = {s.id: s for s in (
     _s("lion", 50, 7, 0.30, "mutton", LIVESTOCK, ("gameops_hyena",), ("male", "female"), "roar", "cat",
        (1.0, 1.2), ("#c9a05a", "#6a4220")),
     _s("black_leopard", 40, 6, 0.32, "chicken", SMALL, ("gameops_hyena",), (), "ambush", "cat",
-       (0.9, 1.0), ("#26262c", "#6a6a74")),
+       (0.9, 1.0), ("#26262c", "#6a6a74"), pounce=True),
     _s("brown_bear", 80, 9, 0.25, "salmon", (), (), (), "guard", "bear",
        (1.4, 1.5), ("#5a3a22", "#a07a50")),
     _s("hyena", 30, 7, 0.32, "rotten_flesh", (),

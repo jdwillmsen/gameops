@@ -3,10 +3,11 @@
 Model space is pixels, +y up, the animal faces -z, negative x is its right. Every size is an
 integer so each cube's box-UV rectangle sits on the pixel grid.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 TEXTURE = 128
 BONES = ("body", "head", "tail", "front_left_leg", "front_right_leg", "back_left_leg", "back_right_leg")
+MANE = "mane"
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,8 @@ class CatParams:
     head_rise: int = 0    # how far the top of the head stands above the back line
     muzzle: tuple = (0.5, 0.4, 0.4)   # width, height, depth as fractions of the head
     scale: float = 1.0
+    tuft: int = 0   # length of a tail-end tuft past the tail; 0 for none
+    mane: bool = False   # extra bone of boxes around the neck and shoulders, shown per variant
 
 
 # Tiger: big, heavy and broad. Cheetah: slender, long-legged, small head, long tail, deep chest.
@@ -34,6 +37,13 @@ PARAMS = {
     "tiger": CatParams(body_w=12, body_h=11, body_len=22, chest_len=11, tuck=0, leg_len=9, leg_w=5,
                        head_w=10, head_h=10, head_d=8, tail_len=18, tail_w=3, tail_droop=25,
                        head_rise=2, muzzle=(0.5, 0.4, 0.5)),
+    # Lion: deep heavy chest on a lean rear, a head wider than tall, a tufted tail and a male mane.
+    "lion": CatParams(body_w=11, body_h=11, body_len=22, chest_len=13, tuck=2, leg_len=9, leg_w=4,
+                      head_w=10, head_h=8, head_d=8, tail_len=17, tail_w=2, tail_droop=15, head_rise=1,
+                      muzzle=(0.55, 0.45, 0.4), tuft=3, mane=True),
+    # Black leopard: low, muscular and long, small head, very long tail.
+    "black_leopard": CatParams(body_w=8, body_h=7, body_len=22, chest_len=10, tuck=0, leg_len=6, leg_w=3,
+                               head_w=6, head_h=6, head_d=5, tail_len=24, tail_w=2, tail_droop=10),
     "cheetah": CatParams(body_w=6, body_h=7, body_len=20, chest_len=10, tuck=2, leg_len=8, leg_w=3,
                          head_w=5, head_h=5, head_d=5, tail_len=20, tail_w=2, tail_droop=12),
 }
@@ -53,9 +63,14 @@ def _sc(p: CatParams) -> CatParams:
         return p
     def i(v):
         return max(1, round(v * p.scale))
-    return CatParams(i(p.body_w), i(p.body_h), i(p.body_len), i(p.chest_len), round(p.tuck * p.scale),
-                     i(p.leg_len), i(p.leg_w), i(p.head_w), i(p.head_h), i(p.head_d), i(p.tail_len),
-                     i(p.tail_w), p.tail_droop, p.head_rise, p.muzzle, 1.0)
+    return replace(p, body_w=i(p.body_w), body_h=i(p.body_h), body_len=i(p.body_len), chest_len=i(p.chest_len),
+                   tuck=round(p.tuck * p.scale), leg_len=i(p.leg_len), leg_w=i(p.leg_w), head_w=i(p.head_w),
+                   head_h=i(p.head_h), head_d=i(p.head_d), tail_len=i(p.tail_len), tail_w=i(p.tail_w),
+                   tuft=round(p.tuft * p.scale), scale=1.0)
+
+
+def bone_names(p: CatParams) -> tuple:
+    return BONES + ((MANE,) if p.mane else ())
 
 
 def pivots(p: CatParams) -> dict:
@@ -102,6 +117,15 @@ def _shapes(p: CatParams):
     tv = pivots(p)["tail"]
     out.append(("tail", "tail", (-p.tail_w / 2, tv[1] - p.tail_w / 2, tv[2]), (p.tail_w, p.tail_w, p.tail_len)))
 
+    if p.tuft:
+        out.append(("tail", "tuft", (-p.tail_w / 2 - 0.5, tv[1] - p.tail_w / 2 - 0.5, tv[2] + p.tail_len),
+                    (p.tail_w + 1, p.tail_w + 1, p.tuft)))
+
+    if p.mane:
+        # The ruff frames the back of the head; the shoulder cape sits over the front of the chest.
+        out.append((MANE, "mane_ruff", (-(hw + 4) / 2, pv[1] - hh / 2 - 2, pv[2] - 1), (hw + 4, hh + 4, 4)))
+        out.append((MANE, "mane_cape", (-(bw + 2) / 2, p.leg_len + 1, -half + 3), (bw + 2, p.body_h + 1, 6)))
+
     for bone in BONES[3:]:
         cx, _, cz = pivots(p)[bone]
         out.append((bone, bone, (cx - p.leg_w / 2, 0, cz - p.leg_w / 2), (p.leg_w, p.leg_len, p.leg_w)))
@@ -132,10 +156,11 @@ def build(params: CatParams, identifier: str = "geometry.gameops.cat") -> dict:
     pv = pivots(p)
     bones = []
     parts = layout(params)
-    for bone in BONES:
+    pv[MANE] = pv["head"]
+    for bone in bone_names(p):
         entry = {"name": bone, "pivot": pv[bone]}
-        # Head, tail and rear legs ride on the body so a sitting pitch carries them down with it.
-        if bone in ("head", "tail", "back_left_leg", "back_right_leg"):
+        # Head, tail, mane and rear legs ride on the body so a sitting pitch carries them down with it.
+        if bone in ("head", "tail", "back_left_leg", "back_right_leg", MANE):
             entry["parent"] = "body"
         if bone == "tail" and p.tail_droop:
             entry["rotation"] = [-p.tail_droop, 0, 0]

@@ -3,8 +3,10 @@ from species import Species
 NOT_PLAYER = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
 
 
-def event(add=(), remove=()):
+def event(add=(), remove=(), props=None):
     out = {}
+    if props:
+        out["set_property"] = props
     if add:
         out["add"] = {"component_groups": list(add)}
     if remove:
@@ -13,6 +15,9 @@ def event(add=(), remove=()):
 
 
 MELEE = {"priority": 4, "speed_multiplier": 1.2, "track_target": True}
+LEAP = {"priority": 3, "must_be_on_ground": True, "yd": 0.45, "target_dist": 0.5}
+# Script cannot read the sittable state, so the sit events mirror it into an entity property.
+SITTING_PROPERTY = "gameops:sitting"
 
 
 def ability_groups(s: Species) -> tuple[dict, dict]:
@@ -49,6 +54,8 @@ def entity_json(s: Species) -> dict:
             }],
         },
     }
+    if s.pounce:
+        wild["minecraft:behavior.leap_at_target"] = LEAP
     tamed = {
         "minecraft:is_tamed": {},
         "minecraft:persistent": {},
@@ -68,6 +75,8 @@ def entity_json(s: Species) -> dict:
         "minecraft:behavior.owner_hit_target": {
             "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
     }
+    if s.pounce:
+        active["minecraft:behavior.leap_at_target"] = LEAP
     sitting = {
         # on_sit also removes the active goals; priority 1 keeps lower-priority wandering from moving it.
         "minecraft:behavior.stay_while_sitting": {"priority": 1},
@@ -95,6 +104,7 @@ def entity_json(s: Species) -> dict:
                 "is_spawnable": True,
                 "is_summonable": True,
                 "is_experimental": False,
+                "properties": {SITTING_PROPERTY: {"type": "bool", "default": False}},
             },
             "component_groups": groups,
             "components": {
@@ -119,8 +129,10 @@ def entity_json(s: Species) -> dict:
                 "minecraft:entity_spawned": {"sequence": spawn},
                 "gameops:on_tamed": event(add=["gameops:tamed", "gameops:tamed_active"],
                                           remove=["gameops:wild"]),
-                "gameops:on_sit": event(add=["gameops:sitting"], remove=["gameops:tamed_active"]),
-                "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"]),
+                "gameops:on_sit": event(add=["gameops:sitting"], remove=["gameops:tamed_active"],
+                                      props={SITTING_PROPERTY: True}),
+                "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"],
+                                        props={SITTING_PROPERTY: False}),
                 **ability_events,
             },
         },

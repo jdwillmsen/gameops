@@ -25,6 +25,9 @@ IDS = ("tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena")
 GROUPS = ("gameops:wild", "gameops:tamed", "gameops:sitting")
 ACTIVE_GOALS = tuple("minecraft:behavior." + g for g in (
     "melee_attack", "follow_owner", "owner_hurt_by_target", "owner_hit_target"))
+CATS = ("tiger", "cheetah", "lion", "black_leopard")
+CAT_TEXTURES = (("tiger", "orange"), ("tiger", "white"), ("cheetah", "default"), ("lion", "male"),
+                ("lion", "female"), ("black_leopard", "default"))
 EVENTS = ("gameops:on_tamed", "gameops:on_sit", "gameops:on_stand")
 
 
@@ -100,10 +103,11 @@ class Generators(unittest.TestCase):
         self.assertIn("query.variant", json.dumps(ctl))
 
     def test_models_are_not_vanilla_cat(self):
-        for sid in ("tiger", "cheetah"):
+        for sid in CATS:
             geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
             self.assertEqual(geo["description"]["identifier"], f"geometry.gameops.{sid}")
-            self.assertEqual([b["name"] for b in geo["bones"]], list(cat_rig.BONES))
+            expected = list(cat_rig.BONES) + (["mane"] if sid == "lion" else [])
+            self.assertEqual([b["name"] for b in geo["bones"]], expected)
             self.assertEqual(geo["description"]["texture_width"], 128)
             client = json.loads(self.load(f"resource_pack/entity/{sid}.entity.json"))
             self.assertEqual(client["minecraft:client_entity"]["description"]["geometry"]["default"],
@@ -124,12 +128,12 @@ class Generators(unittest.TestCase):
         self.assertEqual(sorted(anims), sorted(build_models.ANIMATION_PREFIX + n for n in build_models.ANIMATION_NAMES))
         self.assertTrue(all(a["bones"] for a in anims.values()))
         self.assertIn("query.modified_distance_moved", json.dumps(anims[build_models.ANIMATION_PREFIX + "walk"]))
-        for sid in ("tiger", "cheetah"):
+        for sid in CATS:
             client = json.loads(self.load(f"resource_pack/entity/{sid}.entity.json"))["minecraft:client_entity"]
             self.assertEqual(sorted(client["description"]["animations"].values()), sorted(anims))
 
     def test_textures_are_deterministic_128_png(self):
-        for sid, variant in (("tiger", "orange"), ("tiger", "white"), ("cheetah", "default")):
+        for sid, variant in CAT_TEXTURES:
             a = build_textures.paint(SPECIES[sid], variant)
             self.assertEqual(a, build_textures.paint(SPECIES[sid], variant))
             self.assertEqual(a[:8], b"\x89PNG\r\n\x1a\n")
@@ -212,6 +216,89 @@ class Generators(unittest.TestCase):
                     for entry in comps.get("minecraft:behavior." + goal, {}).get("entity_types", []):
                         f = entry["filters"]
                         self.assertEqual((f["test"], f["operator"], f["value"]), ("is_family", "!=", "player"))
+
+    def geo_bones(self, sid):
+        geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
+        return {b["name"]: b for b in geo["bones"]}
+
+    def test_lion_female_has_no_mane(self):
+        bones = self.geo_bones("lion")
+        self.assertGreaterEqual(len(bones["mane"]["cubes"]), 2)
+        self.assertEqual(bones["mane"]["parent"], "body")
+        ctl = json.loads(self.load("resource_pack/render_controllers/lion.render_controllers.json"))
+        rc = ctl["render_controllers"]["controller.render.gameops.lion"]
+        male = SPECIES["lion"].variants.index("male")
+        self.assertEqual(SPECIES["lion"].variants.index("female"), 1 - male)
+        self.assertIn({"*": True}, rc["part_visibility"])
+        self.assertIn({"mane": f"query.variant == {male}"}, rc["part_visibility"])
+        for sid in CATS:
+            if sid != "lion":
+                self.assertNotIn("mane", self.geo_bones(sid))
+        ent = self.committed_entity("lion")
+        for v in ("male", "female"):
+            self.assertIn(f"gameops:variant_{v}", ent["component_groups"])
+        spawn = ent["events"]["minecraft:entity_spawned"]["sequence"]
+        self.assertEqual(len(spawn[1]["randomize"]), 2)
+
+    def test_lion_mane_is_painted_differently_from_the_coat(self):
+        male = build_textures.paint(SPECIES["lion"], "male")
+        female = build_textures.paint(SPECIES["lion"], "female")
+        self.assertNotEqual(male, female)
+        self.assertNotEqual(build_textures.COLOURS[("lion", "male")]["mane"],
+                            build_textures.COLOURS[("lion", "male")]["base"])
+
+    def test_lion_and_leopard_are_distinct_cats(self):
+        P = cat_rig.PARAMS
+        vol = lambda p: p.body_w * p.body_h * p.body_len
+        self.assertGreater(vol(P["lion"]), vol(P["cheetah"]) * 2)
+        self.assertGreater(vol(P["tiger"]), vol(P["lion"]))
+        self.assertGreater(P["lion"].head_w, P["lion"].head_h)
+        self.assertGreater(P["lion"].chest_len, P["lion"].body_len // 2)
+        self.assertTrue(P["lion"].tuft)
+        self.assertFalse(P["black_leopard"].tuft)
+        lp, ch = P["black_leopard"], P["cheetah"]
+        self.assertGreater(lp.body_w, ch.body_w)
+        self.assertLess(lp.leg_len / (lp.leg_len + lp.body_h), ch.leg_len / (ch.leg_len + ch.body_h))
+        self.assertGreater(lp.tail_len / lp.body_len, 1.0)
+        self.assertLess(lp.head_w, P["lion"].head_w)
+
+    def test_lion_tail_has_a_dark_tuft(self):
+        names = [c["size"] for c in self.geo_bones("lion")["tail"]["cubes"]]
+        self.assertEqual(len(names), 2)
+        self.assertEqual(len(self.geo_bones("black_leopard")["tail"]["cubes"]), 1)
+
+    def test_black_leopard_pounces(self):
+        ent = self.committed_entity("black_leopard")
+        groups = ent["component_groups"]
+        for g in ("gameops:wild", "gameops:tamed_active"):
+            leap = groups[g]["minecraft:behavior.leap_at_target"]
+            self.assertTrue(leap["must_be_on_ground"], g)
+            self.assertGreater(leap["yd"], 0, g)
+        self.assertNotIn("minecraft:behavior.leap_at_target", groups["gameops:sitting"])
+        self.assertNotIn("minecraft:behavior.leap_at_target", ent["components"])
+        for sid in IDS:
+            if sid != "black_leopard":
+                self.assertNotIn("leap_at_target", json.dumps(build_behavior.entity_json(SPECIES[sid])), sid)
+        self.assertNotIn("component_groups", ent["events"].get("minecraft:entity_spawned", {}))
+        self.assertEqual(SPECIES["black_leopard"].variants, ())
+        self.assertNotIn("gameops:ability_active", groups)
+
+    def test_lion_and_leopard_taming_foods_and_stats(self):
+        for sid, food, hp, dmg in (("lion", "mutton", 50, 7), ("black_leopard", "chicken", 40, 6)):
+            ent = self.committed_entity(sid)
+            tame = ent["component_groups"]["gameops:wild"]["minecraft:tameable"]
+            self.assertEqual(tame["tame_items"], [food])
+            self.assertEqual(ent["components"]["minecraft:health"]["max"], hp)
+            self.assertEqual(ent["components"]["minecraft:attack"]["damage"], dmg)
+            self.assertNotIn("gameops:ability_active", ent["component_groups"])
+
+    def test_sitting_is_readable_from_script(self):
+        for s in SPECIES.values():
+            ent = build_behavior.entity_json(s)["minecraft:entity"]
+            prop = ent["description"]["properties"]["gameops:sitting"]
+            self.assertEqual((prop["type"], prop["default"]), ("bool", False), s.id)
+            self.assertEqual(ent["events"]["gameops:on_sit"]["set_property"], {"gameops:sitting": True}, s.id)
+            self.assertEqual(ent["events"]["gameops:on_stand"]["set_property"], {"gameops:sitting": False}, s.id)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,42 @@
+{
+  "format_version": "1.10.0",
+  "minecraft:client_entity": {
+    "description": {
+      "identifier": "gameops:black_leopard",
+      "materials": {
+        "default": "entity_alphatest"
+      },
+      "textures": {
+        "default": "textures/entity/black_leopard"
+      },
+      "geometry": {
+        "default": "geometry.gameops.black_leopard"
+      },
+      "animations": {
+        "walk": "animation.gameops.cat.walk",
+        "sit": "animation.gameops.cat.sit",
+        "idle": "animation.gameops.cat.idle",
+        "attack": "animation.gameops.cat.attack"
+      },
+      "scripts": {
+        "animate": [
+          "walk",
+          "idle",
+          {
+            "sit": "query.is_sitting"
+          },
+          {
+            "attack": "variable.attack_time > 0"
+          }
+        ]
+      },
+      "render_controllers": [
+        "controller.render.gameops.black_leopard"
+      ],
+      "spawn_egg": {
+        "base_color": "#26262c",
+        "overlay_color": "#6a6a74"
+      }
+    }
+  }
+}

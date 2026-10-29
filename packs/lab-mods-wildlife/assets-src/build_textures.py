@@ -16,6 +16,16 @@ COLOURS = {
                          "nose": (120, 78, 80), "eye": (150, 178, 196)},
     ("cheetah", "default"): {"base": (214, 174, 98), "mark": (30, 24, 20), "belly": (240, 224, 188),
                              "nose": (40, 30, 30), "eye": (200, 150, 40)},
+    # shade: the coat's faint darker flecks; mane/mane_hi/mane_dark: the male's mane strands and tuft.
+    ("lion", "male"): {"base": (206, 160, 92), "shade": (190, 144, 80), "belly": (234, 208, 160),
+                       "mane": (96, 60, 30), "mane_hi": (168, 120, 48), "mane_dark": (62, 38, 20),
+                       "nose": (52, 34, 32), "eye": (196, 150, 40), "mark": (62, 38, 20)},
+    ("lion", "female"): {"base": (210, 166, 100), "shade": (194, 150, 88), "belly": (238, 214, 168),
+                         "mane": (96, 60, 30), "mane_hi": (168, 120, 48), "mane_dark": (62, 38, 20),
+                         "nose": (60, 40, 38), "eye": (196, 150, 40), "mark": (62, 38, 20)},
+    # shade: the rosette outline; mark: the paler rosette centre.
+    ("black_leopard", "default"): {"base": (44, 42, 48), "shade": (22, 21, 25), "mark": (58, 54, 60),
+                                   "belly": (66, 62, 66), "nose": (86, 66, 70), "eye": (176, 196, 46)},
 }
 
 
@@ -234,7 +244,94 @@ def cheetah(p: Px, pal: dict):
     return mark if small_spot(p, 11) else base
 
 
-SKINS = {"tiger": tiger, "cheetah": cheetah}
+def face_hash(p: Px) -> int:
+    return zlib.crc32(f"{p.part}{p.face}".encode()) % 100000
+
+
+def speckle(p: Px, seed: int, one_in=11) -> bool:
+    """Irregular single-pixel flecks; hashed per pixel so there is no grid or parity pattern."""
+    return noise(p.col, p.row, face_hash(p) + seed) % one_in == 0
+
+
+def mane_strand(p: Px, pal: dict):
+    """Vertical hair strands of uneven length: golden tips over a dark brown base, darker at the roots."""
+    n = noise(p.col, face_hash(p))
+    length = 2 + (n >> 4) % (p.rows - 1)
+    if p.row < length and n % 3 == 0:
+        return pal["mane_hi"]
+    return pal["mane_dark"] if p.row >= p.rows - 2 or n % 7 == 0 else pal["mane"]
+
+
+def lion(p: Px, pal: dict):
+    feat = face_features(p, pal)
+    if feat:
+        return feat
+    base, shade, belly = pal["base"], pal["shade"], pal["belly"]
+    if p.part.startswith("mane"):
+        return mane_strand(p, pal)
+    if p.part == "tuft":
+        return pal["mane_dark"]
+    if p.part == "tail":
+        return belly if p.under else (shade if speckle(p, 3, 9) else base)
+    if p.part in ("chest", "rear"):
+        if p.under or p.up < 0.3 or (p.face == "front" and p.up < 0.6):
+            return belly
+        return shade if speckle(p, 1) else base
+    if p.part == "head":
+        if p.face == "front":
+            return belly if p.up < 0.35 else base
+        if p.under or p.up < 0.3:
+            return belly
+        return shade if speckle(p, 2, 13) else base
+    if p.part == "muzzle":
+        return base if p.face == "top" else belly
+    if p.part.startswith("ear"):
+        return pal["mane_dark"] if p.face == "back" else base
+    if p.y < 1.5 or p.under:
+        return belly
+    inner = p.face in ("right", "left") and abs(p.x) < abs(p.origin[0] + p.size[0] / 2)
+    return belly if inner else (shade if speckle(p, 4, 8) else base)
+
+
+def rosette(p: Px, seed: int, cell=(6, 5), chance=80):
+    """'ring' or 'centre' where a small broken ring of rosette sits inside its cell, else None."""
+    cw, ch = cell
+    gx, gy = p.col // cw, p.row // ch
+    n = noise(gx, gy, face_hash(p) + seed)
+    if n % 100 >= chance:
+        return None
+    dx = p.col - (gx * cw + 1 + (n >> 8) % (cw - 3))
+    dy = p.row - (gy * ch + 1 + (n >> 12) % (ch - 3))
+    if abs(dx) > 1 or abs(dy) > 1:
+        return None
+    if dx == 0 and dy == 0:
+        return "centre"
+    return None if noise(dx, dy, n & 0xFFFF) % 6 == 0 else "ring"
+
+
+def black_leopard(p: Px, pal: dict):
+    feat = face_features(p, pal)
+    if feat:
+        return feat
+    base, belly = pal["base"], pal["belly"]
+    if p.part == "tail":
+        rear = p.z - p.origin[2]
+        return pal["shade"] if noise(int(rear // 3), 9) % 3 == 0 and rear % 3 < 1.5 else base
+    if p.part == "muzzle":
+        return base if p.face == "top" else belly
+    if p.part.startswith("ear"):
+        return pal["shade"] if p.face == "back" else base
+    if p.under or (p.part != "head" and p.up < 0.25):
+        return belly
+    if p.part == "head" and p.up < 0.3:
+        return belly
+    if p.part.endswith("leg") and p.y < 1.2:
+        return belly
+    r = rosette(p, 21)
+    return pal["shade"] if r == "ring" else (pal["mark"] if r == "centre" else base)
+
+
+SKINS = {"tiger": tiger, "cheetah": cheetah, "lion": lion, "black_leopard": black_leopard}
 
 
 def paint(s: Species, variant: str) -> bytes:
