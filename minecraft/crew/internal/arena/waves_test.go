@@ -216,3 +216,20 @@ func TestCustomBruteWaveBookLoads(t *testing.T) {
 		t.Fatalf("unexpected waves: %+v", book.Waves)
 	}
 }
+
+func TestCustomWerewolfWaveBookLoads(t *testing.T) {
+	book, err := LoadWaveFile("../../lab/waves-custom-werewolf.yaml")
+	if err != nil {
+		t.Fatalf("LoadWaveFile: %v", err)
+	}
+	if len(book.Waves) != 2 {
+		t.Fatalf("waves = %d, want 2", len(book.Waves))
+	}
+	for _, w := range book.Waves {
+		for _, m := range w.Mobs {
+			if !customMob(m.Mob) {
+				t.Errorf("%s: %q is not recognised as a pack mob", w.Name, m.Mob)
+			}
+		}
+	}
+}
