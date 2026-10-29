@@ -270,22 +270,15 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 			if !hasBlock && !soilItem(name) {
 				return res, c0, false, nil
 			}
-			for _, soil := range altSoils {
-				if err := w.setSoil(ctx, soil); err != nil {
-					return nil, c0, false, err
-				}
+			if err := w.findSoil(ctx, ir, func() (bool, error) {
 				if err := run(c); err != nil {
-					return nil, c0, false, err
+					return false, err
 				}
-				if res[c.key()].Placed {
-					ir.soil = soil
-					break
-				}
+				return res[c.key()].Placed, nil
+			}); err != nil {
+				return nil, c0, false, err
 			}
 			if ir.soil == "" {
-				// The deferred reset in calibrate only runs once a soil
-				// worked, so a failed search must not leave grass behind.
-				w.resetSoil(context.WithoutCancel(ctx))
 				return res, c0, false, nil
 			}
 		}
@@ -367,7 +360,38 @@ func (w *worker) setSoil(ctx context.Context, soil string) error {
 	return ctx.Err()
 }
 
-func (w *worker) resetSoil(ctx context.Context) { _ = w.setSoil(ctx, "dirt") }
+func (w *worker) resetSoil(ctx context.Context) error { return w.setSoil(ctx, "dirt") }
+
+// findSoil offers each alternate soil to try in turn and records the first
+// that works in ir.soil, leaving it in place for the item's later trials
+// (calibrate resets it afterwards). When none works, or a step fails, the
+// lane floor goes back to dirt here, since calibrate resets only after a
+// success.
+func (w *worker) findSoil(ctx context.Context, ir *itemResult, try func() (bool, error)) (err error) {
+	defer func() {
+		if ir.soil != "" && err == nil {
+			return
+		}
+		ir.soil = ""
+		if rerr := w.resetSoil(context.WithoutCancel(ctx)); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
+	}()
+	for _, soil := range altSoils {
+		if err := w.setSoil(ctx, soil); err != nil {
+			return err
+		}
+		placed, err := try()
+		if err != nil {
+			return err
+		}
+		if placed {
+			ir.soil = soil
+			return nil
+		}
+	}
+	return nil
+}
 
 // withSecondHalf folds in what the other cell of a two-cell block says. A
 // door's hinge is stored on the upper half; the clicked cell is the lower.
@@ -415,11 +439,13 @@ func byConstruction(block string, props map[string]any) []string {
 }
 
 // calibrate runs one item to completion.
-func (w *worker) calibrate(ctx context.Context, it item) (*itemResult, error) {
+func (w *worker) calibrate(ctx context.Context, it item) (_ *itemResult, err error) {
 	ir := newItemResult(it.name)
 	defer func() {
 		if ir.soil != "" {
-			w.resetSoil(context.WithoutCancel(ctx))
+			if rerr := w.resetSoil(context.WithoutCancel(ctx)); rerr != nil {
+				err = errors.Join(err, rerr)
+			}
 		}
 	}()
 	w.retryMisses = false
