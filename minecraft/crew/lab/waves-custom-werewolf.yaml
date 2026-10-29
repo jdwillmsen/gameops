@@ -1,0 +1,39 @@
+# Two-wave book for the add-on pack's gameops:werewolf (500 hp, 20 damage,
+# fast, leaps). It only hunts entities tagged arena_warrior, which arena.sh
+# applies to the squad for the run. A pack mob has no equipment slots, so each
+# tier is effects only; tiers 3 to 5 are unused here but the loader needs all five. One werewolf is already a hard fight for three
+# warriors; the second wave adds brutes around a single tougher werewolf.
+#   arena.sh run <lab> --waves lab/waves-custom-werewolf.yaml
+pause: 10s
+max_live: 6
+wave_timeout: 4m
+
+tiers:
+  1:
+    effects:
+      - {id: health_boost, seconds: 900, amplifier: 0}
+  2:
+    effects:
+      - {id: resistance, seconds: 900, amplifier: 1}
+      - {id: health_boost, seconds: 900, amplifier: 2}
+  3:
+    effects:
+      - {id: resistance, seconds: 900, amplifier: 1}
+      - {id: health_boost, seconds: 900, amplifier: 4}
+  4:
+    effects:
+      - {id: resistance, seconds: 900, amplifier: 2}
+      - {id: health_boost, seconds: 900, amplifier: 6}
+  5:
+    effects:
+      - {id: resistance, seconds: 900, amplifier: 3}
+      - {id: health_boost, seconds: 900, amplifier: 8}
+
+waves:
+  - name: Lone Wolf
+    mobs:
+      - {mob: "gameops:werewolf", count: 1, tier: 1, pen: 1}
+  - name: Wolf and Pack
+    mobs:
+      - {mob: "gameops:werewolf", count: 1, tier: 2, name: Alpha, pen: 1}
+      - {mob: "gameops:training_dummy_brute", count: 3, tier: 1, pen: 2}
