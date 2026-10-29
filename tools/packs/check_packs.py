@@ -125,7 +125,42 @@ def entity_filter_items(node, rep=None, where=""):
             yield from entity_filter_items(item, rep, where)
 
 
-def check_behaviour_entity(path, doc, rep):
+POLICIES = ("arena", "wildlife")
+WILDLIFE_FAMILY = "gameops_wildlife"
+PLAYER_TARGET_GOALS = ("nearest_attackable_target", "owner_hurt_by_target", "owner_hit_target", "melee_attack")
+OWNER_GOALS = ("owner_hurt_by_target", "owner_hit_target")
+
+
+def goal_filter_tests(goal, rep, where):
+    return [t for et in goal.get("entity_types", []) for t in entity_filter_items(et.get("filters"), rep, where)]
+
+
+def is_player_family(test, ops):
+    return test.get("test") == "is_family" and test.get("value") == "player" and test.get("operator", "==") in ops
+
+
+def check_wildlife_entity(path, comps, rep):
+    if "minecraft:behavior.hurt_by_target" in comps:
+        rep.fail(f"{path}: hurt_by_target would let the mob retaliate against players")
+    for name in PLAYER_TARGET_GOALS:
+        goal = comps.get("minecraft:behavior." + name)
+        if goal is None:
+            continue
+        tests = goal_filter_tests(goal, rep, path)
+        if any(is_player_family(t, ("==", "equals")) for t in tests):
+            rep.fail(f"{path}: {name} must never select family player")
+        if name in OWNER_GOALS and not any(is_player_family(t, ("!=", "not")) for t in tests):
+            rep.fail(f"{path}: {name} must filter is_family != player")
+    families = (comps.get("minecraft:type_family") or {}).get("family") or []
+    if WILDLIFE_FAMILY not in families:
+        rep.fail(f"{path}: entity must be in family {WILDLIFE_FAMILY}")
+    if "minecraft:tameable" in comps:
+        for need in ("minecraft:behavior.stay_while_sitting", "minecraft:persistent"):
+            if need not in comps:
+                rep.fail(f"{path}: tameable entity needs {need}")
+
+
+def check_behaviour_entity(path, doc, rep, policy="arena"):
     ent = doc.get("minecraft:entity") or {}
     ident = (ent.get("description") or {}).get("identifier")
     comps = ent.get("components") or {}
@@ -135,6 +170,9 @@ def check_behaviour_entity(path, doc, rep):
         rep.fail(f"{path}: identifier {ident!r} must be in our own namespace")
     if "minecraft:boss" in comps:
         rep.fail(f"{path}: minecraft:boss must not be used")
+    if policy == "wildlife":
+        check_wildlife_entity(path, comps, rep)
+        return ident
     if "minecraft:behavior.hurt_by_target" in comps:
         rep.fail(f"{path}: hurt_by_target would let the mob retaliate against players")
     target = comps.get("minecraft:behavior.nearest_attackable_target")
@@ -155,6 +193,14 @@ def check_behaviour_entity(path, doc, rep):
 
 def check_pack_dir(pack, rep):
     bp, rp = os.path.join(pack, "behavior_pack"), os.path.join(pack, "resource_pack")
+    policy = "arena"
+    policy_file = os.path.join(pack, "policy.txt")
+    if os.path.isfile(policy_file):
+        with open(policy_file, encoding="utf-8") as f:
+            policy = f.read().strip()
+        if policy not in POLICIES:
+            rep.fail(f"{policy_file}: unknown policy {policy!r}, expected one of {', '.join(POLICIES)}")
+            return
     for d in (bp, rp):
         if not os.path.isdir(d):
             rep.fail(f"{d}: missing")
@@ -193,7 +239,7 @@ def check_pack_dir(pack, rep):
     bp_ids = set()
     for path, doc in parsed.items():
         if path.startswith(os.path.join(bp, "entities") + os.sep):
-            ident = check_behaviour_entity(path, doc, rep)
+            ident = check_behaviour_entity(path, doc, rep, policy)
             if ident:
                 bp_ids.add(ident)
 
@@ -275,7 +321,8 @@ def main(argv):
         packs = argv
     else:
         base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "packs")
-        packs = [os.path.join(base, n) for n in sorted(os.listdir(base)) if os.path.isdir(os.path.join(base, n))]
+        packs = [os.path.join(base, n) for n in sorted(os.listdir(base))
+                 if os.path.isdir(os.path.join(base, n, "behavior_pack")) or os.path.isdir(os.path.join(base, n, "resource_pack"))]
     if not packs:
         print("no packs found")
         return 1
