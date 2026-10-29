@@ -94,7 +94,11 @@ system.runInterval(() => {
   for (const dimId of DIMENSIONS) {
     for (const [type, spec] of Object.entries(AURAS)) {
       for (const entity of world.getDimension(dimId).getEntities({ type })) {
-        if (entity.isValid) applyAura(entity, spec);
+        try {
+          if (entity.isValid) applyAura(entity, spec);
+        } catch {
+          // An entity invalidated mid-scan must not stop the others.
+        }
       }
     }
   }
