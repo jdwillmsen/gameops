@@ -389,10 +389,11 @@ func TestPollEchoesRevAndReadsLeaderMoves(t *testing.T) {
 		_, pos, ok := c.Leader()
 		return ok && pos == (mgl32.Vec3{9, 70, -4})
 	}, "the leader's move to reach the client")
-	_, rev := ri.lastQuery()
-	if rev != 4 {
-		t.Errorf("after the move the client echoes rev %d, want 4", rev)
-	}
+	// The echo rides on the poll after the one that read the move.
+	waitFor(t, func() bool {
+		_, rev := ri.lastQuery()
+		return rev == 4
+	}, "the new revision echoed")
 }
 
 // After a restart of crew-control the squad's seq starts over at 0 while
