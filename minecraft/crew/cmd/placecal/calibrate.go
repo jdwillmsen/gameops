@@ -283,6 +283,9 @@ func (w *worker) firstPass(ctx context.Context, name string, hasBlock bool, ir *
 				}
 			}
 			if ir.soil == "" {
+				// The deferred reset in calibrate only runs once a soil
+				// worked, so a failed search must not leave grass behind.
+				w.resetSoil(context.WithoutCancel(ctx))
 				return res, c0, false, nil
 			}
 		}
