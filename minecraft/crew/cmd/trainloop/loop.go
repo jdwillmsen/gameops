@@ -75,6 +75,9 @@ type Loop struct {
 	// EvalOverride replaces the trainbridge evaluator in tests, which run
 	// the trainer against a fake so the caps are provable offline.
 	EvalOverride trainer.Evaluator
+	// BetweenRounds is a test seam that runs after a finished round and
+	// before the next one, where the switch and stop file are checked.
+	BetweenRounds func()
 
 	store *trainer.Store
 	eval  trainer.Evaluator
@@ -415,6 +418,9 @@ func (l *Loop) loop(ctx context.Context, st *State, book *arena.ScenarioBook, ou
 		if err := st.save(l.StatePath); err != nil {
 			l.Logf("saving the state file: %v", err)
 			return 1
+		}
+		if l.BetweenRounds != nil {
+			l.BetweenRounds()
 		}
 	}
 }
