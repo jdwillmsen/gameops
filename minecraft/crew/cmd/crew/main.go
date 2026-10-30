@@ -243,6 +243,11 @@ func dialServer(ctx context.Context, cfg config.Config, auth authn, unitSkin ski
 		TokenSource:  auth.tokens,
 		IdentityData: auth.identity,
 		Protocol:     proto,
+		// NetherNet has no port redirect. The library would still read the
+		// port from a RakNet-style pong it synthesises for the server, and a
+		// server name containing ";" shifts that field and turns the signaling
+		// port into 0. RakNet keeps following the pong, as before.
+		DisablePortFollowing: cfg.NetherNet(),
 		// A headless unit never renders, so a world resource pack is dead
 		// weight that the login would otherwise wait on.
 		DownloadResourcePack: declinePack,
