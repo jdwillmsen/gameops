@@ -44,6 +44,11 @@ func startSlowWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 // Xbox identity to present; the identity-bound dial path is covered separately.
 func startSlowNetherNetWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 	t.Helper()
+	return startNamedNetherNetWorld(t, spawnDelay, "Minecraft Server")
+}
+
+func startNamedNetherNetWorld(t *testing.T, spawnDelay time.Duration, serverName string) *slowWorld {
+	t.Helper()
 	signaling, err := endpoint.Serve("127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("serve signaling: %v", err)
@@ -53,7 +58,10 @@ func startSlowNetherNetWorld(t *testing.T, spawnDelay time.Duration) *slowWorld 
 		Signaling:    signaling,
 		ListenConfig: nethernet.ListenConfig{AllowAnonymous: true},
 	}
-	listener, err := minecraft.ListenConfig{AuthenticationDisabled: true}.ListenNetwork(network, signaling.NetworkID())
+	listener, err := minecraft.ListenConfig{
+		AuthenticationDisabled: true,
+		StatusProvider:         minecraft.NewStatusProvider(serverName, "Gophertunnel"),
+	}.ListenNetwork(network, signaling.NetworkID())
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}

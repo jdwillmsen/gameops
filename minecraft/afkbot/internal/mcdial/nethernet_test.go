@@ -3,6 +3,10 @@ package mcdial
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +53,34 @@ func TestNetherNetDialThatGivesUpBeforeSpawnLeavesNoSession(t *testing.T) {
 	conn, err := Dial(context.Background(), dialerFor("Bot"), world.address(), 5*time.Second, 20*time.Second)
 	if err != nil {
 		t.Fatalf("redial after giving up: %v (server refused %d logins)", err, world.refusals())
+	}
+	_ = conn.Close()
+}
+
+// The pong the client library synthesises from a signaling status leaves the
+// server name unescaped, so a ";" in it shifts the port field the library
+// would otherwise follow. The status is served by a front for the real
+// signaling endpoint, since the real one cannot render such a name itself.
+func TestNetherNetDialSurvivesSemicolonInServerName(t *testing.T) {
+	world := startSlowNetherNetWorld(t, 0)
+	upstream, err := url.Parse(world.address())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	front := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/join" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"name":"My;World","protocol":1,"version":"1.0.0","level":"World","players":0,"maxPlayers":20,"gameType":0}`))
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer front.Close()
+
+	conn, err := Dial(context.Background(), dialerFor("Bot"), front.URL, 5*time.Second, 20*time.Second)
+	if err != nil {
+		t.Fatalf("Dial to a server named with ';': %v", err)
 	}
 	_ = conn.Close()
 }

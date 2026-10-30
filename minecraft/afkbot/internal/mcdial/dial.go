@@ -49,6 +49,12 @@ func Dial(ctx context.Context, dialer minecraft.Dialer, address string, connect,
 	ctx, cancel := context.WithDeadline(ctx, connectBy.Add(spawn))
 	defer cancel()
 
+	// NetherNet has no port redirect. The library would still read the port
+	// from a RakNet-style pong it synthesises for the server, and a server
+	// name containing ";" shifts that field and turns the signaling port into
+	// 0. RakNet keeps following the pong, as before.
+	dialer.DisablePortFollowing = dialer.DisablePortFollowing || mcaddr.IsNetherNet(address)
+
 	network, t := newTransport(address, connectBy, dialer.ErrorLog)
 	conn, err := dialer.DialContextNetwork(ctx, network, address)
 	if err != nil {
