@@ -59,6 +59,13 @@ replace() { # source dest
 themes=
 for dir in "$packs"/*/; do
   [ -d "$dir" ] || continue
+  name=$(basename "$dir")
+  # The name lands in rm -rf paths below, so only plain names are allowed to reach them.
+  case $name in
+    *[!A-Za-z0-9._-]*)
+      echo "install.sh: skipping theme '$name': names may only use letters, digits, . _ -" >&2
+      continue ;;
+  esac
   found=
   for kind in behavior resource; do
     manifest=$dir${kind}_pack/manifest.json
@@ -67,8 +74,10 @@ for dir in "$packs"/*/; do
       || die "$manifest needs header.uuid (string) and header.version (array)"
     found=1
   done
-  [ -z "$found" ] || themes="$themes $(basename "$dir")"
+  [ -z "$found" ] || themes="$themes $name"
 done
+# $themes is split on spaces below; with globbing off a name can never expand to other paths.
+set -f
 
 mkdir -p "$world/behavior_packs" "$world/resource_packs"
 for theme in $themes; do

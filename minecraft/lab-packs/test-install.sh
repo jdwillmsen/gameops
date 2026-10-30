@@ -105,6 +105,24 @@ out=$(PACKS_DIR=$emptypacks "$here/install.sh" "$ew" 2>&1) || fail "empty theme 
 printf '%s\n' "$out" | grep -q hollow && fail "empty theme reported: $out"
 [ "$(printf '%s\n' "$out" | grep -c '^installed ')" = 2 ] || fail "expected two installed lines: $out"
 
+# A theme folder whose name is not plain is reported and skipped: the name ends up in rm -rf paths
+# and a space or glob character would split or expand it.
+oddpacks=$tmp/oddpacks
+cp -R "$packs" "$oddpacks"
+for name in 'bad name' 'gl*b' '$(touch pwned)'; do
+  mkpack "$oddpacks/$name/behavior_pack" "c0000000-0000-0000-0000-000000000009" "[0,9,9]"
+done
+ow=$tmp/oddworld
+mkdir -p "$ow/behavior_packs/precious" "$ow/resource_packs"
+echo keep >"$ow/behavior_packs/precious/keep.txt"
+out=$(cd "$tmp" && PACKS_DIR=$oddpacks "$here/install.sh" "$ow" 2>"$tmp/odd.err") || fail "odd theme names failed: $(cat "$tmp/odd.err")"
+for name in 'bad name' 'gl*b' '$(touch pwned)'; do
+  grep -qF "skipping theme '$name'" "$tmp/odd.err" || fail "odd theme '$name' not reported: $(cat "$tmp/odd.err")"
+done
+[ "$(printf '%s\n' "$out" | grep -c '^installed ')" = 2 ] || fail "odd names were installed: $out"
+[ -f "$ow/behavior_packs/precious/keep.txt" ] || fail "unrelated world pack was removed"
+[ ! -e "$tmp/pwned" ] || fail "theme name was executed"
+
 # Empty and absent lists become [].
 fresh=$tmp/fresh
 mkdir -p "$fresh"
@@ -144,8 +162,9 @@ verify() {
 # The helper containers leave root-owned files, so removal also goes through one.
 rmworld() { docker run --rm -v "$1:/data" --entrypoint sh lab-packs-test -c 'rm -rf /data/* /data/.[!.]*' || true; }
 
-# (a) the image's default user (root), caps dropped, root-owned world: the
-# lab's existing init container runs this way.
+# (a) the image's default user (root), caps dropped, root-owned world. The
+# live pod runs as uid 1000 / gid 3000 (case b); this case keeps root coverage
+# for other callers of the image.
 a=$tmp/a; mkworld "$a" 0:0
 # shellcheck disable=SC2086
 out=$(docker run $flags -v "$a:/data" lab-packs-test /data/worlds/crew-lab) || fail "(a) root on root-owned world failed: $out"
