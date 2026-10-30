@@ -387,11 +387,18 @@ without that gauge beside them there is nothing on the graph to say so.
 
 ## Environment variables
 
+**Transport.** The agent speaks RakNet or NetherNet and picks by `MC_HOST`. A
+bare hostname dials RakNet at `MC_HOST:MC_PORT`. A value starting with
+`http://` or `https://` dials NetherNet through that URL's signaling port, e.g.
+`MC_HOST=http://192.168.1.87` with `MC_PORT=31134`. NetherNet needs the Xbox
+token (the server rejects an anonymous player at the transport) and UDP egress
+to the server's NetherNet port range as well as TCP to the signaling port.
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `MC_HOST` | *(required)* | Bedrock server hostname |
+| `MC_HOST` | *(required)* | Bedrock server hostname for RakNet, or `http://host` / `https://host` for a NetherNet server's signaling port (see below) |
 | `MC_USERNAME` | *(required)* | Token-cache identity; not the gamertag |
-| `MC_PORT` | `19132` | Bedrock server port |
+| `MC_PORT` | `19132` | Bedrock server port (the signaling TCP port for NetherNet; ignored when `MC_HOST` already carries one) |
 | `RECONNECT_MIN_MS` | `5000` | Initial reconnect backoff |
 | `RECONNECT_MAX_MS` | `300000` | Reconnect backoff ceiling |
 | `AUTH_RETRY_DELAY_MS` | `900000` | Flat wait before retrying after Xbox Live refuses the stored token (`invalid_grant`), instead of the reconnect ladder above. Refused device-code logins are paced off it too - see "When the stored token is refused" |
@@ -539,7 +546,7 @@ Every reachability check this cluster ran passed for the whole of the
 kubelet probes were green. The server was a version behind its clients and
 hard-kicks a mismatched protocol *before* login — a step past everything being
 checked — and the two clients that were connected had established their
-sessions before the fault and implement RakNet themselves, so their presence
+sessions before the fault and implement their own transport, so their presence
 argued the opposite of the truth.
 
 Two things here answer the question those checks could not, at different
@@ -555,6 +562,14 @@ which is exactly why it catches the version-skew failure.
 ```bash
 joinprobe -address fwb.example:19132 -interval 1m -listen :9103
 ```
+
+`-address` is a RakNet `host:port`, or the `http(s)://host:port` signaling URL
+of a NetherNet server. A NetherNet server admits only an authenticated player,
+so no anonymous handshake exists to perform: the probe reads the server's
+`/v1/join` status instead, stops at stage 1 and counts that as joinable. It
+still catches a server that is down; a version-skew refusal is reported only
+when `-protocol` pins a number that differs from the advertised one, and is
+inferred from the two numbers rather than observed.
 
 `-protocol` pins the number the handshake announces. Left at zero it uses
 whatever the server advertises, which asks "is this server consistent with
@@ -1873,7 +1888,8 @@ removes it. `mc_agent_leader` is how a reader tells live from standby;
 
 1. closes its Bedrock connection and waits ~2s for the disconnect to actually
    reach the server. Closing the socket is not leaving the game: the RakNet
-   layer sends the disconnect notice from its own tick, and a process that
+   layer sends the disconnect notice from its own tick (NetherNet tears the
+   link down at once, so there the wait is only slack), and a process that
    exits first leaves the server to time the session out - the ten seconds the
    old rollout spent with the login held by a pod that was already gone,
 2. closes every session it was watching as `ended_reason = 'agent_restart'`,
