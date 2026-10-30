@@ -1,6 +1,6 @@
 """Writes every generated file of the pack. Run: python3 -I generate.py [pack-dir]
 
-Only the species in GENERATED are written; the rest follow with their art.
+Every species in species.SPECIES is written.
 """
 import json
 import os
@@ -14,7 +14,6 @@ import build_textures  # noqa: E402
 from species import SPECIES, Species  # noqa: E402
 
 PACK = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena")
 
 
 def dump(doc) -> bytes:
@@ -67,7 +66,7 @@ def lang(species) -> bytes:
 
 
 def files() -> dict:
-    species = [SPECIES[i] for i in GENERATED]
+    species = list(SPECIES.values())
     out = {
         "resource_pack/animations/cat.animation.json": dump(build_models.animations()),
         "resource_pack/texts/en_US.lang": lang(species),
