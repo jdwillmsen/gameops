@@ -376,6 +376,7 @@ func (l *Life) warriorTarget(pr tactics.Profile, p act.Pose, anchor mgl32.Vec3) 
 	}
 	if canFly(l.self()) {
 		q.flyHeight = airThreatHeight
+		q.climbable = func(e belief.Entity) bool { return l.airTacticFor(pr, e) && l.airborne(e) }
 	}
 	best, found := focusTarget(l.ents, q)
 	// A creeper about to blast is answered first, as the reactive defence
@@ -505,6 +506,11 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	p := a.Pose()
 
 	if l.eat.active && w.healing {
+		if p.Gliding() {
+			// A meal cannot be eaten in the air, and an input without glide
+			// drops the unit out of the sky.
+			return l.glideDown(a, p)
+		}
 		if l.mealThreatened(p) {
 			// An enemy closed on the meal: let it go and fight.
 			l.stopEating(a, s)
@@ -522,6 +528,11 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 		if handled, err := l.familyTactic(ctx, pr, a, p, e, s); handled || err != nil {
 			return err
 		}
+	}
+
+	// Only the air tactic flies: whatever else takes the tick lands first.
+	if p.Gliding() {
+		return l.glideDown(a, p)
 	}
 
 	// What is about to blast the unit outranks a meal, and a meal outranks

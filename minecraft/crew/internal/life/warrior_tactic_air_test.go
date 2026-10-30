@@ -126,10 +126,9 @@ func TestTheAirFightClimbsDivesStrikesAndRecovers(t *testing.T) {
 			break
 		}
 	}
-	for _, ph := range []airPhase{airClimb, airDive, airStrike, airRecover} {
-		if !seen[ph] {
-			t.Errorf("phase %v never ran; order %v", ph, order)
-		}
+	want := []airPhase{airLift, airClimb, airDive, airStrike, airRecover}
+	if len(order) < len(want) || !slices.Equal(order[:len(want)], want) {
+		t.Errorf("phases ran as %v, want them to begin %v", order, want)
 	}
 	if len(r.out.attacks()) == 0 {
 		t.Fatalf("no swing in the whole fight; feet %v", r.feet())
@@ -284,5 +283,110 @@ func TestAnAirUnitFocusesAThreatHigherThanAGroundUnitSees(t *testing.T) {
 	g.spawn(50, "minecraft:phantom", phantomAt)
 	if g.l.Engaged(g.a.Pose(), g.tracker.Snapshot()) {
 		t.Error("a ground unit engaged a phantom 23 blocks up")
+	}
+}
+
+// glidingRig is an air rig whose unit is mid-glide after the phantom, with
+// the squad able to order it.
+func glidingRig(t *testing.T) (*rig, *fakeSquad) {
+	t.Helper()
+	squad := &fakeSquad{leaderID: "crew-18", leader: start, leaderOK: true}
+	r := airRig(t, 64)
+	r.setSquad(t, squad)
+	r.spawn(50, "minecraft:phantom", phantomAt)
+	for i := 0; i < 400 && !r.a.Pose().Gliding(); i++ {
+		r.step()
+	}
+	r.run(60)
+	if !r.a.Pose().Gliding() {
+		t.Fatal("not gliding to begin with")
+	}
+	return r, squad
+}
+
+// mustStayGliding runs the unit until it is down and fails on a stop-glide
+// flag sent while it is still well above the ground: the fall that costs
+// health.
+func mustStayGliding(t *testing.T, r *rig) {
+	t.Helper()
+	for i := 0; i < 1500 && !r.a.Pose().OnGround; i++ {
+		before := len(r.out.inputs())
+		r.step()
+		high := r.l.heightAboveGround(r.a.Pose().Feet) > flareHeight
+		for _, in := range r.out.inputs()[before:] {
+			if high && in.InputData.Load(packet.InputFlagStopGliding) {
+				t.Fatalf("tick %d: glide dropped %.0f blocks up", i, r.l.heightAboveGround(r.a.Pose().Feet))
+			}
+		}
+	}
+	if p := r.a.Pose(); !p.OnGround || p.Gliding() {
+		t.Fatalf("not landed: feet %v gliding %v", p.Feet, p.Gliding())
+	}
+}
+
+func TestTheGlideLandsWhenTheTargetDiesInTheGraceWindow(t *testing.T) {
+	r, _ := glidingRig(t)
+	r.remove(50)
+	mustStayGliding(t, r)
+}
+
+func TestTheGlideLandsWhenAnOrderTakesTheFightAway(t *testing.T) {
+	for name, order := range map[string]Order{
+		"retreat": {Kind: OrderRetreat},
+		"hold":    {Kind: OrderHold},
+		"regroup": {Kind: OrderRegroup},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, squad := glidingRig(t)
+			squad.order = order
+			if order.Kind == OrderRegroup {
+				squad.leader = mgl32.Vec3{-60, 1, 20.5}
+			}
+			mustStayGliding(t, r)
+		})
+	}
+}
+
+func TestTheGlideLandsWhenTheUnitMustHeal(t *testing.T) {
+	r, _ := glidingRig(t)
+	r.give(3, 363, 2)
+	r.setHealth(6)
+	mustStayGliding(t, r)
+}
+
+func TestTheGlideLandsWhenACreeperForcesARetreat(t *testing.T) {
+	r, _ := glidingRig(t)
+	p := r.feet()
+	r.spawn(80, "minecraft:creeper", mgl32.Vec3{p.X() + 2, 1, p.Z()})
+	// The unit outflies the creeper and goes back to the fight, so only the
+	// ticks of the retreat are watched.
+	before := len(r.out.inputs())
+	r.run(3)
+	for _, in := range r.out.inputs()[before:] {
+		if in.InputData.Load(packet.InputFlagStopGliding) {
+			t.Fatal("glide dropped for a creeper retreat")
+		}
+	}
+	if !r.a.Pose().Gliding() {
+		t.Fatal("no longer gliding after the retreat ticks")
+	}
+}
+
+func TestAGroundMobOnACliffIsNotFocusedByAnAirUnit(t *testing.T) {
+	r := airRig(t, 8)
+	r.raise(30, 20, 20, 32, 20, 22, "stone")
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{31.5, 21, 21.5})
+	if r.l.Engaged(r.a.Pose(), r.tracker.Snapshot()) {
+		t.Error("an air unit focused a zombie standing on a cliff 20 blocks up")
+	}
+}
+
+func TestAnAirUnitWithoutAnAirTacticForTheFamilyKeepsTheWalkersRange(t *testing.T) {
+	r := airRig(t, 8)
+	pr := tactics.NewProfile("plain")
+	mustProfile(t, r, pr)
+	r.spawn(50, "minecraft:phantom", phantomAt)
+	if r.l.Engaged(r.a.Pose(), r.tracker.Snapshot()) {
+		t.Error("a unit with no air tactic listed focused a phantom 23 blocks up")
 	}
 }
