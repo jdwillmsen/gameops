@@ -286,13 +286,13 @@ func boss(args []string) {
 	}
 
 	var trace io.Writer
+	var traceFile *os.File
 	if *tracePath != "" {
 		f, err := os.OpenFile(*tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			fail("arenadirector: " + err.Error())
 		}
-		defer f.Close()
-		trace = f
+		traceFile, trace = f, f
 	}
 
 	b := &arena.BossTest{
@@ -333,6 +333,13 @@ func boss(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	recs, err := b.Run(ctx)
+	// Closed before the exits below, which skip deferred calls; a failed
+	// close can lose buffered trace lines, so it is reported.
+	if traceFile != nil {
+		if cerr := traceFile.Close(); cerr != nil {
+			fmt.Fprintln(os.Stderr, "arenadirector: trace: "+cerr.Error())
+		}
+	}
 	var busy *arena.NotAloneError
 	switch {
 	case errors.As(err, &busy):
