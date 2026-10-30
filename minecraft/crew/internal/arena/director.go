@@ -67,7 +67,8 @@ type Director struct {
 	// Kits spawns every wave mob the lab's kit catalog covers from it.
 	Kits bool
 	// WarriorKits are catalog kits ("vanguard/t5"), one per warrior in
-	// Warriors order, handed out before wave one.
+	// Warriors order, handed out before wave one. "air/t<n>" is the flying
+	// kit: elytra on the chest, firework rockets on the hotbar and a sword.
 	WarriorKits []string
 
 	// Observer, when set, is told about deaths and kills as the run sees them.

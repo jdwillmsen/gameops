@@ -27,6 +27,9 @@ var families = map[string]Family{
 	// A breeze keeps its distance and throws from it, as a blaze does.
 	"blaze": FamilyBlaze, "breeze": FamilyBlaze,
 
+	// A ghast hangs in the air out of any sword's reach.
+	"ghast": FamilyAir,
+
 	"enderman": FamilyEnderman,
 
 	"witch": FamilyWitch,

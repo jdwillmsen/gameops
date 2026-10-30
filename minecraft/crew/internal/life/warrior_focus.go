@@ -44,6 +44,19 @@ type focusQuery struct {
 	healthOf func(uint64) (float32, bool)
 	// player says whether a player may be targeted at all; nil is never.
 	player func(belief.Entity) bool
+	// flyHeight is how far above or below the anchor a threat is still
+	// focused, for a unit that can fly to it, and which keeps a target in
+	// focus while the unit dives past it; zero is the walkers' threatHeight.
+	flyHeight float64
+}
+
+// withinHeight says whether e is level enough with the anchor to be focused.
+func (q focusQuery) withinHeight(e belief.Entity) bool {
+	dy := math.Abs(float64(e.Pos.Y() - q.anchor.Y()))
+	if q.flyHeight > 0 {
+		return dy <= q.flyHeight
+	}
+	return dy <= threatHeight
 }
 
 // focusTarget picks the squad's shared target: the lowest-health threat
@@ -71,7 +84,7 @@ func focusTarget(ents *belief.Entities, q focusQuery) (belief.Entity, bool) {
 	ents.Each(func(e belief.Entity) {
 		if e.Player {
 			if q.player == nil || !q.player(e) ||
-				math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight ||
+				!q.withinHeight(e) ||
 				horizontal(e.Pos, q.anchor) > q.rangeOf(e) ||
 				(q.ignore[e.ID] > q.tick && !inMeleeReachAt(q.self, e.Pos)) {
 				return
@@ -114,7 +127,7 @@ func (q focusQuery) mobThreat(e belief.Entity) bool {
 	if k == other || k == flee || (k == provoked && !q.suspect(e.ID)) {
 		return false
 	}
-	if math.Abs(float64(e.Pos.Y()-q.anchor.Y())) > threatHeight {
+	if !q.withinHeight(e) {
 		return false
 	}
 	if horizontal(e.Pos, q.anchor) > q.rangeOf(e) {

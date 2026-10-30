@@ -1516,6 +1516,7 @@ func TestWarriorKitsAreValidated(t *testing.T) {
 	}{
 		{nil, nil, true},
 		{[]string{"A"}, []string{"vanguard/t6"}, true},
+		{[]string{"A"}, []string{"air/t4"}, true},
 		{[]string{"A", "B"}, []string{"vanguard/t5"}, false},
 		{[]string{"A"}, []string{"vanguard/t7"}, false},
 		{[]string{"A"}, []string{"../x/t1"}, false},
