@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcaddr"
 	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft"
 )
@@ -56,7 +57,7 @@ func Negotiate(ctx context.Context, address string, onSpoof func(Advertisement))
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
-	pong, err := raknet.PingContext(ctx, address)
+	pong, err := ping(ctx, address)
 	if err != nil {
 		return minecraft.DefaultProtocol
 	}
@@ -65,6 +66,17 @@ func Negotiate(ctx context.Context, address string, onSpoof func(Advertisement))
 		return minecraft.DefaultProtocol
 	}
 	return protocolFor(ad, minecraft.DefaultProtocol, onSpoof)
+}
+
+// ping asks the server at address to describe itself. A NetherNet server has
+// no unconnected ping; its signaling endpoint answers GET /v1/join with the
+// same facts as JSON, which the client library renders back into a RakNet
+// pong so ParsePong reads both transports.
+func ping(ctx context.Context, address string) ([]byte, error) {
+	if mcaddr.IsNetherNet(address) {
+		return minecraft.NetherNet{}.PingContext(ctx, address)
+	}
+	return raknet.PingContext(ctx, address)
 }
 
 // protocolFor is the decision on its own, so it can be tested without a
