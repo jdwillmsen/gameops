@@ -70,8 +70,12 @@ for dir in "$packs"/*/; do
   for kind in behavior resource; do
     manifest=$dir${kind}_pack/manifest.json
     [ -d "$dir${kind}_pack" ] || continue
-    jq -e '(.header.uuid | type == "string") and (.header.version | type == "array")' "$manifest" >/dev/null 2>&1 \
-      || die "$manifest needs header.uuid (string) and header.version (array)"
+    # Bedrock drops a list entry whose pack_id is not a UUID or whose version
+    # is not three integers, and a bad entry would outlive the manifest fix.
+    jq -e '(.header.uuid | type == "string" and test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"))
+      and (.header.version | type == "array" and length == 3 and all(.[]; type == "number" and . >= 0 and . == floor))' \
+      "$manifest" >/dev/null 2>&1 \
+      || die "$manifest needs header.uuid (hyphenated UUID) and header.version (array of three non-negative integers)"
     found=1
   done
   [ -z "$found" ] || themes="$themes $name"

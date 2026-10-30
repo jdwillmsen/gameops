@@ -23,7 +23,7 @@ packs=$tmp/packs
 for t in alpha beta; do
   n=$([ "$t" = alpha ] && echo 1 || echo 2)
   mkpack "$packs/$t/behavior_pack" "b0000000-0000-0000-0000-00000000000$n" "[0,$n,3]"
-  mkpack "$packs/$t/resource_pack" "r0000000-0000-0000-0000-00000000000$n" "[0,$n,4]"
+  mkpack "$packs/$t/resource_pack" "a0000000-0000-0000-0000-00000000000$n" "[0,$n,4]"
   mkdir -p "$packs/$t/behavior_pack/scripts"
   echo js >"$packs/$t/behavior_pack/scripts/real.js"
 done
@@ -44,8 +44,8 @@ printf '%s\n' "$out1" | grep -qx 'installed gameops-beta 0.2.3' || fail "no beta
 
 for pair in "b0000000-0000-0000-0000-000000000001 [0,1,3] world_behavior_packs.json" \
             "b0000000-0000-0000-0000-000000000002 [0,2,3] world_behavior_packs.json" \
-            "r0000000-0000-0000-0000-000000000001 [0,1,4] world_resource_packs.json" \
-            "r0000000-0000-0000-0000-000000000002 [0,2,4] world_resource_packs.json"; do
+            "a0000000-0000-0000-0000-000000000001 [0,1,4] world_resource_packs.json" \
+            "a0000000-0000-0000-0000-000000000002 [0,2,4] world_resource_packs.json"; do
   read -r id ver file <<<"$pair"
   [ "$(count "$world/$file" "$id")" = 1 ] || fail "$id not registered exactly once in $file"
   [ "$(version "$world/$file" "$id")" = "$ver" ] || fail "$id has wrong version in $file"
@@ -94,6 +94,45 @@ if err=$(PACKS_DIR=$badpacks "$here/install.sh" "$bw" 2>&1); then fail "bad mani
 printf '%s\n' "$err" | grep -q 'zeta/behavior_pack/manifest.json' || fail "bad manifest message unclear: $err"
 [ ! -e "$bw/behavior_packs/gameops-alpha" ] || fail "pack replaced despite bad manifest"
 [ ! -e "$bw/world_behavior_packs.json" ] || fail "list written despite bad manifest"
+
+# A manifest whose uuid or version is not a real pack reference is rejected
+# before anything is written, so the lists never hold an invalid pack_id.
+while IFS='|' read -r label uuid ver; do
+  vp=$tmp/vp-$label
+  cp -R "$packs" "$vp"
+  mkpack "$vp/zeta/behavior_pack" "$uuid" "$ver"
+  vw=$tmp/vw-$label
+  mkdir -p "$vw/behavior_packs/gameops-alpha"
+  echo keep >"$vw/behavior_packs/gameops-alpha/keep.txt"
+  echo '[{"pack_id":"other-uuid","version":[1,0,0]}]' >"$vw/world_behavior_packs.json"
+  echo '[]' >"$vw/world_resource_packs.json"
+  before=$(cd "$vw" && find . -type f -exec cksum {} + | sort)
+  if err=$(PACKS_DIR=$vp "$here/install.sh" "$vw" 2>&1); then fail "$label: exited 0"; fi
+  printf '%s\n' "$err" | grep -q 'zeta/behavior_pack/manifest.json' || fail "$label: message does not name the manifest: $err"
+  printf '%s\n' "$err" | grep -q 'uuid' || fail "$label: message does not explain: $err"
+  after=$(cd "$vw" && find . -type f -exec cksum {} + | sort)
+  [ "$before" = "$after" ] || fail "$label: world changed despite bad manifest"
+  [ ! -e "$vw/behavior_packs/gameops-zeta" ] || fail "$label: pack installed"
+done <<'CASES'
+empty-uuid||[1,0,0]
+not-a-uuid|not-a-uuid|[1,0,0]
+short-group|b0000000-0000-0000-0000-00000000000|[1,0,0]
+non-hex|g0000000-0000-0000-0000-000000000001|[1,0,0]
+empty-version|c0000000-0000-0000-0000-000000000009|[]
+two-ints|c0000000-0000-0000-0000-000000000009|[1,2]
+string-int|c0000000-0000-0000-0000-000000000009|[1,"2",3]
+negative|c0000000-0000-0000-0000-000000000009|[1,2,-1]
+four-ints|c0000000-0000-0000-0000-000000000009|[1,2,3,4]
+float|c0000000-0000-0000-0000-000000000009|[1,2.5,3]
+CASES
+
+# Upper-case UUIDs are valid.
+up=$tmp/uppacks
+cp -R "$packs" "$up"
+mkpack "$up/zeta/behavior_pack" "ABCDEF00-0000-0000-0000-00000000000A" "[1,0,0]"
+uw=$tmp/upworld
+mkdir -p "$uw"
+PACKS_DIR=$up "$here/install.sh" "$uw" >/dev/null || fail "upper-case uuid rejected"
 
 # A theme folder with no packs is skipped, not reported.
 emptypacks=$tmp/emptypacks
