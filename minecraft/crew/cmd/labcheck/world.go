@@ -83,7 +83,7 @@ func (e *Env) playerPose(name string) (pose, error) {
 	case err != nil:
 		return pose{}, fmt.Errorf("%s: %w", name, err)
 	case len(poses) == 0:
-		return pose{}, fmt.Errorf("%s: querytarget returned no entity", name)
+		return pose{}, fmt.Errorf("%s: querytarget returned no entity: %w", name, errNoTargets{out})
 	}
 	return poses[0], nil
 }
