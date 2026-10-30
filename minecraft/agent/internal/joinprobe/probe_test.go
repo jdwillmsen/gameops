@@ -3,6 +3,9 @@ package joinprobe
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -244,5 +247,55 @@ func TestProbeReportsADisconnectAsNotJoinable(t *testing.T) {
 	}
 	if got.Stage != StagePong {
 		t.Errorf("stage = %s, want pong for a disconnected handshake", got.Stage)
+	}
+}
+
+func signalingServer(t *testing.T, protocol int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/join" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"name":"FWB","protocol":%d,"version":"1.26.60","level":"FWB","players":0,"maxPlayers":20,"gameType":0}`, protocol)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// A NetherNet server cannot be handshaken anonymously, so the status endpoint
+// answering is as far as this probe can go -- and Joinable must say that is
+// enough, or every NetherNet server would alert as unjoinable forever.
+func TestProbeReadsANetherNetServersStatus(t *testing.T) {
+	got := Probe(context.Background(), signalingServer(t, 2200), 0)
+
+	if got.Stage != StagePong || !got.Joinable() {
+		t.Fatalf("stage = %s joinable = %v, want pong and joinable (err: %v)", got.Stage, got.Joinable(), got.Err)
+	}
+	if got.Protocol != 2200 || got.DialedProtocol != 2200 || got.Version != "1.26.60" {
+		t.Errorf("result = %+v, want the advertised 2200 / 1.26.60", got)
+	}
+}
+
+func TestProbeReportsAForcedProtocolThatDiffersFromANetherNetServers(t *testing.T) {
+	url := signalingServer(t, 2200)
+	older := Probe(context.Background(), url, 2193)
+	if older.Stage != StageRefused || older.PlayStatus != packet.PlayStatusLoginFailedClient || older.Joinable() {
+		t.Errorf("older client: %+v, want refused with LoginFailedClient", older)
+	}
+	newer := Probe(context.Background(), url, 2300)
+	if newer.Stage != StageRefused || newer.PlayStatus != packet.PlayStatusLoginFailedServer {
+		t.Errorf("newer client: %+v, want refused with LoginFailedServer", newer)
+	}
+	same := Probe(context.Background(), url, 2200)
+	if !same.Joinable() {
+		t.Errorf("matching client: %+v, want joinable", same)
+	}
+}
+
+func TestProbeReportsDeadNetherNetSignalingAsUnreachable(t *testing.T) {
+	got := Probe(context.Background(), "http://127.0.0.1:1", 0)
+	if got.Stage != StageUnreachable || got.Joinable() || got.Err == nil {
+		t.Errorf("result = %+v, want unreachable with an error", got)
 	}
 }

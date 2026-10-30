@@ -16,6 +16,12 @@
 // Xbox Live identity, because the version verdict is delivered before any
 // credential is examined.
 //
+// NetherNet servers admit nobody the transport cannot identify, so there is no
+// anonymous handshake to perform: an address that is an http(s) signaling URL
+// is probed by its status endpoint alone. That reaches StagePong at best, and
+// Joinable accepts it as the strongest answer the transport allows -- see
+// Result.NetherNet.
+//
 // What it deliberately does not prove: that a real player can authenticate,
 // spawn and play. Proving that needs a real account and is a separate,
 // human-gated piece of work.
@@ -88,11 +94,23 @@ type Result struct {
 	PlayStatus int32
 	Duration   time.Duration
 	Err        error
+	// NetherNet marks a result from a signaling URL, which can never reach
+	// StageHandshake because that exchange needs an authenticated player.
+	NetherNet bool
 }
 
 // Joinable reports whether a session could be started. It is the one question
 // callers should ask; the stages exist to say why not.
-func (r Result) Joinable() bool { return r.Stage == StageHandshake }
+//
+// Over NetherNet the answer is weaker: the signaling port answered and the
+// announced protocol is not known to be refused. Whether the server then
+// accepts a login is only learned by an authenticated dial.
+func (r Result) Joinable() bool {
+	if r.NetherNet {
+		return r.Stage == StagePong
+	}
+	return r.Stage == StageHandshake
+}
 
 const (
 	// pingTimeout and handshakeTimeout are separate because they fail for
@@ -112,6 +130,10 @@ const (
 func Probe(ctx context.Context, address string, forceProtocol int32) Result {
 	started := time.Now()
 	result := Result{DialedProtocol: forceProtocol}
+	if mcproto.IsNetherNet(address) {
+		result.NetherNet = true
+		return probeNetherNet(ctx, address, forceProtocol, started, result)
+	}
 
 	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
 	pong, err := raknet.PingContext(pingCtx, address)
@@ -148,6 +170,36 @@ func Probe(ctx context.Context, address string, forceProtocol int32) Result {
 		result.Stage, result.PlayStatus = StageRefused, *status
 	default:
 		result.Stage = StageHandshake
+	}
+	return result
+}
+
+// probeNetherNet is Probe for a signaling URL.
+//
+// A forced protocol that differs from the advertised one is reported as
+// refused: Bedrock hard-kicks a client announcing any other number, and that
+// is the verdict this probe exists to give. It is inferred from the
+// advertisement rather than observed, since the kick itself is only delivered
+// to an authenticated player.
+func probeNetherNet(ctx context.Context, address string, forceProtocol int32, started time.Time, result Result) Result {
+	pingCtx, cancel := context.WithTimeout(ctx, pingTimeout)
+	ad, err := mcproto.Advertise(pingCtx, address)
+	cancel()
+	result.Duration = time.Since(started)
+	if err != nil {
+		result.Err = fmt.Errorf("status %s: %w", address, err)
+		return result
+	}
+	result.Stage = StagePong
+	result.Protocol, result.Version = ad.Protocol, ad.Version
+	if result.DialedProtocol == 0 {
+		result.DialedProtocol = ad.Protocol
+	}
+	switch {
+	case forceProtocol != 0 && forceProtocol < ad.Protocol:
+		result.Stage, result.PlayStatus = StageRefused, packet.PlayStatusLoginFailedClient
+	case forceProtocol != 0 && forceProtocol > ad.Protocol:
+		result.Stage, result.PlayStatus = StageRefused, packet.PlayStatusLoginFailedServer
 	}
 	return result
 }
