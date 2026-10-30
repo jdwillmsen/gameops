@@ -1,9 +1,17 @@
 package mcdial
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -342,4 +350,49 @@ func TestNetherNetDialGivesUpOnDeadSignalingAtConnectBudget(t *testing.T) {
 	if waited := time.Since(started); waited > 5*time.Second {
 		t.Errorf("gave up after %v, want about the 1s connect budget", waited)
 	}
+}
+
+// A server name containing ";" shifts the fields of the RakNet-style pong the
+// library synthesises from a NetherNet server's status, so the field it reads
+// as a redirect port holds something else -- here the game type, 0 -- and
+// following it would replace the signaling port. The dial must keep the port
+// it was given.
+func TestNetherNetDialSurvivesSemicolonInServerName(t *testing.T) {
+	world := startNetherNetWorld(t, 0)
+	upstream, err := url.Parse(world.address())
+	if err != nil {
+		t.Fatalf("parse %q: %v", world.address(), err)
+	}
+
+	// The real server cannot be named this way -- it parses its own pong --
+	// so the status a client reads is rewritten on the way through.
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if resp.Request.Method != http.MethodGet || resp.Request.URL.Path != "/v1/join" {
+			return nil
+		}
+		var status map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		status["name"] = "Crew;Lab"
+		status["gameType"] = 0
+		body, err := json.Marshal(status)
+		if err != nil {
+			return err
+		}
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.ContentLength = int64(len(body))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+		return nil
+	}
+	front := httptest.NewServer(proxy)
+	t.Cleanup(front.Close)
+
+	conn, err := Dial(context.Background(), dialerFor("Agent"), front.URL, 20*time.Second, 20*time.Second)
+	if err != nil {
+		t.Fatalf("dial a server whose name contains ';': %v", err)
+	}
+	_ = conn.Close()
 }
