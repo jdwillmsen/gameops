@@ -30,7 +30,7 @@ import (
 )
 
 func main() {
-	address := flag.String("address", "", "host:port of the Bedrock server to probe (required)")
+	address := flag.String("address", "", "host:port of a RakNet server, or the http(s) signaling URL of a NetherNet one (required)")
 	interval := flag.Duration("interval", time.Minute, "how often to probe")
 	protocol := flag.Int("protocol", 0, "protocol number to announce; 0 uses whatever the server advertises")
 	listen := flag.String("listen", ":9103", "address for /metrics and /healthz")
