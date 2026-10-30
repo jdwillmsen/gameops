@@ -23,7 +23,7 @@
 #                            [--place-squad=false]
 #        arena.sh boss <lab> --mob <id> [--name W] [--event <spawn event>] [--effects "cmd1,cmd2"]
 #                            [--runs N] [--timeout <duration>] [--warriors <names>]
-#                            [--log <path>] [--summary]
+#                            [--log <path>] [--trace <path>] [--summary]
 #        arena.sh reset <lab>
 #        arena.sh status <lab> [--warriors <names>]
 #   <lab> is the compose service of the local lab, or k8s:<namespace>/<pod>
@@ -74,7 +74,7 @@ confirm=false
 colosseum=false
 prebuilt=
 out=
-usage="usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--event <spawn event>] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
+usage="usage: arena.sh [--confirm-overwrite] [--colosseum] [--plan <file>] build <lab> | arena.sh layout [--out <file>] | arena.sh run <lab> [--tier N] [--waves <file>] [--warriors <names>] [--timeout <duration>] [--max-live N] [--poll <d>] [--rally-after <d>] [--rally-every <d>] [--place-squad=false] | arena.sh boss <lab> --mob <id> [--name W] [--event <spawn event>] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout <duration>] [--warriors <names>] [--log <path>] [--trace <path>] [--summary] | arena.sh reset <lab> | arena.sh status <lab> [--warriors <names>]"
 while [[ ${1:-} == --* ]]; do
   case $1 in
     --confirm-overwrite) confirm=true ;;
@@ -179,6 +179,14 @@ if [[ $action != build ]]; then
             ;;
           --log=*)
             boss_args+=("--log=$(absolutise "${1#--log=}")")
+            shift
+            ;;
+          --trace)
+            boss_args+=(--trace "$(absolutise "${2:?$usage}")")
+            shift 2
+            ;;
+          --trace=*)
+            boss_args+=("--trace=$(absolutise "${1#--trace=}")")
             shift
             ;;
           *)

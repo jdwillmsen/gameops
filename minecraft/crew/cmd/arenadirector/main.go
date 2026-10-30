@@ -87,7 +87,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: arenadirector run --lab <lab> --layout <file> [--tier N] [--waves <file>] [--warriors names] [--crew-names names] [--rally-after d] [--rally-every d] [--place-squad=false] [--scorecards <path> [--profile name] [--family f] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
 		"       arenadirector reset --lab <lab> [--crew-names names]\n"+
 		"       arenadirector status --lab <lab> [--warriors names]\n"+
-		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
+		"       arenadirector boss --lab <lab> --layout <file> --mob <id> [--name W] [--effects \"cmd1,cmd2\"] [--runs N] [--timeout 5m] [--warriors names] [--log <path>] [--trace <path>] [--summary] [--scorecards <path> [--profile name] [--run-id id] [--side s] [--seed n] [--status-url url]]\n"+
 		"       arenadirector duel --lab <lab> --layout <file> --red A,B --blue C,D [--kits vanguard/t5,ranger/t5] [--rounds N] [--timeout 2m] [--max-wall 30m] [--red-profile P] [--blue-profile P] [--crew-names names] [--duelists-allow names] [--duelists-roster <file>] [--scores <path>] [--stop-file <path>]")
 	os.Exit(2)
 }
@@ -245,6 +245,7 @@ func boss(args []string) {
 	crew := fs.String("crew-names", strings.Join(arena.DefaultCrewNames, ","), "players allowed online during a test")
 	logPath := fs.String("log", "", "run log (default ~/.local/state/arena-runs.jsonl)")
 	summary := fs.Bool("summary", false, "print runs and medians from the log instead of fighting")
+	tracePath := fs.String("trace", "", "append a JSON line per poll with the boss and warrior positions to this file")
 	poll := fs.Duration("poll", 3*time.Second, "delay between squad and boss checks")
 	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
 	placeWait := fs.Duration("place-wait", 3*time.Second, "wait after placing the squad")
@@ -284,9 +285,20 @@ func boss(args []string) {
 		fail("arenadirector: " + err.Error())
 	}
 
+	var trace io.Writer
+	if *tracePath != "" {
+		f, err := os.OpenFile(*tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		if err != nil {
+			fail("arenadirector: " + err.Error())
+		}
+		defer f.Close()
+		trace = f
+	}
+
 	b := &arena.BossTest{
 		Console:   console,
 		Layout:    layout,
+		Trace:     trace,
 		Mob:       *mob,
 		Name:      *name,
 		Event:     *event,
