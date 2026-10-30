@@ -109,6 +109,8 @@ type squadBackend interface {
 	SetStart(squadID string, p position) bool
 	SetProfile(squadID string, p profileWire) bool
 	Profile(squadID string) (profileWire, bool)
+	SetDuel(squadID string, d duelWire) bool
+	Duel(squadID string) (duelWire, bool)
 	Has(id string) bool
 	Member(squadID, unit string) bool
 	Delta(id string, since int64) (Delta, bool)
@@ -148,6 +150,8 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 	mux.HandleFunc("GET /v1/squads/{id}/orders", a.guard(a.orders))
 	mux.HandleFunc("GET /v1/squads/{id}/profile", a.guard(a.getProfile))
 	mux.HandleFunc("PUT /v1/squads/{id}/profile", a.guard(a.putProfile))
+	mux.HandleFunc("GET /v1/squads/{id}/duel", a.guard(a.getDuel))
+	mux.HandleFunc("PUT /v1/squads/{id}/duel", a.guard(a.putDuel))
 	return a
 }
 
