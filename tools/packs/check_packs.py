@@ -157,6 +157,49 @@ def excludes_player(tests, strict):
     return False
 
 
+# Exactly the component keys the generated wildlife entities use. A deny-list cannot keep up with
+# every vanilla component that picks a target or deals damage (mob_effect, area_attack, ranged_attack,
+# nearest_prioritized_attackable_target ...), so anything not named here is rejected until a human adds it.
+WILDLIFE_COMPONENTS = frozenset((
+    "minecraft:attack", "minecraft:behavior.avoid_mob_type", "minecraft:behavior.float",
+    "minecraft:behavior.follow_owner", "minecraft:behavior.leap_at_target", "minecraft:behavior.look_at_player",
+    "minecraft:behavior.melee_attack", "minecraft:behavior.nearest_attackable_target",
+    "minecraft:behavior.owner_hit_target", "minecraft:behavior.owner_hurt_by_target",
+    "minecraft:behavior.random_look_around", "minecraft:behavior.random_stroll",
+    "minecraft:behavior.stay_while_sitting", "minecraft:collision_box", "minecraft:follow_range",
+    "minecraft:health", "minecraft:is_tamed", "minecraft:jump.static", "minecraft:movement",
+    "minecraft:movement.basic", "minecraft:nameable", "minecraft:navigation.walk", "minecraft:persistent",
+    "minecraft:physics", "minecraft:pushable", "minecraft:sittable", "minecraft:tameable",
+    "minecraft:type_family", "minecraft:variant",
+))
+# queue_command and trigger could run a command or chain into an event this checker never saw.
+WILDLIFE_EVENT_ACTIONS = frozenset(("add", "remove", "set_property", "sequence", "randomize"))
+# Keys that sit beside the actions in an event body without being one.
+WILDLIFE_EVENT_MODIFIERS = frozenset(("weight",))
+
+
+def check_wildlife_components(path, comps, rep):
+    for key in comps:
+        if key not in WILDLIFE_COMPONENTS:
+            rep.fail(f"{path}: {key} is not on the wildlife allow-list")
+
+
+def check_wildlife_event(path, body, rep):
+    if isinstance(body, list):
+        for item in body:
+            check_wildlife_event(path, item, rep)
+        return
+    if not isinstance(body, dict):
+        return
+    for key, value in body.items():
+        if key in WILDLIFE_EVENT_MODIFIERS:
+            continue
+        if key not in WILDLIFE_EVENT_ACTIONS:
+            rep.fail(f"{path}: action {key} is not allowed")
+        elif key in ("sequence", "randomize"):
+            check_wildlife_event(path, value, rep)
+
+
 def check_wildlife_goals(path, comps, rep):
     if "minecraft:behavior.hurt_by_target" in comps:
         rep.fail(f"{path}: hurt_by_target would let the mob retaliate against players")
@@ -199,8 +242,12 @@ def check_behaviour_entity(path, doc, rep, policy="arena"):
     if policy == "wildlife":
         # Goals are checked per block: merging groups would let a later group hide an earlier one's goal.
         check_wildlife_goals(path, ent.get("components") or {}, rep)
+        check_wildlife_components(path, ent.get("components") or {}, rep)
         for name, group in (ent.get("component_groups") or {}).items():
             check_wildlife_goals(f"{path} (group {name})", group, rep)
+            check_wildlife_components(f"{path} (group {name})", group, rep)
+        for name, body in (ent.get("events") or {}).items():
+            check_wildlife_event(f"{path}: event {name}", body, rep)
         check_wildlife_entity(path, comps, rep)
         return ident
     if "minecraft:behavior.hurt_by_target" in comps:

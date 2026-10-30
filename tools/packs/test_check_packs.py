@@ -243,6 +243,47 @@ class CheckPacks(unittest.TestCase):
         self.edit(BP_ENTITY, lambda d: d["minecraft:entity"].update({"component_groups": {"wild": safe}}))
         self.assertFails("must exclude family player")
 
+    def test_wildlife_component_outside_allow_list_rejected(self):
+        for comp in ("minecraft:behavior.nearest_prioritized_attackable_target", "minecraft:area_attack",
+                     "minecraft:mob_effect", "minecraft:behavior.ranged_attack"):
+            with self.subTest(comp=comp, where="base"):
+                self.make_wildlife(lambda c, comp=comp: c.update({comp: {}}))
+                self.assertFails(f"{comp} is not on the wildlife allow-list")
+
+    def test_wildlife_component_outside_allow_list_rejected_in_any_group(self):
+        for group in ("gameops:wild", "gameops:variant_x"):
+            with self.subTest(group=group):
+                self.make_wildlife()
+                self.edit(BP_ENTITY, lambda d, group=group: d["minecraft:entity"].setdefault(
+                    "component_groups", {}).update({group: {"minecraft:behavior.knockback_roar": {}}}))
+                self.assertFails(f"(group {group}): minecraft:behavior.knockback_roar is not on the wildlife allow-list")
+
+    def test_wildlife_event_actions_are_allow_listed(self):
+        for action in ({"queue_command": {"command": ["damage @p 5"]}}, {"trigger": "other"}):
+            with self.subTest(action=list(action)[0]):
+                self.make_wildlife()
+                self.edit(BP_ENTITY, lambda d, action=action: d["minecraft:entity"].update(
+                    {"events": {"gameops:x": action}}))
+                self.assertFails(f"event gameops:x: action {list(action)[0]} is not allowed")
+
+    def test_wildlife_nested_event_actions_are_checked(self):
+        self.make_wildlife()
+        self.edit(BP_ENTITY, lambda d: d["minecraft:entity"].update({"events": {
+            "gameops:x": {"sequence": [{"randomize": [{"weight": 1, "queue_command": {"command": ["kill @p"]}}]}]}}}))
+        self.assertFails("action queue_command is not allowed")
+
+    def test_wildlife_plain_event_actions_pass(self):
+        self.make_wildlife()
+        self.edit(BP_ENTITY, lambda d: d["minecraft:entity"].update({"events": {
+            "gameops:x": {"sequence": [{"add": {"component_groups": ["a"]}}, {"randomize": [
+                {"weight": 1, "remove": {"component_groups": ["a"]}, "set_property": {"gameops:p": True}}]}]}}}))
+        self.assertEqual(self.errors(), [])
+
+    def test_arena_policy_ignores_the_wildlife_allow_lists(self):
+        self.edit(BP_ENTITY, lambda d: d["minecraft:entity"].update(
+            {"events": {"gameops:x": {"queue_command": {"command": ["say hi"]}}}}))
+        self.assertEqual(self.errors(), [])
+
     def test_wildlife_entity_needs_wildlife_family(self):
         self.make_wildlife(lambda c: c.update({"minecraft:type_family": {"family": ["gameops_brute"]}}))
         self.assertFails("gameops_wildlife")
