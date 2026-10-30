@@ -459,3 +459,92 @@ func TestTacticsControlDirDefaultsToOff(t *testing.T) {
 		t.Fatalf("set: %q, %v", cfg.TacticsControlDir, err)
 	}
 }
+
+// Crew and the agent read the same MC_HOST and MC_PORT; the cases mirror the
+// agent's so a change to one rule shows up as a failure in the other.
+func TestAddressFollowsTheSameRuleAsTheAgent(t *testing.T) {
+	for host, want := range map[string]string{
+		"mc.example.internal":          "mc.example.internal:25565",
+		"::1":                          "[::1]:25565",
+		"http://192.168.1.87":          "http://192.168.1.87:25565",
+		"https://mc.example.internal/": "https://mc.example.internal:25565",
+		"http://192.168.1.87:31134":    "http://192.168.1.87:31134",
+		"HTTP://mc.example.internal":   "http://mc.example.internal:25565",
+	} {
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+		t.Setenv("MC_PORT", "25565")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load with MC_HOST=%q: %v", host, err)
+		}
+		if got := cfg.Address(); got != want {
+			t.Errorf("MC_HOST=%q: Address() = %q, want %q", host, got, want)
+		}
+	}
+}
+
+// Existing configs name a bare host and keep dialling RakNet, at the same
+// host:port crew always built.
+func TestAddressOfABareHostIsRakNet(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Address(); got != "example.invalid:19132" || cfg.NetherNet() {
+		t.Errorf("Address() = %q, NetherNet() = %v; want example.invalid:19132 over RakNet", got, cfg.NetherNet())
+	}
+}
+
+func TestLoadRejectsAMalformedNetherNetHost(t *testing.T) {
+	for _, host := range []string{"http://", "http://mc.example/join", "http://user@mc.example", "http://mc.example?x=1"} {
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "MC_HOST") {
+			t.Errorf("MC_HOST=%q: err = %v, want one naming MC_HOST", host, err)
+		}
+	}
+}
+
+// A NetherNet server answers an unsigned player with error 37 and no hint why,
+// so the unit is refused here where the cause can be named.
+func TestLoadRefusesAnOfflineUnitOnNetherNet(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_HOST", "http://192.168.1.87:31134")
+	t.Setenv("MC_OFFLINE", "true")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load accepted MC_OFFLINE with a NetherNet MC_HOST")
+	}
+	for _, want := range []string{"MC_OFFLINE", "NetherNet", "sign"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("err = %q, want it to mention %q", err, want)
+		}
+	}
+}
+
+func TestLoadKeepsOfflineOnRakNet(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_OFFLINE", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Offline {
+		t.Error("Offline = false, want the lab setting kept for a RakNet server")
+	}
+}
+
+func TestLoadAcceptsASignedInUnitOnNetherNet(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_HOST", "http://192.168.1.87")
+	t.Setenv("MC_PORT", "31134")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.NetherNet() || cfg.Address() != "http://192.168.1.87:31134" {
+		t.Errorf("Address() = %q, NetherNet() = %v", cfg.Address(), cfg.NetherNet())
+	}
+}
