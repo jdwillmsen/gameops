@@ -573,3 +573,37 @@ func TestLoad_MapLogin(t *testing.T) {
 		}
 	}
 }
+
+func TestMCAddress(t *testing.T) {
+	for host, want := range map[string]string{
+		"mc.example.internal":          "mc.example.internal:25565",
+		"::1":                          "[::1]:25565",
+		"http://192.168.1.87":          "http://192.168.1.87:25565",
+		"https://mc.example.internal/": "https://mc.example.internal:25565",
+		"http://192.168.1.87:31134":    "http://192.168.1.87:31134",
+		"HTTP://mc.example.internal":   "http://mc.example.internal:25565",
+	} {
+		clearEnv(t)
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+		t.Setenv("MC_PORT", "25565")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load with MC_HOST=%q: %v", host, err)
+		}
+		if got := cfg.MCAddress(); got != want {
+			t.Errorf("MC_HOST=%q: MCAddress() = %q, want %q", host, got, want)
+		}
+	}
+}
+
+func TestLoad_MalformedNetherNetHostFails(t *testing.T) {
+	for _, host := range []string{"http://", "http://mc.example/join", "http://user@mc.example"} {
+		clearEnv(t)
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+		if _, err := Load(); err == nil {
+			t.Errorf("Load accepted MC_HOST=%q", host)
+		}
+	}
+}

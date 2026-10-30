@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -15,7 +16,9 @@ import (
 
 // Config is the agent's fully-parsed runtime configuration.
 type Config struct {
-	// Bedrock connection.
+	// Bedrock connection. MCHost is a hostname for a RakNet server, or the
+	// scheme and host (http://192.168.1.87) of a NetherNet server's signaling
+	// port; see MCAddress.
 	MCHost     string
 	MCPort     int
 	MCUsername string
@@ -221,6 +224,9 @@ func Load() (Config, error) {
 
 	port, err := portNumber("MC_PORT", 19132)
 	if err != nil {
+		return Config{}, err
+	}
+	if _, err := mcAddress(host, port); err != nil {
 		return Config{}, err
 	}
 	reconnectMin, err := positiveInt("RECONNECT_MIN_MS", 5000)
@@ -503,6 +509,31 @@ func portNumber(name string, def int) (int, error) {
 		return 0, fmt.Errorf("environment variable %s must be a valid port (1-65535), got %d", name, n)
 	}
 	return n, nil
+}
+
+// MCAddress is what the Bedrock client dials. A MC_HOST that starts with
+// http:// or https:// selects NetherNet and yields the signaling URL with the
+// port appended unless the host already carries one; any other MC_HOST is a
+// RakNet host:port.
+func (c Config) MCAddress() string {
+	addr, _ := mcAddress(c.MCHost, c.MCPort)
+	return addr
+}
+
+func mcAddress(host string, port int) (string, error) {
+	lower := strings.ToLower(host)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return net.JoinHostPort(host, strconv.Itoa(port)), nil
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return "", fmt.Errorf("MC_HOST must be a bare http(s)://host[:port] URL when it names a NetherNet server, got %q", host)
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+	}
+	u.Path = ""
+	return u.String(), nil
 }
 
 // PostgresDSN assembles a connection string from the parts above.
