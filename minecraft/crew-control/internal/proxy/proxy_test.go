@@ -327,3 +327,34 @@ func TestProxyNameRoutesStayOnTheAllowList(t *testing.T) {
 		t.Errorf("upstream saw %d requests, want 0", n)
 	}
 }
+
+func TestProxyNameResolutionRefusesAmbiguousAndIdShapedKeys(t *testing.T) {
+	unit := newFakeUnit(t, nil)
+	r, err := roster.Parse(fmt.Sprintf(`[
+		{"id":"crew-01","name":"Twin","url":%[1]q},
+		{"id":"crew-02","name":"Twin","url":%[1]q},
+		{"id":"crew-03","name":"Solo","url":%[1]q}]`, unit.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(r, logging.New("error"))
+	for path, want := range map[string]int{
+		"/units/Twin/v1/state":    http.StatusNotFound,
+		"/units/crew-04/v1/state": http.StatusNotFound,
+		"/units/crew-3/v1/state":  http.StatusNotFound,
+		"/units/Solo/v1/state":    http.StatusOK,
+		"/units/crew-03/v1/state": http.StatusOK,
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", path, nil))
+		if rec.Code != want {
+			t.Errorf("GET %s: status %d, want %d", path, rec.Code, want)
+		}
+	}
+	if n := len(unit.seen()); n != 2 {
+		t.Errorf("upstream saw %d requests, want only the two that resolved", n)
+	}
+	if _, err := roster.Parse(fmt.Sprintf(`[{"id":"crew-01","name":"crew-02","url":%q}]`, unit.URL)); err == nil {
+		t.Error("a roster with an id-shaped name must not load, so no proxy can be built on one")
+	}
+}
