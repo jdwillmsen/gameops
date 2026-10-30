@@ -158,6 +158,9 @@ type Life struct {
 	// fed by watch from the read loop and the stepping goroutine.
 	dealt DamageCounter
 	watch *DamageWatcher
+	// moves counts the sprint ticks and server corrections of the unit's
+	// actuator, which the wiring points at it.
+	moves *act.MoveCounters
 	// makeKit replaces the withdraw a visit runs, for tests.
 	makeKit func(weapon bool, food int) skill.Skill
 }
@@ -168,7 +171,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	if cfg.Radius < 1 {
 		cfg.Radius = 1
 	}
-	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
+	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}, moves: &act.MoveCounters{}}
 	if role, ok := validRole(cfg.Role); ok {
 		l.warrior = &warriorState{role: role, p: tactics.Defaults()}
 		l.watch = NewDamageWatcher(&l.dealt)
@@ -234,6 +237,7 @@ func (l *Life) Apply(pk packet.Packet) {
 		l.tel.observe(pk, l.selfID, l.dead)
 		l.watch.Observe(pk)
 		l.noteHealthSeen(pk)
+		l.noteActorFlags(pk)
 	}
 	switch p := pk.(type) {
 	case *packet.ActorEvent:

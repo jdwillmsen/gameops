@@ -44,6 +44,8 @@ const (
 	maxSeenHurts = 64
 	// Mob types announced by a health_seen line per session.
 	maxHealthTypes = 32
+	// Flag states announced by an actor_flags line per session.
+	maxFlagSightings = 32
 	// A health drop and a hurt animation of the one blow can arrive ticks
 	// apart; a lone hurt animation is given this long to be joined by a drop.
 	// A second blow cannot land sooner, inside the invulnerability frames.
@@ -64,6 +66,11 @@ type FightStats struct {
 	// swing or shot; an upper bound when several warriors fight one target.
 	DamageDealt float64 `json:"damage_dealt"`
 	Deaths      uint64  `json:"deaths"`
+	// SprintTicks and MovementCorrections are the inputs sent while sprinting
+	// and the server's corrections of the predicted pose, so a live check can
+	// tell a sprint model the server agrees with from one it keeps overruling.
+	SprintTicks         uint64 `json:"sprint_ticks"`
+	MovementCorrections uint64 `json:"movement_corrections"`
 }
 
 // FightSummary is the unit's totals since it started and the fight now under
@@ -103,6 +110,14 @@ type telemetry struct {
 	// them and the stepping goroutine says so.
 	healthTypes   map[string]struct{}
 	healthPending []healthSighting
+	// seen is what the session has sighted, kept for the status API so a
+	// reader does not need the log; seq counts sightings of both kinds.
+	seen        Sightings
+	seq         uint64
+	flagKeys    map[string]struct{}
+	flagPending []FlagSeen
+	// moveBase is the movement counters at the start of the current fight.
+	moveBase moveBase
 
 	total, fight FightStats
 
@@ -135,7 +150,11 @@ func (t *telemetry) spawn() {
 	clear(t.seenHurts)
 	clear(t.seenDeaths)
 	clear(t.healthTypes)
+	clear(t.flagKeys)
 	t.healthPending = t.healthPending[:0]
+	t.flagPending = t.flagPending[:0]
+	t.seen = Sightings{}
+	t.seq = 0
 }
 
 // newLife forgets the swings and blows of the life that ended. The clock
@@ -206,6 +225,8 @@ func (t *telemetry) noteHealthSeen(typ string, hp float32) {
 	}
 	t.healthTypes[typ] = struct{}{}
 	t.healthPending = append(t.healthPending, healthSighting{typ, hp})
+	t.seq++
+	t.seen.Health = append(t.seen.Health, HealthSeen{Seq: t.seq, Entity: typ, Health: round2(float64(hp))})
 }
 
 func (t *telemetry) takeHealthSeen() []healthSighting {
@@ -279,10 +300,14 @@ func (l *Life) Stats() (FightSummary, bool) {
 		return FightSummary{}, false
 	}
 	d := l.dealt.Summary()
+	sprint, corrections := l.moves.SprintTicks(), l.moves.Corrections()
 	l.tel.mu.Lock()
 	defer l.tel.mu.Unlock()
 	sum := FightSummary{Total: l.tel.total, Current: l.tel.fight}
 	sum.Total.DamageDealt, sum.Current.DamageDealt = d.Total.Dealt, d.Fight.Dealt
+	sum.Total.SprintTicks, sum.Total.MovementCorrections = sprint, corrections
+	base := l.tel.moveBase
+	sum.Current.SprintTicks, sum.Current.MovementCorrections = since(sprint, base.sprint), since(corrections, base.corrections)
 	return sum, true
 }
 
@@ -311,8 +336,10 @@ func (l *Life) fightStarted() {
 		return
 	}
 	t := &l.tel
+	sprint, corrections := l.moves.SprintTicks(), l.moves.Corrections()
 	t.mu.Lock()
 	t.fight = FightStats{}
+	t.moveBase = moveBase{sprint, corrections}
 	t.mu.Unlock()
 	t.open = t.open[:0]
 	l.watch.FightStart()
@@ -344,6 +371,9 @@ func (l *Life) telemetryTick(d drained) {
 	l.watch.Tick(l.tick)
 	for _, h := range t.takeHealthSeen() {
 		l.logEvent("health_seen", map[string]any{"entity": h.typ, "health": round2(float64(h.health))})
+	}
+	for _, f := range t.takeFlagSightings() {
+		l.logEvent("actor_flags", map[string]any{"type": f.Type, "ignited": f.Ignited, "charged": f.Charged, "angry": f.Angry})
 	}
 	if d.empty() && !t.hurtPending {
 		return

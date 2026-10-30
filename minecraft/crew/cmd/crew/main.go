@@ -115,7 +115,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	// otherwise be restarted before it ever answered. /readyz stays 503 until
 	// the unit is in the world.
 	tacticsView := newTacticsState(lf)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf), statusapi.WithTactics(tacticsView)), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf), statusapi.WithSightings(lf), statusapi.WithTactics(tacticsView)), ReadHeaderTimeout: 5 * time.Second}
 	var statusFailed atomic.Bool
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

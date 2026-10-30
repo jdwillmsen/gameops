@@ -126,6 +126,9 @@ func (u *unit) startActing() error {
 	a := act.New(heldRecorder{packetWriter: u.conn, runtimeID: u.runtimeID, tracker: u.tracker, hub: u.hub}, u.runtimeID, startPose(snap), path.NewSolid(u.world))
 	a.SetCorrectionDiagnostics(u.correctionLog, u.world)
 	a.SetClipDiagnostics(u.correctionLog)
+	if u.life != nil {
+		a.CountMovement(u.life.MoveCounters())
+	}
 	a.ItemNames(u.items)
 	a.Crafting(u.book, func() []belief.Item { return u.tracker.Snapshot().Inventory })
 	a.SetCreative(u.tracker.Creative)

@@ -38,12 +38,24 @@ type FightSource interface {
 type Option func(*options)
 
 type options struct {
-	fight   FightSource
-	tactics TacticsSource
+	fight     FightSource
+	tactics   TacticsSource
+	sightings SightingSource
 }
 
 // WithFight reports a warrior's fight counts under the tasks in /v1/state.
 func WithFight(f FightSource) Option { return func(o *options) { o.fight = f } }
+
+// SightingSource is the read side of what the unit has seen of other
+// entities; ok is false for a unit that keeps none.
+type SightingSource interface {
+	Sightings() (life.Sightings, bool)
+}
+
+// WithSightings reports the first health reading and flag states of each mob
+// type as "seen" in /v1/state, which is how a lab check reads them back
+// without the unit's log.
+func WithSightings(s SightingSource) Option { return func(o *options) { o.sightings = s } }
 
 // Tactics is what a unit is fighting with, so a trainer can confirm a pushed
 // profile took hold on the unit and not only on the squad route.
@@ -84,6 +96,8 @@ type stateBody struct {
 	Tasks   tasksView       `json:"tasks"`
 	// Tactics is absent for a unit that has no tuning to report.
 	Tactics *Tactics `json:"tactics,omitempty"`
+	// Seen is absent for a unit that keeps no sightings.
+	Seen *life.Sightings `json:"seen,omitempty"`
 }
 
 type tasksView struct {
@@ -143,6 +157,11 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Op
 		if o.tactics != nil {
 			t := o.tactics.Tactics()
 			body.Tactics = &t
+		}
+		if o.sightings != nil {
+			if s, ok := o.sightings.Sightings(); ok {
+				body.Seen = &s
+			}
 		}
 		_ = json.NewEncoder(w).Encode(body)
 	})
