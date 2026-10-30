@@ -486,7 +486,7 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 		Console: b.Console, Layout: b.Layout, Red: red, Blue: blue,
 		RedProfile: redProfile, BlueProfile: blueProfile, Kits: b.DuelKits,
 		Rounds: 1, RoundTimeout: b.RoundTimeout, MaxWall: min(max(b.wall, time.Second), arena.MaxDuelWall),
-		CrewNames: b.Crew, Duelists: b.Duelists, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got,
+		CrewNames: b.Crew, Duelists: b.Duelists, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got, Damage: b.Damage,
 		RunID:   fmt.Sprintf("duel-%d-%s", ts.Seed, ts.Side),
 		Spacing: b.Spacing, Poll: b.Poll, Settle: b.Settle, KitGap: b.KitGap, Countdown: b.Countdown,
 		Halted: b.stopped, Out: b.Out, Now: b.Now, Sleep: b.Sleep,
