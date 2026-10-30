@@ -258,7 +258,16 @@ func TestPingVersionStillReadsARakNetPong(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = l.Close() }()
-	if got := pingVersion(context.Background(), l.Addr().String()); got == "" {
-		t.Error("pingVersion of a RakNet server is empty")
+	// The ping is a single best-effort UDP exchange, and the listener may not
+	// answer the very first one on a loaded machine, so ask until it does.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if got := pingVersion(context.Background(), l.Addr().String()); got != "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pingVersion of a RakNet server stayed empty for 5s")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
