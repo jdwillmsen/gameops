@@ -61,6 +61,11 @@ type bridge struct {
 	// scored only once the units themselves report it.
 	Units arena.TacticsSource
 
+	// DuelPolicy builds the policy a duel round hands its units their start
+	// signal through; nil keeps the console tags alone, which the units cannot
+	// read.
+	DuelPolicy func(red, blue []string) (arena.TargetPolicy, error)
+
 	// DryRun writes the candidate to the sink and stops: it never fights and
 	// never scores, since the file sink has no consumer.
 	DryRun bool
@@ -481,12 +486,19 @@ func (b *bridge) duel(ctx context.Context, cand tactics.Profile, ts trainer.Scen
 		return []tactics.Scorecard{aborted()}, classify(err)
 	}
 
+	var policy arena.TargetPolicy = &arena.ConsolePolicy{Console: b.Console}
+	if b.DuelPolicy != nil {
+		if policy, err = b.DuelPolicy(red, blue); err != nil {
+			b.logf("duel not started: %v", err)
+			return []tactics.Scorecard{aborted()}, refusal{err}
+		}
+	}
 	got := &collector{}
 	d := &arena.Duel{
 		Console: b.Console, Layout: b.Layout, Red: red, Blue: blue,
 		RedProfile: redProfile, BlueProfile: blueProfile, Kits: b.DuelKits,
 		Rounds: 1, RoundTimeout: b.RoundTimeout, MaxWall: min(max(b.wall, time.Second), arena.MaxDuelWall),
-		CrewNames: b.Crew, Duelists: b.Duelists, Policy: &arena.ConsolePolicy{Console: b.Console}, Sink: got, Damage: b.Damage,
+		CrewNames: b.Crew, Duelists: b.Duelists, Policy: policy, Sink: got, Damage: b.Damage,
 		RunID:   fmt.Sprintf("duel-%d-%s", ts.Seed, ts.Side),
 		Spacing: b.Spacing, Poll: b.Poll, Settle: b.Settle, KitGap: b.KitGap, Countdown: b.Countdown,
 		Halted: b.stopped, Out: b.Out, Now: b.Now, Sleep: b.Sleep,
