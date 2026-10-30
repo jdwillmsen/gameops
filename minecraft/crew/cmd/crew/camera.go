@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
@@ -187,17 +186,14 @@ func (l *atlasLoader) load(ctx context.Context, serverVersion string) {
 	l.log.Info("camera_atlas_ready", logging.Fields{"server_version": serverVersion})
 }
 
-// pingVersion asks the server for the version it advertises. The game data's
-// own version field is a wildcard on current servers, so the ping is the only
+// pingVersion asks the server for the version it advertises, over whichever
+// transport addr names. The game data's own version field is a wildcard on
+// current servers, so the ping (or a NetherNet server's status) is the only
 // place the real one is.
 func pingVersion(ctx context.Context, addr string) string {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	pong, err := raknet.PingContext(ctx, addr)
-	if err != nil {
-		return ""
-	}
-	ad, err := mcproto.ParsePong(string(pong))
+	ad, err := mcproto.Advertise(ctx, addr)
 	if err != nil {
 		return ""
 	}

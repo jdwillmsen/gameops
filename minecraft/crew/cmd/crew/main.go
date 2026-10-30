@@ -13,11 +13,9 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -47,6 +45,10 @@ import (
 
 const (
 	connectTimeout = 30 * time.Second
+	// A NetherNet server is not reached until signaling, ICE and the DTLS and
+	// SCTP handshakes have all finished, which takes several round trips where
+	// RakNet takes one.
+	netherNetConnectTimeout = 45 * time.Second
 	// Far longer than connectTimeout: a freshly started server loads its
 	// world for the first player in, and abandoning a login the server would
 	// have completed is worse than waiting.
@@ -61,6 +63,13 @@ const (
 	// The overworld's -64..319 in 16-block sections.
 	sectionsPerColumn = 24
 )
+
+func connectBudget(cfg config.Config) time.Duration {
+	if cfg.NetherNet() {
+		return netherNetConnectTimeout
+	}
+	return connectTimeout
+}
 
 // storedSubChunks sizes the world store to the whole view, one chunk of margin
 // all round. The server never resends a chunk the client already had, so a
@@ -215,10 +224,10 @@ func spawnedFields(xuid string, viewDistance uint8) logging.Fields {
 	return logging.Fields{"xuid": xuid, "view_distance": viewDistance}
 }
 
-func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
-	unitSkin := unitSkinFor(cfg, log)
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-
+// dialServer connects the unit to the server at addr and returns once the
+// transport and login are up; the caller still waits for the spawn. The
+// transport follows addr: an http(s):// URL is NetherNet, anything else RakNet.
+func dialServer(ctx context.Context, cfg config.Config, auth authn, unitSkin skin.Skin, addr string, log *logging.Logger) (*minecraft.Conn, func(time.Duration), error) {
 	// The server upgrades itself on restart; announcing the server's own
 	// protocol number keeps a release that changed no packets from kicking
 	// crew before login.
@@ -243,9 +252,20 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 			SkinImageWidth:  unitSkin.Width,
 			SkinImageHeight: unitSkin.Height,
 		},
-	}, addr, connectTimeout, spawnTimeout)
+	}, addr, connectBudget(cfg), spawnTimeout)
 	if err != nil {
-		return fmt.Errorf("dial: %w", err)
+		return nil, nil, fmt.Errorf("dial: %w", err)
+	}
+	return conn, leave, nil
+}
+
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
+	unitSkin := unitSkinFor(cfg, log)
+	addr := cfg.Address()
+
+	conn, leave, err := dialServer(ctx, cfg, auth, unitSkin, addr, log)
+	if err != nil {
+		return err
 	}
 	defer leave(leaveTimeout)
 
