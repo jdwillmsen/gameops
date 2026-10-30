@@ -738,6 +738,9 @@ func TestBossTraceRecordsPositionsAndDistancePerPoll(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
 		t.Fatalf("trace line is not JSON: %v", err)
 	}
+	if first.TS == "" {
+		t.Errorf("first sample has no fight start timestamp")
+	}
 	r := first.Warriors["Rusty"]
 	if first.Boss == nil || r == nil || r.Dist == nil || *r.Dist != 5 {
 		t.Errorf("first sample = %+v, want the boss and Rusty 5 blocks away", first)
@@ -761,5 +764,24 @@ func TestBossTraceFailureDoesNotEndTheFight(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), `"boss":null`) {
 		t.Errorf("trace = %q, want a null boss", buf.String())
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestBossTraceWriteFailureIsReportedOnce(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	var out strings.Builder
+	b.Out = &out
+	b.Trace = failingWriter{}
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if n := strings.Count(out.String(), "trace write failed"); n != 1 {
+		t.Errorf("reported %d times, want once: %q", n, out.String())
 	}
 }
