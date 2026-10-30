@@ -9,16 +9,16 @@ import (
 )
 
 func TestNetherNetDialSpawnsAndOutlastsConnectBudget(t *testing.T) {
-	world := startSlowNetherNetWorld(t, 1500*time.Millisecond)
+	world := startSlowNetherNetWorld(t, 7*time.Second)
 
 	started := time.Now()
-	conn, err := Dial(context.Background(), dialerFor("Bot"), world.address(), 2*time.Second, 30*time.Second)
+	conn, err := Dial(context.Background(), dialerFor("Bot"), world.address(), 5*time.Second, 30*time.Second)
 	if err != nil {
 		t.Fatalf("Dial over NetherNet: %v", err)
 	}
 	defer func() { _ = conn.Close() }()
-	if waited := time.Since(started); waited < time.Second {
-		t.Errorf("spawned after %v, want it to have waited out the 1.5s world load", waited)
+	if waited := time.Since(started); waited < 5*time.Second {
+		t.Errorf("spawned after %v, want it to have outlasted the 5s connect budget", waited)
 	}
 	if err := conn.DoSpawnContext(context.Background()); err != nil {
 		t.Errorf("DoSpawnContext: %v", err)
