@@ -29,3 +29,20 @@ saved in a world depend on them.
 - `gameops:perf` logs one `gameops:perf mean_tick_ms=... ticks=200` line after 200 ticks.
 - `gameops:census` logs one `gameops:census tiger=<n> cheetah=<n> lion=<n> black_leopard=<n> brown_bear=<n> hyena=<n>` line counting loaded animals of each type in all three dimensions; it works from the server console.
 - At startup the script logs `gameops:wildlife script loaded`; `tools/lab-preview-smoke.sh` looks for it.
+
+## Manual checklist
+
+For a human with a real client; the headless smoke cannot cover these. Start a
+preview with `tools/lab-preview up packs` (it prints the join address) and
+accept the resource pack.
+
+- Tame each animal with its food: tiger raw beef, cheetah raw rabbit, lion raw mutton, black leopard raw chicken, brown bear raw salmon, hyena rotten flesh (`gameops:tame` is the shortcut).
+- A tamed pet follows you, sits and stays on interact, and stands again.
+- A pet defends you when you are hit.
+- Abilities: tiger charge then the tired phase; cheetah sprint; lion roar; black leopard at night only; brown bear guard; a hyena pack of four.
+- A lion and a hyena fight each other on sight.
+- Hit a wild animal: it never attacks you.
+- A second player cannot sit another player's pet.
+- Spawn eggs exist and spawn each animal.
+- Models and textures look right; the mane is hidden on the female lion.
+- Strength and resistance effects actually appear on the recipients (the startup log warns if an effect id is unknown).
