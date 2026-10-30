@@ -397,7 +397,21 @@ func TestLabRefusals(t *testing.T) {
 	if code := l.Run(context.Background(), &out); code != 2 {
 		t.Errorf("squad %q: exit %d, want 2", l.Squad, code)
 	}
+	l.Lab = "crew-lab"
+	l.Squad = arena.KnownLab
+	if code := l.Run(context.Background(), &out); code != 2 {
+		t.Errorf("squad %q (the cluster pod): exit %d, want 2", l.Squad, code)
+	}
+	l.Squad, l.SquadB = "lab-alpha", arena.KnownLab
+	if code := l.Run(context.Background(), &out); code != 2 {
+		t.Errorf("squad-b %q (the cluster pod): exit %d, want 2", l.SquadB, code)
+	}
+	l.SquadB = ""
 	l.Squad = "lab-alpha"
+	l.EvaluatorArgs = []string{"--status-url", "http://crew-control/units/{name}/v1/state", "--squad", arena.KnownLab}
+	if code := l.Run(context.Background(), &out); code != 2 {
+		t.Errorf("evaluator arg --squad pod: exit %d, want 2", code)
+	}
 	l.EvaluatorArgs = []string{"--status-url", "http://crew-control/units/{name}/v1/state", "--lab", "prd"}
 	if code := l.Run(context.Background(), &out); code != 2 {
 		t.Errorf("evaluator arg --lab prd: exit %d, want 2", code)

@@ -167,7 +167,7 @@ func (l *Loop) prepare() error {
 		if s == "" {
 			continue
 		}
-		if err := tacticsctl.LabOnly(s); err != nil {
+		if err := labSquad(s); err != nil {
 			return err
 		}
 	}
@@ -198,6 +198,16 @@ func (l *Loop) prepare() error {
 // rule the bridge applies to its own flags.
 var labTargets = map[string]bool{"lab": true, "squad": true, "squad-b": true}
 
+// labSquad accepts a squad id of the lab and nothing else. LabOnly alone is
+// not enough: it exempts the cluster lab's pod name, which is a server, not a
+// squad.
+func labSquad(id string) error {
+	if err := arena.ValidateLabSquad(id); err != nil {
+		return err
+	}
+	return tacticsctl.LabOnly(id)
+}
+
 // checkEvaluatorTargets refuses extra evaluator arguments that aim at
 // anything but the crew lab. Free-position flags and separate values are both
 // accepted, as the trainer reads its own evaluator spec.
@@ -216,7 +226,11 @@ func checkEvaluatorTargets(args []string) error {
 			}
 			val = args[i+1]
 		}
-		if err := tacticsctl.LabOnly(val); err != nil {
+		check := tacticsctl.LabOnly
+		if name != "lab" {
+			check = labSquad
+		}
+		if err := check(val); err != nil {
 			return fmt.Errorf("--evaluator-args: %w", err)
 		}
 	}
