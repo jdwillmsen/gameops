@@ -535,6 +535,9 @@ func TestABiomeColouredTextureIsMultipliedByAPlainsColourAndNoOtherIsTinted(t *t
 		{"birch_leaves", "textures/blocks/leaves_birch.tga", birchFoliage},
 		{"spruce_leaves", "textures/blocks/leaves_spruce.tga", spruceFoliage},
 		{"waterlily", "textures/blocks/waterlily", lilyPad},
+		// A flower's stalk keeps its own green.
+		{"sunflower", "textures/blocks/double_plant_sunflower_bottom", ""},
+		{"lilac", "textures/blocks/double_plant_syringa_bottom", ""},
 		// The game does not colour these in place.
 		{"cherry_leaves", "textures/blocks/leaves_cherry", ""},
 		{"azalea_leaves", "textures/blocks/leaves_azalea", ""},
@@ -556,7 +559,7 @@ func TestABiomeColouredTextureIsMultipliedByAPlainsColourAndNoOtherIsTinted(t *t
 func TestAShieldAndAGrassBlockAreDrawnFromTheirModelsAndNotAFlatTexture(t *testing.T) {
 	src := itemSources{
 		ids:      []string{"shield", "grass_block"},
-		textures: map[string]bool{"textures/blocks/grass_side_carried": true},
+		textures: map[string]bool{"textures/blocks/grass_side_carried": true, "textures/blocks/grass_top": true},
 	}
 	if err := json.Unmarshal([]byte(`{"texture_data":{"shield":{"textures":"textures/entity/shield"},"grass_top":{"textures":["textures/blocks/grass_top"]}}}`), &src.items); err != nil {
 		t.Fatal(err)
@@ -589,5 +592,34 @@ func TestATextureKeptAsATGAIsHeldByItsPath(t *testing.T) {
 		if got := src.held(path); got != want {
 			t.Errorf("held(%q) = %q, want %q", path, got, want)
 		}
+	}
+}
+
+func TestLayeredAndCubeItemsCountEveryTextureTheyNameAgainstTheLimit(t *testing.T) {
+	recipes := map[string]Recipe{}
+	items := map[string]Recipe{}
+	// Each names two textures of its own, none of them as a flat picture.
+	for n := range maxModelTextures {
+		layer := func(name string) []Layer {
+			return []Layer{{Texture: name, Units: [2]int{16, 16}, Src: [4]int{0, 0, 16, 16}, Dst: [4]int{0, 0, 16, 16}}}
+		}
+		items[fmt.Sprintf("item/c%05d", n)] = Recipe{Block: &Block{
+			W: 16, H: 16, D: 16,
+			Top: layer(fmt.Sprintf("textures/blocks/t%d", n)), Left: layer(fmt.Sprintf("textures/blocks/l%d", n)), Right: layer(fmt.Sprintf("textures/blocks/t%d", n)),
+		}}
+	}
+	rejected := map[string]string{}
+	addItems(recipes, rejected, items)
+	textures := map[string]bool{}
+	for _, r := range recipes {
+		for _, path := range r.textures() {
+			textures[path] = true
+		}
+	}
+	if len(textures) > maxModelTextures {
+		t.Errorf("%d textures named, over the %d a making may name", len(textures), maxModelTextures)
+	}
+	if len(rejected) == 0 {
+		t.Error("no cube was left out though together they name twice the limit")
 	}
 }
