@@ -160,3 +160,63 @@ func TestEntitiesLeaveFlagsUnknownWithoutAFlagWord(t *testing.T) {
 		t.Error("SetActorData for an unknown actor must not create one")
 	}
 }
+
+func healthAttr(hp float32) protocol.Attribute {
+	return protocol.Attribute{AttributeValue: protocol.AttributeValue{Name: "minecraft:health", Value: hp}}
+}
+
+func TestEntitiesReadAMobsHealthFromAddActorAndUpdateAttributes(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:zombie",
+		Attributes: []protocol.AttributeValue{{Name: "minecraft:movement", Value: 0.23}, {Name: "minecraft:health", Value: 20, Max: 20}}})
+	if en := listed(e)[50]; !en.HealthKnown || en.Health != 20 {
+		t.Fatalf("after AddActor health = %v (known %v), want 20", en.Health, en.HealthKnown)
+	}
+
+	e.Apply(&packet.UpdateAttributes{EntityRuntimeID: 50, Attributes: []protocol.Attribute{healthAttr(14)}})
+	if en := listed(e)[50]; !en.HealthKnown || en.Health != 14 {
+		t.Fatalf("after UpdateAttributes health = %v (known %v), want 14", en.Health, en.HealthKnown)
+	}
+
+	e.Apply(&packet.UpdateAttributes{EntityRuntimeID: 50, Attributes: []protocol.Attribute{
+		{AttributeValue: protocol.AttributeValue{Name: "minecraft:absorption", Value: 4}}}})
+	if en := listed(e)[50]; en.Health != 14 {
+		t.Errorf("an update with no health attribute changed health to %v", en.Health)
+	}
+}
+
+func TestEntitiesLeaveHealthUnknownWithoutAHealthAttribute(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityRuntimeID: 50, EntityType: "minecraft:zombie"})
+	e.Apply(&packet.AddActor{EntityRuntimeID: 51, EntityType: "minecraft:zombie",
+		Attributes: []protocol.AttributeValue{{Name: "minecraft:movement", Value: 0.23}}})
+	for _, id := range []uint64{50, 51} {
+		if en := listed(e)[id]; en.HealthKnown || en.Health != 0 {
+			t.Errorf("entity %d health = %v (known %v), want unknown", id, en.Health, en.HealthKnown)
+		}
+	}
+}
+
+func TestEntitiesIgnoreAttributesOfTheUnitAndOfUnknownActors(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.UpdateAttributes{EntityRuntimeID: 1, Attributes: []protocol.Attribute{healthAttr(9)}})
+	e.Apply(&packet.UpdateAttributes{EntityRuntimeID: 99, Attributes: []protocol.Attribute{healthAttr(9)}})
+	if got := listed(e); len(got) != 0 {
+		t.Fatalf("entities = %+v, want none invented from attribute updates", got)
+	}
+}
+
+func TestEntitiesForgetHealthWhenAMobIsRemovedAndReAdded(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:zombie",
+		Attributes: []protocol.AttributeValue{{Name: "minecraft:health", Value: 20}}})
+	e.Apply(&packet.RemoveActor{EntityUniqueID: -50})
+	e.Apply(&packet.AddActor{EntityUniqueID: -50, EntityRuntimeID: 50, EntityType: "minecraft:zombie"})
+	if en := listed(e)[50]; en.HealthKnown {
+		t.Errorf("a re-added mob kept the old health %v", en.Health)
+	}
+}

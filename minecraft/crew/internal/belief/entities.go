@@ -39,6 +39,22 @@ type Entity struct {
 	// Angry is a hostile mob's aggro, such as an enderman that has been
 	// provoked.
 	Angry bool
+	// Health is the entity's last announced minecraft:health, and says
+	// nothing until HealthKnown: a mob the server never sent one for is not
+	// at zero.
+	Health      float32
+	HealthKnown bool
+}
+
+// withHealth returns e with the health read from attrs, or e unchanged when
+// they carry none.
+func (e Entity) withHealth(attrs []protocol.AttributeValue) Entity {
+	for _, a := range attrs {
+		if a.Name == healthAttribute {
+			e.Health, e.HealthKnown = a.Value, true
+		}
+	}
+	return e
 }
 
 // withFlags returns e with the flag-derived fields read from md, or e
@@ -118,13 +134,26 @@ func (e *Entities) Apply(pk packet.Packet) {
 			return
 		}
 		e.unique[p.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}.withFlags(p.EntityMetadata)
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}.withFlags(p.EntityMetadata).withHealth(p.Attributes)
 	case *packet.AddPlayer:
 		if p.EntityRuntimeID == e.self {
 			return
 		}
 		e.unique[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
 		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: "player", Pos: p.Position, Player: true, Name: p.Username}
+	case *packet.UpdateAttributes:
+		// The unit's own health is the tracker's; an entity never announced
+		// is not invented from an attribute update.
+		if p.EntityRuntimeID == e.self {
+			return
+		}
+		if en, ok := e.ents[p.EntityRuntimeID]; ok {
+			vals := make([]protocol.AttributeValue, len(p.Attributes))
+			for i, a := range p.Attributes {
+				vals[i] = a.AttributeValue
+			}
+			e.ents[p.EntityRuntimeID] = en.withHealth(vals)
+		}
 	case *packet.SetActorData:
 		if en, ok := e.ents[p.EntityRuntimeID]; ok {
 			e.ents[p.EntityRuntimeID] = en.withFlags(p.EntityMetadata)
