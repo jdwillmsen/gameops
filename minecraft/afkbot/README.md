@@ -15,13 +15,22 @@ farms depend on is kept with as little in it as possible to go wrong.
 
 [agent]: https://github.com/jdwillmsen/gameops/tree/main/minecraft/agent
 
+## Transports
+
+Bedrock 1.26.60 servers speak NetherNet only; older ones speak RakNet. The bot
+picks by `MC_HOST`: a value starting `http://` or `https://` is the NetherNet
+signaling URL (TCP, e.g. `http://192.168.1.87:31134`, plus the server's UDP
+range for ICE), anything else is a RakNet hostname joined with `MC_PORT`.
+Moving a bot between them is an address change, not a flag. NetherNet needs a
+signed-in account, which the token cache already provides.
+
 ## Configuration
 
 | Variable | Required | Default | Range | Meaning |
 |---|---|---|---|---|
-| `MC_HOST` | yes | — | non-empty | Server hostname |
+| `MC_HOST` | yes | — | non-empty | RakNet: server hostname. NetherNet: the signaling URL, `http://host:port` (no path); `MC_PORT` is then ignored ([transports](#transports)) |
 | `MC_USERNAME` | yes | — | non-empty | Key the auth token caches under, **not** the gamertag the server shows |
-| `MC_PORT` | no | `19132` | 1–65535 | Server port |
+| `MC_PORT` | no | `19132` | 1–65535 | RakNet server port; unused when `MC_HOST` is a URL |
 | `MC_VIEW_DISTANCE` | no | `12` | 1–64 | Chunk radius to request. The default is Bedrock's maximum tick-distance; the server grants what is asked for, so a smaller value holds proportionally less world ([why][radius]) |
 | `AUTH_CACHE_DIR` | no | `/data/auth` | — | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | 1–3600000 | Backoff floor |
