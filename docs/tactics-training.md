@@ -137,6 +137,27 @@ aborted card and exit 1), since a disconnect says nothing about the profile. The
 shipped scenario book trains a ravager under `brute`, the family the warrior
 fights it as, and the boss family through `warden-trial`.
 
+## Duels
+
+A duel needs the units to hear the start signal, and they hear it from their lab
+squads. The director `PUT`s a duel state to each side's squad
+(`/v1/squads/<lab-id>/duel`, token in `CONTROL_TOKEN`, lab squads only): `armed`
+when the roster is set, `go` at the start with the players already out,
+`idle` or `over` to end it. The signal is a squad's own members as the fighters
+and the other squad's as the enemies, so it follows the teams when the sides
+swap between rounds. A lab unit whose training switch is on reads it and may
+hit a player only while the state is `go`, the player is an enemy and not yet
+out; an unreadable squad, an unknown state or a `go` that stops being renewed
+for a few seconds closes the rule again, and `idle`/`over` removes it. The
+director withdraws the signal on every exit path, an interrupt included, and
+the squad forgets a `go` nobody renewed after twelve minutes.
+
+`arenadirector duel` takes `--squad-url`, `--red-squad` and `--blue-squad`
+(all three or none; lab ids only, two different squads, the `--red` units in the
+first and the `--blue` units in the second). Without them it only tags and
+scores. `trainbridge` hands the same signal to the squads it already pushes the
+profiles to (`--squad`, `--squad-b`), so a duel there needs no extra flag.
+
 ## Promotion to production
 
 **Nothing consumes the production stage today.** No production unit fetches a
