@@ -41,20 +41,23 @@ func TestParseRejects(t *testing.T) {
 		return fmt.Sprintf(`[{"id":%q,"name":%q,"url":%q}]`, id, name, url)
 	}
 	cases := map[string]string{
-		"invalid json":  `not json`,
-		"empty list":    `[]`,
-		"too many":      "[" + strings.Join(many, ",") + "]",
-		"bad id":        unit("crew-1", "A", "http://h:1"),
-		"bad id prefix": unit("unit-01", "A", "http://h:1"),
-		"id trailing":   unit("crew-01x", "A", "http://h:1"),
-		"duplicate":     `[{"id":"crew-01","name":"A","url":"http://h:1"},{"id":"crew-01","name":"B","url":"http://h:2"}]`,
-		"empty name":    unit("crew-01", "", "http://h:1"),
-		"long name":     unit("crew-01", strings.Repeat("a", 17), "http://h:1"),
-		"https":         unit("crew-01", "A", "https://h:1"),
-		"path":          unit("crew-01", "A", "http://h:1/x"),
-		"userinfo":      unit("crew-01", "A", "http://u:p@h:1"),
-		"query":         unit("crew-01", "A", "http://h:1/?a=b"),
-		"no host":       unit("crew-01", "A", "http://"),
+		"invalid json":   `not json`,
+		"empty list":     `[]`,
+		"too many":       "[" + strings.Join(many, ",") + "]",
+		"bad id":         unit("crew-1", "A", "http://h:1"),
+		"bad id prefix":  unit("unit-01", "A", "http://h:1"),
+		"id trailing":    unit("crew-01x", "A", "http://h:1"),
+		"duplicate":      `[{"id":"crew-01","name":"A","url":"http://h:1"},{"id":"crew-01","name":"B","url":"http://h:2"}]`,
+		"empty name":     unit("crew-01", "", "http://h:1"),
+		"long name":      unit("crew-01", strings.Repeat("a", 17), "http://h:1"),
+		"https":          unit("crew-01", "A", "https://h:1"),
+		"path":           unit("crew-01", "A", "http://h:1/x"),
+		"userinfo":       unit("crew-01", "A", "http://u:p@h:1"),
+		"query":          unit("crew-01", "A", "http://h:1/?a=b"),
+		"no host":        unit("crew-01", "A", "http://"),
+		"id-like name":   unit("crew-04", "crew-01", "http://h:1"),
+		"own id as name": unit("crew-01", "crew-01", "http://h:1"),
+		"long id name":   unit("crew-04", "crew-100", "http://h:1"),
 	}
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -98,8 +101,7 @@ func TestResolveFindsAnIdOrAUniqueName(t *testing.T) {
 	r, err := Parse(`[
 		{"id":"crew-01","name":"Rusty","url":"http://crew-01:8080"},
 		{"id":"crew-02","name":"Twin","url":"http://crew-02:8080"},
-		{"id":"crew-03","name":"Twin","url":"http://crew-03:8080"},
-		{"id":"crew-04","name":"crew-01","url":"http://crew-04:8080"}]`)
+		{"id":"crew-03","name":"Twin","url":"http://crew-03:8080"}]`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +114,7 @@ func TestResolveFindsAnIdOrAUniqueName(t *testing.T) {
 		{"rusty", "", false},
 		{"Twin", "", false},
 		{"crew-01", "crew-01", true},
+		{"crew-04", "", false},
 		{"nobody", "", false},
 		{"", "", false},
 	}
@@ -120,5 +123,17 @@ func TestResolveFindsAnIdOrAUniqueName(t *testing.T) {
 		if ok != c.ok || u.ID != c.id {
 			t.Errorf("Resolve(%q) = %q, %v; want %q, %v", c.key, u.ID, ok, c.id, c.ok)
 		}
+	}
+}
+
+func TestResolvePrefersAnIdOverAName(t *testing.T) {
+	// Parse refuses such a roster; this is the lookup's own rule, held for a
+	// roster built any other way.
+	r := Roster{
+		units: []Unit{{ID: "crew-01", Name: "Rusty"}, {ID: "crew-04", Name: "crew-01"}},
+		byID:  map[string]int{"crew-01": 0, "crew-04": 1},
+	}
+	if u, ok := r.Resolve("crew-01"); !ok || u.ID != "crew-01" {
+		t.Errorf("Resolve(crew-01) = %q, %v; want the unit with that id", u.ID, ok)
 	}
 }

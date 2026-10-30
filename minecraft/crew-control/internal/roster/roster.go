@@ -111,6 +111,11 @@ func Parse(raw string) (Roster, error) {
 		if n := utf8.RuneCountInString(ru.Name); n == 0 || n > maxNameLen {
 			return Roster{}, fmt.Errorf("unit %s name must be 1 to %d characters", ru.ID, maxNameLen)
 		}
+		// A name shaped like an id would name another unit's id to anyone
+		// reading a URL or a log; that unit stays addressable by its id only.
+		if idPattern.MatchString(ru.Name) {
+			return Roster{}, fmt.Errorf("unit %s name %q looks like a unit id", ru.ID, ru.Name)
+		}
 		u, err := parseURL(ru.URL)
 		if err != nil {
 			return Roster{}, fmt.Errorf("unit %s: %w", ru.ID, err)
