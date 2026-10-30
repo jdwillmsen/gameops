@@ -294,7 +294,9 @@ func dialAddress(host string, port int) (string, error) {
 	}
 	u, err := url.Parse(host)
 	if err != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
-		return "", fmt.Errorf("MC_HOST must be a bare http(s)://host[:port] URL when it names a NetherNet server, got %q", host)
+		// The value is left out of the message: a URL can carry credentials, and
+		// this error reaches the log.
+		return "", fmt.Errorf("MC_HOST must be a bare http(s)://host[:port] URL when it names a NetherNet server")
 	}
 	if u.Port() == "" {
 		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
