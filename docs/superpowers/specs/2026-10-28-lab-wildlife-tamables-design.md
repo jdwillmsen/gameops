@@ -104,9 +104,10 @@ Blockbench's Bedrock entity format (`.geo.json`, PNG, `.animation.json`).
 - **Livestock:** wild predators skip animals that carry a name tag. Rivalry
   is mutual: a wild hyena or lion also attacks a tamed rival, so a tamed
   pet can be hurt or killed like a vanilla wolf.
-- **Bots:** each new id is `provoked` in `kinds.go` (neutral until it
-  hurts the unit), as for the wolf and the polar bear. Units never attack
-  a tamed pet.
+- **Bots:** the new ids are left unlisted in `kinds.go`, so they are
+  `other`: never a threat and never a suspect. Wildlife never attacks units,
+  and listing it as `provoked` would let a hurt unit blame a nearby pet.
+  Units never attack a tamed pet.
 - **Variants** (male and female lion, alpha hyena, white tiger) are chosen
   at random on spawn and are cosmetic, apart from the alpha hyena having a
   little more health.

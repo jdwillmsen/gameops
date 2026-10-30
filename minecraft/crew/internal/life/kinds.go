@@ -34,16 +34,14 @@ var kinds = map[string]kind{
 	// Pack mobs keep their namespace, which name() leaves alone, so they
 	// cannot collide with a vanilla key. They only attack units tagged for
 	// the arena, so an idle unit must not go and hit one: provoked fights
-	// them once one has hurt the unit and not before. Wildlife does not
-	// attack units either, but an animal that has hurt a unit (say a
-	// rival's stray hit) counts as provoked, like the wolf and the polar bear.
+	// them once one has hurt the unit and not before. The wildlife pack is
+	// deliberately unlisted: those animals never attack units, and listing
+	// them would let a hurt unit blame a tamed pet standing beside it.
 	"gameops:werewolf": provoked, "gameops:training_dummy_brute": provoked,
 	// The ground dragon is a boss: as a provoked kind it was a threat only
 	// while it had just hurt this unit, so a squad whose leader had strayed
 	// never committed to it.
 	"gameops:ground_dragon": hostile,
-	"gameops:tiger":         provoked, "gameops:cheetah": provoked, "gameops:lion": provoked,
-	"gameops:black_leopard": provoked, "gameops:brown_bear": provoked, "gameops:hyena": provoked,
 
 	"creeper": flee,
 }

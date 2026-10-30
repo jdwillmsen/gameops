@@ -81,16 +81,26 @@ func TestGroundDragonProfileBandsAreOrdered(t *testing.T) {
 	}
 }
 
-func TestWildlifeKindsAreProvoked(t *testing.T) {
+func TestWildlifeIsNeverASuspect(t *testing.T) {
 	for _, id := range []string{
 		"gameops:tiger", "gameops:cheetah", "gameops:lion",
 		"gameops:black_leopard", "gameops:brown_bear", "gameops:hyena",
 	} {
-		if kindOf(id) != provoked {
-			t.Errorf("%s: kind %v, want provoked", id, kindOf(id))
+		if kindOf(id) != other {
+			t.Errorf("%s: kind %v, want other", id, kindOf(id))
 		}
 		if Threat(id) {
 			t.Errorf("%s: Threat true, want false for a neutral mob", id)
+		}
+		r := newRig(t, defaults, start)
+		r.spawn(72, id, mgl32.Vec3{21.5, 1, 20.5})
+		r.hurt()
+		r.step()
+		if r.l.attacker != 0 {
+			t.Errorf("%s: a hurt unit blamed the animal beside it (%d)", id, r.l.attacker)
+		}
+		if len(r.out.attacks()) != 0 {
+			t.Errorf("%s: attacked the animal", id)
 		}
 	}
 }
