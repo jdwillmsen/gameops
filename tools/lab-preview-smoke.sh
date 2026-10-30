@@ -3,6 +3,26 @@
 # headless: loads cleanly, animals persist, prey rules hold, tick cost is flat.
 set -euo pipefail
 
+# Pure helpers, kept free of docker so tools/lab-preview-smoke.test.sh can source them.
+# testfor prints "Found ..." on a match and "No targets matched" otherwise; any
+# other output means the console line was dropped, which proves nothing either way.
+probe_verdict() {
+  if grep -q 'No targets matched' <<<"$1"; then echo none
+  elif grep -q 'Found' <<<"$1"; then echo found
+  else echo unknown
+  fi
+}
+
+# Exact match per species: "tiger=1" must not accept tiger=10 or tiger=12.
+census_ok() {
+  local line=$1 count=$2 sp
+  for sp in tiger cheetah lion black_leopard brown_bear hyena; do
+    [[ " $line " == *" $sp=$count "* ]] || return 1
+  done
+}
+
+[[ ${LAB_PREVIEW_SMOKE_SOURCE_ONLY:-} == 1 ]] && return 0
+
 COUNT=1
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -24,7 +44,10 @@ SPECIES=(tiger cheetah lion black_leopard brown_bear hyena)
 Y=-60 # surface of the flat world
 
 stage=$(mktemp -d)
+finished=0
 cleanup() {
+  # An early exit (a console command that never went through) still owes the tally.
+  if ((finished == 0)); then echo "RESULT count=$COUNT pass=$pass fail=$fail (aborted)"; fi
   "$preview" down >/dev/null 2>&1 || true
   rm -rf "$stage"
 }
@@ -43,8 +66,8 @@ run() {
     "$preview" cmd "$@" >/dev/null 2>&1 && return 0
     sleep 2
   done
-  echo "error: console command failed: $*" >&2
-  return 1
+  bad console-command "never went through: $*"
+  exit 1
 }
 logs_since() { docker logs --since "$1" "$LAB_PREVIEW_NAME" 2>&1; }
 # Captured first: grep -q exiting early gives docker logs SIGPIPE under pipefail.
@@ -72,21 +95,26 @@ area() {
 # testfor prints "Found ..." when the selector matches and "No targets matched"
 # otherwise; unlike a scoreboard count it needs no setup and survives a
 # restart. Selectors carry x,y,z,r so animals from other checks never match.
-alive() {
+# Sets PROBE to found, none or unknown for a selector.
+probe() {
   local t out
   t=$(now)
   run testfor "$1"
   sleep 3
   out=$(logs_since "$t")
-  if grep -q 'No targets matched' <<<"$out"; then return 1; fi
-  grep -q 'Found' <<<"$out"
+  PROBE=$(probe_verdict "$out")
 }
 
-# Waits up to $2 seconds for a selector to stop matching.
+# Fails closed: only an explicit "Found" counts as alive.
+alive() { probe "$1"; [[ $PROBE == found ]]; }
+
+# Succeeds only on an explicit "No targets matched"; a dropped line keeps
+# retrying until the deadline instead of reading as "gone".
 gone_within() {
-  local i
-  for ((i = 0; i < $2; i += 5)); do
-    alive "$1" || return 0
+  local deadline=$((SECONDS + $2))
+  while ((SECONDS < deadline)); do
+    probe "$1"
+    [[ $PROBE == none ]] && return 0
     sleep 2
   done
   return 1
@@ -113,20 +141,22 @@ mkdir -p "$stage/wildlife"
 cp -r "$pack/behavior_pack" "$pack/resource_pack" "$stage/wildlife/"
 "$preview" down >/dev/null 2>&1 || true
 echo "booting $LAB_PREVIEW_VERSION with $COUNT of each animal"
-boot_log=$("$preview" up "$stage" 2>&1) || { bad boot "up failed: $(tail -3 <<<"$boot_log")"; echo "RESULT pass=$pass fail=$fail"; exit 1; }
+boot_log=$("$preview" up "$stage" 2>&1) || { bad boot "up failed: $(tail -3 <<<"$boot_log")"; exit 1; }
 
 # a. boot
 # The world's first boot runs without the pack, so only lines after the final restart count.
-errs=$(logs_since "$(docker inspect -f '{{.State.StartedAt}}' "$LAB_PREVIEW_NAME")" |
+# The first boot has no pack, so everything is bounded by the final restart.
+started=$(docker inspect -f '{{.State.StartedAt}}' "$LAB_PREVIEW_NAME")
+errs=$(logs_since "$started" |
   grep -iE 'was not found|\[(Scripting|Behavior|Resource).*(error|warn)|pack.*(error|invalid|failed)|manifest.*error|\[Scripting\].*(error|exception)' | sort -u || true)
-if log_has 1970-01-01T00:00:00Z 'Server started' && [[ -z $errs ]]; then
+if log_has "$started" 'Server started' && [[ -z $errs ]]; then
   ok boot
 else
   bad boot "${errs:-no 'Server started'}"
 fi
 
 # b. script loaded
-if log_has 1970-01-01T00:00:00Z 'gameops:wildlife script loaded'; then
+if log_has "$started" 'gameops:wildlife script loaded'; then
   ok script-loaded
 else
   bad script-loaded "gameops:wildlife script loaded not in logs"
@@ -161,11 +191,7 @@ line=${line%%$'\n'*}
 if [[ -z $line ]]; then
   bad census "no census line logged"
 else
-  wrong=""
-  for sp in "${SPECIES[@]}"; do
-    [[ $line == *" $sp=$COUNT"* || $line == *" $sp=$COUNT" ]] || wrong+=" $sp"
-  done
-  if [[ -z $wrong ]]; then ok census; else bad census "expected $COUNT each, got: $line"; fi
+  if census_ok "$line" "$COUNT"; then ok census; else bad census "expected $COUNT each, got: $line"; fi
 fi
 
 # d. prey: wild lion hunts an unnamed sheep; a named cow is spared.
@@ -173,15 +199,17 @@ run summon gameops:lion 210 "$Y" 10
 run summon sheep 214 "$Y" 10
 run summon gameops:tiger 410 "$Y" 10
 run summon cow '"Bessie"' 414 "$Y" 10
+cow_at=$SECONDS
 # Without this, a failed summon would read as "the lion ate it".
 if ! alive "@e[type=sheep,x=214,y=$Y,z=10,r=30]"; then
   bad prey-sheep-hunted "sheep was not there after summon (setup failed)"
 elif gone_within "@e[type=sheep,x=214,y=$Y,z=10,r=30]" 60; then
   ok prey-sheep-hunted
 else
-  bad prey-sheep-hunted "sheep still alive 60s after meeting a wild lion"
+  bad prey-sheep-hunted "sheep not confirmed gone in 60s after meeting a wild lion (last probe: $PROBE)"
 fi
-sleep 5
+# A full 60 s from the cow's own summon, however long the sheep check took.
+((SECONDS - cow_at < 60)) && sleep $((60 - SECONDS + cow_at))
 if alive "@e[type=cow,name=Bessie,x=414,y=$Y,z=10,r=30]"; then
   ok prey-named-cow-spared
 else
@@ -240,5 +268,6 @@ fi
 serr=$(logs_since "$(docker inspect -f '{{.State.StartedAt}}' "$LAB_PREVIEW_NAME")" | grep -E '\[Scripting\].*(ERROR|error|exception)' || true)
 if [[ -z $serr ]]; then ok script-errors; else bad script-errors "$(head -3 <<<"$serr")"; fi
 
+finished=1
 echo "RESULT count=$COUNT pass=$pass fail=$fail"
 [[ $fail -eq 0 ]]
