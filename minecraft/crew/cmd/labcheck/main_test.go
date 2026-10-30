@@ -125,13 +125,12 @@ func TestAllFiveChecksRunInOrder(t *testing.T) {
 
 func TestRefusesATargetThatIsNotTheCrewLab(t *testing.T) {
 	for name, lab := range map[string]string{
-		"fwb pod":         "k8s:jdwillmsen-prd/jdwillmsen-fwb-minecraft-bedrock-0",
-		"another pod":     "k8s:jdwillmsen-prd/jdwillmsen-minecraft-bedrock-0",
-		"fwb compose":     "fwb",
-		"no lab":          "",
-		"prod word":       "k8s:ns/crew-lab-prod-0",
-		"the cluster pod": arena.KnownLab,
-		"bare lab word":   "k8s:ns/some-lab-0",
+		"fwb pod":       "k8s:jdwillmsen-prd/jdwillmsen-fwb-minecraft-bedrock-0",
+		"another pod":   "k8s:jdwillmsen-prd/jdwillmsen-minecraft-bedrock-0",
+		"fwb compose":   "fwb",
+		"no lab":        "",
+		"prod word":     "k8s:ns/crew-lab-prod-0",
+		"bare lab word": "k8s:ns/some-lab-0",
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := newCLI(t)
@@ -142,6 +141,13 @@ func TestRefusesATargetThatIsNotTheCrewLab(t *testing.T) {
 				t.Errorf("the server was reached for %q: built %v, cmds %v", lab, c.built, c.lab.cmds)
 			}
 		})
+	}
+}
+
+func TestTheClusterLabPassesTheTargetGuard(t *testing.T) {
+	c := newCLI(t)
+	if code := c.run("--lab", arena.KnownLab, "--control-dir", c.dir, "--checks", "tp"); code == exitRefused {
+		t.Fatalf("the real crew lab was refused at the guard (exit %d)", code)
 	}
 }
 

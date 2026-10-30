@@ -55,6 +55,13 @@ var (
 	labSquadID   = regexp.MustCompile(`^lab-[a-z0-9-]+$`)
 )
 
+// KnownLab is the one cluster pod the tools trust as the crew lab. Its
+// namespace and pod name contain "prd" because the lab runs in the production
+// cluster, so the word check below would refuse it; only this exact string is
+// let through, never a lookalike. It must equal arena.KnownLab (a test in
+// cmd/trainbridge holds the two together; this package cannot import arena).
+const KnownLab = "k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0"
+
 // LabOnly accepts a target only when it is positively the crew lab: it
 // carries the token "crew-lab" (a compose service, or the pod of a
 // k8s:<namespace>/<pod>), or it is a lab squad id, "lab-" and a name. A bare
@@ -62,6 +69,9 @@ var (
 // allowlist is the rule; the forbidden list only catches names like
 // "crew-lab-prod" that would otherwise slip through it.
 func LabOnly(target string) error {
+	if target == KnownLab {
+		return nil
+	}
 	lower := strings.ToLower(target)
 	if strings.Contains(lower, "fwb") {
 		return fmt.Errorf("%w: %q names a real-player server", ErrNotLab, target)

@@ -958,3 +958,20 @@ func TestUsedApprovalCopiedBackFailsAfterRollback(t *testing.T) {
 		})
 	}
 }
+
+func TestLabOnlyAcceptsTheKnownClusterLabAndNothingLikeIt(t *testing.T) {
+	if err := LabOnly(KnownLab); err != nil {
+		t.Fatalf("the real crew lab is refused: %v", err)
+	}
+	for _, bad := range []string{
+		KnownLab + "x",
+		"k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-1",
+		"k8s:jdwillmsen-prd/jdwillmsen-fwb-prd-minecraft-bedrock-0",
+		"K8S:JDWILLMSEN-PRD/JDWILLMSEN-CREW-LAB-PRD-MINECRAFT-BEDROCK-0",
+		"k8s:jdwillmsen-prd/jdwillmsen-crew-lab-prd-minecraft-bedrock-0/fwb",
+	} {
+		if err := LabOnly(bad); err == nil {
+			t.Errorf("%q passed LabOnly", bad)
+		}
+	}
+}
