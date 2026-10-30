@@ -109,6 +109,8 @@ printf '%s\n' "$out" | grep -q hollow && fail "empty theme reported: $out"
 # and a space or glob character would split or expand it.
 oddpacks=$tmp/oddpacks
 cp -R "$packs" "$oddpacks"
+# The single quotes are the point: the name is a hostile literal that must not expand.
+# shellcheck disable=SC2016
 for name in 'bad name' 'gl*b' '$(touch pwned)'; do
   mkpack "$oddpacks/$name/behavior_pack" "c0000000-0000-0000-0000-000000000009" "[0,9,9]"
 done
@@ -116,6 +118,8 @@ ow=$tmp/oddworld
 mkdir -p "$ow/behavior_packs/precious" "$ow/resource_packs"
 echo keep >"$ow/behavior_packs/precious/keep.txt"
 out=$(cd "$tmp" && PACKS_DIR=$oddpacks "$here/install.sh" "$ow" 2>"$tmp/odd.err") || fail "odd theme names failed: $(cat "$tmp/odd.err")"
+# The single quotes are the point: the name is a hostile literal that must not expand.
+# shellcheck disable=SC2016
 for name in 'bad name' 'gl*b' '$(touch pwned)'; do
   grep -qF "skipping theme '$name'" "$tmp/odd.err" || fail "odd theme '$name' not reported: $(cat "$tmp/odd.err")"
 done
@@ -145,7 +149,7 @@ flags="--rm --read-only --cap-drop ALL --security-opt no-new-privileges --memory
 # throwaway root container with default capabilities.
 mkworld() {
   mkdir -p "$1"
-  docker run --rm -v "$1:/data" --entrypoint sh lab-packs-test -c \
+  docker run --rm --user 0:0 -v "$1:/data" --entrypoint sh lab-packs-test -c \
     "mkdir -p /data/worlds/crew-lab && chown -R $2 /data && chmod -R 755 /data"
 }
 verify() {
@@ -160,35 +164,37 @@ verify() {
   [ "$(jq length "$w/world_behavior_packs.json")" -ge 1 ] || fail "image: behavior list empty"
 }
 # The helper containers leave root-owned files, so removal also goes through one.
-rmworld() { docker run --rm -v "$1:/data" --entrypoint sh lab-packs-test -c 'rm -rf /data/* /data/.[!.]*' || true; }
+rmworld() { docker run --rm --user 0:0 -v "$1:/data" --entrypoint sh lab-packs-test -c 'rm -rf /data/* /data/.[!.]*' || true; }
 
-# (a) the image's default user (root), caps dropped, root-owned world. The
-# live pod runs as uid 1000 / gid 3000 (case b); this case keeps root coverage
-# for other callers of the image.
-a=$tmp/a; mkworld "$a" 0:0
-# shellcheck disable=SC2086
-out=$(docker run $flags -v "$a:/data" lab-packs-test /data/worlds/crew-lab) || fail "(a) root on root-owned world failed: $out"
-verify "$a" "$out"; echo "(a) PASS: default user, root-owned 755 world"
-rmworld "$a"
-
-# (b) the lab's real shape: pod runs uid 1000 / gid 3000, the world is owned
-# 1000:2000 with setgid directories (2775) and 644 files.
-b=$tmp/b; mkworld "$b" 1000:2000
-docker run --rm -v "$b:/data" --entrypoint sh lab-packs-test -c \
+# Helpers that need root run as 0:0 because the image's default user is not.
+# (a) the image default user (1000:3000, the lab pod's own) against the lab's
+# real world shape: owned 1000:2000, setgid directories (2775), 644 files.
+a=$tmp/a; mkworld "$a" 1000:2000
+docker run --rm --user 0:0 -v "$a:/data" --entrypoint sh lab-packs-test -c \
   "echo '[]' >/data/worlds/crew-lab/world_behavior_packs.json && chown -R 1000:2000 /data && find /data -type d -exec chmod 2775 {} + && find /data -type f -exec chmod 644 {} +"
 # shellcheck disable=SC2086
-out=$(docker run $flags --user 1000:3000 -v "$b:/data" lab-packs-test /data/worlds/crew-lab) || fail "(b) uid 1000:3000 on the lab-shaped world failed: $out"
-verify "$b" "$out"
-owner=$(docker run --rm -v "$b:/data" --entrypoint stat lab-packs-test -c '%u' /data/worlds/crew-lab/behavior_packs/gameops-lab-mods-wildlife/manifest.json /data/worlds/crew-lab/world_behavior_packs.json | sort -u)
-[ "$owner" = 1000 ] || fail "(b) installed files not owned by uid 1000: $owner"
-echo "(b) PASS: --user 1000:3000, 1000:2000-owned setgid 2775 world, files owned by uid 1000"
+ids=$(docker run $flags --entrypoint sh lab-packs-test -c 'echo "$(id -u):$(id -g)"')
+[ "$ids" = 1000:3000 ] || fail "(a) image default user is $ids, want 1000:3000"
+# shellcheck disable=SC2086
+out=$(docker run $flags -v "$a:/data" lab-packs-test /data/worlds/crew-lab) || fail "(a) default user on the lab-shaped world failed: $out"
+verify "$a" "$out"
+owner=$(docker run --rm --user 0:0 -v "$a:/data" --entrypoint stat lab-packs-test -c '%u' /data/worlds/crew-lab/behavior_packs/gameops-lab-mods-wildlife/manifest.json /data/worlds/crew-lab/world_behavior_packs.json | sort -u)
+[ "$owner" = 1000 ] || fail "(a) installed files not owned by uid 1000: $owner"
+echo "(a) PASS: default user $ids, 1000:2000-owned setgid 2775 world, files owned by uid 1000"
+rmworld "$a"
+
+# (b) the user can be overridden: explicit root on a root-owned world.
+b=$tmp/b; mkworld "$b" 0:0
+# shellcheck disable=SC2086
+out=$(docker run $flags --user 0:0 -v "$b:/data" lab-packs-test /data/worlds/crew-lab) || fail "(b) --user 0:0 on root-owned world failed: $out"
+verify "$b" "$out"; echo "(b) PASS: --user 0:0, root-owned 755 world"
 rmworld "$b"
 
 # (c) informational: root without CAP_DAC_OVERRIDE cannot write another
 # uid's 755 files, so the chart's init container user must own the world.
 c=$tmp/c; mkworld "$c" 1000:1000
 # shellcheck disable=SC2086
-if out=$(docker run $flags -v "$c:/data" lab-packs-test /data/worlds/crew-lab 2>&1); then
+if out=$(docker run $flags --user 0:0 -v "$c:/data" lab-packs-test /data/worlds/crew-lab 2>&1); then
   echo "(c) PASS: root with caps dropped could write a 1000-owned 755 world: $out"
 else
   echo "(c) EXPECTED-FAIL: root with caps dropped on a 1000-owned 755 world: $out"
