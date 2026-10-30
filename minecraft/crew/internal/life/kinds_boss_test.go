@@ -54,3 +54,29 @@ func TestGroundDragonIsFocusedWithoutHavingHurtTheUnit(t *testing.T) {
 		t.Error("ground dragon is not a threat until it hurts the unit; a squad that never got hit would idle")
 	}
 }
+
+func TestGroundDragonStaysFocusedWhenTheLeaderHasStrayed(t *testing.T) {
+	p, ok := bossOf("gameops:ground_dragon")
+	if !ok {
+		t.Fatal("no boss profile")
+	}
+	e := belief.Entity{ID: 5, Type: "gameops:ground_dragon", Pos: mgl32.Vec3{25, 0, 0}}
+	if (focusQuery{tick: 1}).mobThreat(e) {
+		t.Fatal("setup: the shipped 12-block range should lose a dragon 25 blocks from the leader")
+	}
+	q := focusQuery{tick: 1, focusRange: func(belief.Entity) float64 { return p.focusRange }}
+	if !q.mobThreat(e) {
+		t.Errorf("dragon 25 blocks from the leader is dropped with the boss range %.0f", p.focusRange)
+	}
+}
+
+func TestGroundDragonProfileBandsAreOrdered(t *testing.T) {
+	p, _ := bossOf("gameops:ground_dragon")
+	if !(p.strikerNear > bossReach && p.strikerFar < p.rangerNear && p.rangerFar < p.focusRange) {
+		t.Errorf("bands out of order: striker %.0f-%.0f, ranger %.0f-%.0f, focus %.0f, reach %.1f",
+			p.strikerNear, p.strikerFar, p.rangerNear, p.rangerFar, p.focusRange, bossReach)
+	}
+	if p.meleeEvery != 0 || p.boom != 0 || p.darkness != 0 {
+		t.Errorf("the dragon has no boom, darkness or timed melee: %+v", p)
+	}
+}
