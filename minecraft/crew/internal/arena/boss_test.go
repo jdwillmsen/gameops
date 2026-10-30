@@ -2,6 +2,7 @@ package arena
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -75,6 +76,8 @@ func (s *bossSim) Exec(cmd string) (string, error) {
 			return s.missReply, nil
 		}
 		return "Found " + name, nil
+	case strings.HasPrefix(cmd, "querytarget @e[name="):
+		return targetJSON(TargetPosition{X: 0, Y: 65, Z: -770}), nil
 	case strings.HasPrefix(cmd, "querytarget @a[name="):
 		name := queryName(cmd)
 		p, ok := s.warriorPos[name]
@@ -714,5 +717,49 @@ func TestBossTagsTheSquadForPackBossesAndUntagsOnExit(t *testing.T) {
 		if !hasCommand(f.Cmds, fmt.Sprintf("tag %q remove arena_warrior", w)) {
 			t.Errorf("%s was not untagged on exit", w)
 		}
+	}
+}
+
+func TestBossTraceRecordsPositionsAndDistancePerPoll(t *testing.T) {
+	s := newBossSim()
+	s.warriorPos["Rusty"] = TargetPosition{X: 3, Y: 65, Z: -774}
+	f := &FakeConsole{Respond: s.Exec}
+	b, _ := newBossTest(f, newFakeClock())
+	var buf strings.Builder
+	b.Trace = &buf
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("trace has %d lines, want one per poll", len(lines))
+	}
+	var first traceSample
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatalf("trace line is not JSON: %v", err)
+	}
+	r := first.Warriors["Rusty"]
+	if first.Boss == nil || r == nil || r.Dist == nil || *r.Dist != 5 {
+		t.Errorf("first sample = %+v, want the boss and Rusty 5 blocks away", first)
+	}
+}
+
+func TestBossTraceFailureDoesNotEndTheFight(t *testing.T) {
+	s := newBossSim()
+	f := &FakeConsole{Respond: func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "querytarget @e[") {
+			return "", errors.New("console gone")
+		}
+		return s.Exec(cmd)
+	}}
+	b, _ := newBossTest(f, newFakeClock())
+	var buf strings.Builder
+	b.Trace = &buf
+	got, err := b.Run(context.Background())
+	if err != nil || len(got) != 1 || got[0].Outcome != BossKilled {
+		t.Fatalf("Run = %+v, %v; want the kill despite a failing trace query", got, err)
+	}
+	if !strings.Contains(buf.String(), `"boss":null`) {
+		t.Errorf("trace = %q, want a null boss", buf.String())
 	}
 }

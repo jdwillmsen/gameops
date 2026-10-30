@@ -2,9 +2,11 @@ package arena
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -70,6 +72,10 @@ type BossTest struct {
 	// Observer, when set, sees each fight's deaths and kill, and is told when
 	// a fight starts; Record then runs before the next FightStart.
 	Observer FightObserver
+
+	// Trace, when set, receives one JSON line per poll with the boss's and
+	// each warrior's position, so a stalled fight can be replayed.
+	Trace io.Writer
 
 	Out   io.Writer
 	Now   func() time.Time
@@ -413,6 +419,7 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 		if err != nil {
 			return BossRecord{}, err
 		}
+		b.trace(d, run, b.now().Sub(startTS))
 		reply, err := d.exec("testfor " + b.bossSelector())
 		if err != nil {
 			return BossRecord{}, err
@@ -461,6 +468,64 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 	}
 	b.logf("arena: run %d: %s after %.1fs, %d deaths", run, outcome, rec.Seconds, res.WarriorDeaths)
 	return rec, busyErr(busy)
+}
+
+// traceSample is one poll of the fight. A missing position is null: the
+// mob was dead, unloaded or not yet respawned.
+type traceSample struct {
+	T        float64                  `json:"t"`
+	Run      int                      `json:"run"`
+	Boss     *TargetPosition          `json:"boss"`
+	Warriors map[string]*traceWarrior `json:"warriors"`
+}
+
+type traceWarrior struct {
+	TargetPosition
+	// Dist is the straight-line distance to the boss, absent without one.
+	Dist *float64 `json:"dist,omitempty"`
+}
+
+// trace appends one sample. Telemetry never ends a fight: a failed query or a
+// write error just drops the sample.
+func (b *BossTest) trace(d *Director, run int, since time.Duration) {
+	if b.Trace == nil {
+		return
+	}
+	query := func(cmd string) *TargetPosition {
+		out, err := d.exec(cmd)
+		if err != nil {
+			return nil
+		}
+		p, err := ParseTargetPosition(out)
+		if err != nil {
+			return nil
+		}
+		return &p
+	}
+	s := traceSample{T: roundTenth(since.Seconds()), Run: run, Warriors: map[string]*traceWarrior{}}
+	s.Boss = query("querytarget " + b.bossSelector())
+	for _, name := range b.Warriors {
+		cmd, err := rallyQueryCommand(name)
+		if err != nil {
+			continue
+		}
+		p := query(cmd)
+		if p == nil {
+			s.Warriors[name] = nil
+			continue
+		}
+		w := &traceWarrior{TargetPosition: *p}
+		if s.Boss != nil {
+			dist := roundTenth(math.Sqrt(math.Pow(p.X-s.Boss.X, 2) + math.Pow(p.Y-s.Boss.Y, 2) + math.Pow(p.Z-s.Boss.Z, 2)))
+			w.Dist = &dist
+		}
+		s.Warriors[name] = w
+	}
+	line, err := json.Marshal(s)
+	if err != nil {
+		return
+	}
+	_, _ = b.Trace.Write(append(line, '\n'))
 }
 
 func (b *BossTest) pollEvery() time.Duration {
