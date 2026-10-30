@@ -25,7 +25,7 @@ type scoreFlags struct {
 
 func addScoreFlags(fs *flag.FlagSet) scoreFlags {
 	damage := new(arena.DamageSource)
-	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken on the scorecard (off by default)", func(v string) error {
+	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken and dealt on the scorecard (off by default)", func(v string) error {
 		src, err := arena.NewHTTPDamage(v)
 		if err != nil {
 			return err

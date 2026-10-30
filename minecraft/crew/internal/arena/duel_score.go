@@ -12,8 +12,8 @@ import (
 // owns the real implementation; the duel only needs somewhere to hand cards.
 //
 // The console can see who stood and who fell, so a card carries outcome,
-// seconds, kills and deaths. DamageDealt and DamageTaken stay zero: only the
-// units' own telemetry measures them, and the recorder merges them in.
+// seconds, kills and deaths. Damage comes from the units' own telemetry, when
+// the duel has a source for it, and stays zero otherwise.
 type ScoreSink interface {
 	Record(tactics.Scorecard) error
 }
@@ -43,9 +43,21 @@ func (s duelSide) alive() int {
 	return n
 }
 
+// taken is the health this side's duelists lost over the round.
+func (s duelSide) taken(growth map[string]UnitDamage) float64 {
+	var sum float64
+	for _, n := range s.names {
+		sum += growth[n].Taken
+	}
+	return sum
+}
+
 // scorecard builds the card for this side. Opponent is the other side's
 // profile, so the trainer can tell a mirror match from a real opponent.
-func (s duelSide) scorecard(runID string, start time.Time, seconds float64, outcome string, foe duelSide) tactics.Scorecard {
+// DamageDealt is the foe's damage taken, not this side's own count of its
+// swings: one duelist's loss is exactly what the other dealt, and the victim
+// measures it without guessing at an attacker.
+func (s duelSide) scorecard(runID string, start time.Time, seconds float64, outcome string, foe duelSide, growth map[string]UnitDamage) tactics.Scorecard {
 	deaths := make(map[string]int, len(s.names))
 	for _, n := range s.names {
 		deaths[n] = 0
@@ -65,5 +77,8 @@ func (s duelSide) scorecard(runID string, start time.Time, seconds float64, outc
 		Seconds:  seconds,
 		Kills:    len(foe.names) - foe.alive(),
 		Deaths:   deaths,
+
+		DamageDealt: foe.taken(growth),
+		DamageTaken: s.taken(growth),
 	}
 }

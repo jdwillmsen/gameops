@@ -104,6 +104,10 @@ type Duel struct {
 	Policy TargetPolicy
 	Sink   ScoreSink
 	RunID  string
+	// Damage, when set, is asked for each duelist's health lost over a round;
+	// a card then carries DamageTaken from its own side and DamageDealt from
+	// the other's. Nil leaves both zero.
+	Damage DamageSource
 
 	// Spacing is how far each line stands from the floor centre.
 	Spacing   int
@@ -160,6 +164,21 @@ func (d *Duel) logf(format string, args ...any) {
 	if d.Out != nil {
 		fmt.Fprintf(d.Out, format+"\n", args...)
 	}
+}
+
+// damageTotals reads the duelists' totals, or nil when it cannot: a round is
+// scored without damage rather than held up by a slow unit.
+func (d *Duel) damageTotals(names []string) map[string]UnitDamage {
+	if d.Damage == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), damageReadTimeout)
+	defer cancel()
+	totals, err := readDamage(ctx, d.Damage, names)
+	if err != nil {
+		d.logf("arena: duel damage reading incomplete: %v", err)
+	}
+	return totals
 }
 
 func (d *Duel) pollEvery() time.Duration {
@@ -361,6 +380,7 @@ func (d *Duel) round(ctx context.Context, h *Director, round int, runStart time.
 	if err := CheckAlone(d.Console, d.CrewNames); err != nil {
 		return DuelRound{}, err
 	}
+	damageBefore := d.damageTotals(everyone)
 	if err := d.Policy.Go(); err != nil {
 		return DuelRound{}, err
 	}
@@ -395,8 +415,12 @@ func (d *Duel) round(ctx context.Context, h *Director, round int, runStart time.
 		} else if winner == SideBlue {
 			rd.WinnerTeam = d.teamOf(blue.names)
 		}
+		var growth map[string]UnitDamage
+		if outcome != DuelAborted && len(damageBefore) > 0 {
+			growth = damageGrowth(damageBefore, d.damageTotals(everyone))
+		}
 		for _, pair := range [][2]duelSide{{red, blue}, {blue, red}} {
-			card := pair[0].scorecard(d.RunID, startTS, secs, cardOutcome(pair[0]), pair[1])
+			card := pair[0].scorecard(d.RunID, startTS, secs, cardOutcome(pair[0]), pair[1], growth)
 			if rerr := d.Sink.Record(card); rerr != nil {
 				err = errors.Join(err, rerr)
 			}

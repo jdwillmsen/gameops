@@ -42,13 +42,17 @@ type FightMeta struct {
 // reads as a kill. Meta.Spawned caps the total where the summoned count is
 // known; where it is not, treat Kills as approximate.
 //
-// DamageDealt stays zero: no unit measures it yet. DamageTaken is filled from
-// Damage when one is set, and stays zero otherwise or when a reading fails, so
-// the trainer's score then rests on outcome, time, kills and deaths alone. The
-// console reports no health, which is why units are asked instead.
+// DamageTaken and DamageDealt are filled from Damage when one is set, as the
+// growth of each warrior's totals over the fight, and stay zero otherwise or
+// when a reading fails, so the trainer's score then rests on outcome, time,
+// kills and deaths alone. The console reports no health, which is why units
+// are asked instead. Dealt is the sum of the warriors' own counts, so several
+// warriors on one mob each credit a teammate's blow to themselves and the sum
+// is an upper bound.
 type Recorder struct {
 	Meta FightMeta
-	// Damage supplies each warrior's lifetime damage taken; nil means none.
+	// Damage supplies each warrior's lifetime damage; nil means none. A source
+	// that is also a TotalsSource supplies damage dealt too.
 	Damage DamageSource
 	// Logf, when set, hears why a damage reading was skipped.
 	Logf func(format string, args ...any)
@@ -56,7 +60,7 @@ type Recorder struct {
 	start  time.Time
 	kills  int
 	deaths map[string]int
-	before map[string]float64
+	before map[string]UnitDamage
 }
 
 // FightStart begins a fight, forgetting any events of an unfinished one.
@@ -68,32 +72,30 @@ func (r *Recorder) FightStart(at time.Time) {
 }
 
 // damageTotals reads the warriors' totals, or nil when it cannot.
-func (r *Recorder) damageTotals() map[string]float64 {
+func (r *Recorder) damageTotals() map[string]UnitDamage {
 	if r.Damage == nil || len(r.Meta.Warriors) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), damageReadTimeout)
 	defer cancel()
-	totals, err := r.Damage.Taken(ctx, r.Meta.Warriors)
+	totals, err := readDamage(ctx, r.Damage, r.Meta.Warriors)
 	if err != nil && r.Logf != nil {
 		r.Logf("damage reading incomplete: %v", err)
 	}
 	return totals
 }
 
-// damageTaken is what the warriors lost since FightStart. A unit missing from
-// either reading is left out, and one whose total fell restarted mid-fight, so
-// its loss is unknown rather than negative.
-func (r *Recorder) damageTaken() float64 {
+// damageSince is what the warriors lost and dealt since FightStart. A unit
+// missing from either reading is left out, and one whose total fell restarted
+// mid-fight, so that count is unknown rather than negative.
+func (r *Recorder) damageSince() UnitDamage {
+	var sum UnitDamage
 	if len(r.before) == 0 {
-		return 0
+		return sum
 	}
-	after := r.damageTotals()
-	var sum float64
-	for name, was := range r.before {
-		if now, ok := after[name]; ok && now > was {
-			sum += now - was
-		}
+	for _, g := range damageGrowth(r.before, r.damageTotals()) {
+		sum.Taken += g.Taken
+		sum.Dealt += g.Dealt
 	}
 	return sum
 }
@@ -125,6 +127,7 @@ func (r *Recorder) Finish(outcome string, seconds float64) tactics.Scorecard {
 	if !r.start.IsZero() {
 		ts = r.start.UTC().Format(time.RFC3339)
 	}
+	dmg := r.damageSince()
 	return tactics.Scorecard{
 		TS:          ts,
 		RunID:       r.Meta.RunID,
@@ -137,7 +140,8 @@ func (r *Recorder) Finish(outcome string, seconds float64) tactics.Scorecard {
 		Seconds:     seconds,
 		Kills:       r.cappedKills(),
 		Deaths:      deaths,
-		DamageTaken: r.damageTaken(),
+		DamageDealt: dmg.Dealt,
+		DamageTaken: dmg.Taken,
 		Seed:        r.Meta.Seed,
 	}
 }
