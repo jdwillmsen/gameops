@@ -96,3 +96,9 @@ export const CENSUS_SPECIES = ["tiger", "cheetah", "lion", "black_leopard", "bro
 export function formatCensus(counts) {
   return `gameops:census ${CENSUS_SPECIES.map((s) => `${s}=${counts[`gameops:${s}`] ?? 0}`).join(" ")}`;
 }
+
+// Test hook output; an amplifier of 0 is Strength I, so absence must read "none", not 0.
+export function formatEffects(name, amplifiers) {
+  const show = (id) => amplifiers[id] ?? "none";
+  return `gameops:effects ${name} strength=${show("strength")} resistance=${show("resistance")}`;
+}

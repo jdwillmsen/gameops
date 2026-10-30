@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale,
-  auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize, formatCensus,
+  auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize, formatCensus, formatEffects,
 } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
@@ -178,4 +178,10 @@ test("formatCensus lists the six species in a fixed order, missing ones as zero"
     formatCensus({ "gameops:tiger": 3, "gameops:hyena": 2 }),
     "gameops:census tiger=3 cheetah=0 lion=0 black_leopard=0 brown_bear=0 hyena=2",
   );
+});
+
+test("formatEffects names the player and shows none for an absent effect", () => {
+  assert.equal(formatEffects("bot", { strength: 0 }), "gameops:effects bot strength=0 resistance=none");
+  assert.equal(formatEffects("bot", {}), "gameops:effects bot strength=none resistance=none");
+  assert.equal(formatEffects("bot", { strength: 1, resistance: 0 }), "gameops:effects bot strength=1 resistance=0");
 });

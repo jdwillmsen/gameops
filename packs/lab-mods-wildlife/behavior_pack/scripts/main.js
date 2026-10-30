@@ -1,7 +1,7 @@
 import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server";
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
-  packStrengthAmplifier, packSize, formatCensus, CENSUS_SPECIES,
+  packStrengthAmplifier, packSize, formatCensus, formatEffects, CENSUS_SPECIES,
 } from "./abilities.js";
 
 const SPRINT = {
@@ -34,6 +34,8 @@ system.run(() => {
 // Lets a headless smoke test tell "script never loaded" from "script loaded, nothing to do".
 console.warn("gameops:wildlife script loaded");
 const SITTING_PROPERTY = "gameops:sitting";
+// The owner is saved on the entity when taming happens because the tameable component is removed with the wild group.
+const OWNER_PROPERTY = "gameops:owner";
 const DIMENSIONS = ["overworld", "nether", "the_end"];
 const STEP = 5;
 const TAME_SEARCH_RADIUS = 64;
@@ -76,18 +78,34 @@ system.runInterval(() => {
   sprintState = pruneStale(sprintState, tick, STATE_GRACE_TICKS);
 }, STEP);
 
+function isTamed(entity) {
+  return entity.hasComponent("minecraft:is_tamed");
+}
+
+// minecraft:tameable only exists in the wild group, so a tamed animal answers undefined to it; the
+// is_tamed marker is in the tamed group, which every pet tamed before the owner was stored also has.
+// Such an older pet has no stored owner, so only its self and pet auras work until it is tamed again.
 function wildlifeData(entity) {
-  const tameable = entity.getComponent("minecraft:tameable");
   return {
     id: entity.id,
     pos: entity.location,
-    owner: tameable?.tamedToPlayerId,
-    tamed: tameable?.isTamed === true,
+    owner: entity.getDynamicProperty(OWNER_PROPERTY),
+    tamed: isTamed(entity),
     sitting: entity.getProperty(SITTING_PROPERTY) === true,
     type: "wildlife",
     ref: entity,
   };
 }
+
+// The tameable component still answers during the tame event, before the wild group is removed.
+world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
+  try {
+    const ownerId = event.entity.getComponent("minecraft:tameable")?.tamedToPlayerId;
+    if (ownerId) event.entity.setDynamicProperty(OWNER_PROPERTY, ownerId);
+  } catch {
+    // An entity that unloaded between the event and this callback has nothing to record.
+  }
+}, { eventTypes: ["gameops:on_tamed"] });
 
 function nearbyWildlife(source, range, family = "gameops_wildlife") {
   return source.dimension
@@ -139,13 +157,20 @@ system.runInterval(() => {
 }, STEP);
 
 function tameNearest(player) {
+  // Filtered before ranking so unrelated entities cannot crowd the animal out of a fixed-size result.
   const candidates = player.dimension.getEntities({
     location: player.location,
     maxDistance: TAME_SEARCH_RADIUS,
-    closest: 20,
+    families: ["gameops_wildlife"],
   });
+  const distance = (e) => {
+    const l = e.location;
+    const p = player.location;
+    return (l.x - p.x) ** 2 + (l.y - p.y) ** 2 + (l.z - p.z) ** 2;
+  };
+  candidates.sort((a, b) => distance(a) - distance(b));
   for (const entity of candidates) {
-    if (!entity.typeId.startsWith("gameops:")) continue;
+    if (isTamed(entity)) continue;
     const tameable = entity.getComponent("minecraft:tameable");
     if (!tameable) continue;
     return tameable.tame(player);
@@ -166,6 +191,14 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
       }
     }
     console.warn(formatCensus(counts));
+  } else if (event.id === "gameops:effects") {
+    const player = world.getPlayers({ name: event.message.trim() })[0];
+    const amplifiers = {};
+    for (const id of ["strength", "resistance"]) {
+      const effect = player?.getEffect(id);
+      if (effect) amplifiers[id] = effect.amplifier;
+    }
+    console.warn(formatEffects(event.message.trim(), amplifiers));
   } else if (event.id === "gameops:perf") {
     const start = system.currentTick;
     const t0 = Date.now();

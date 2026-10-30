@@ -45,7 +45,9 @@ Y=-60 # surface of the flat world
 
 stage=$(mktemp -d)
 finished=0
+bot_pid=
 cleanup() {
+  [[ -n $bot_pid ]] && kill "$bot_pid" 2>/dev/null || true
   # An early exit (a console command that never went through) still owes the tally.
   if ((finished == 0)); then echo "RESULT count=$COUNT pass=$pass fail=$fail (aborted)"; fi
   "$preview" down >/dev/null 2>&1 || true
@@ -168,6 +170,7 @@ area 200 0 hunt
 area 400 0 named
 area 600 0 tamed
 area 800 0 hyenas
+area 1000 0 aura
 sleep 10
 stats before-summon
 base=$(perf || echo "")
@@ -242,6 +245,56 @@ else
     alive "@e[type=pig]" && why+=" (a pig exists elsewhere)"
     alive "@e[type=gameops:lion,x=610,y=$Y,z=10,r=40]" && why+=" (lion still near)" || why+=" (lion gone too)"
     bad tamed-lion-spares-pig "$why"
+  fi
+fi
+
+# e2. aura: a lion tamed by a real joined player gives that player Strength. Only a player
+# can own an animal, so this is the one check that exercises the stored owner.
+effects_of() {
+  local t line
+  t=$(now)
+  run scriptevent gameops:effects smokebot
+  sleep 2
+  line=$(logs_since "$t" | grep -o "gameops:effects smokebot strength=[a-z0-9]* resistance=[a-z0-9]*" || true)
+  echo "${line%%$'\n'*}"
+}
+if ! command -v go >/dev/null 2>&1; then
+  echo "SKIP aura-lion-buffs-owner: go is not installed, so no player can be joined"
+else
+  if (cd "$repo" && go build -o "$stage/crew" ./minecraft/crew/cmd/crew) 2>"$stage/build.err"; then
+    MC_HOST=127.0.0.1 MC_PORT=$LAB_PREVIEW_PORT MC_USERNAME=smokebot MC_OFFLINE=true IDLE_WANDER=false \
+      STATUS_ADDR=127.0.0.1:18097 "$stage/crew" >"$stage/crew.log" 2>&1 &
+    bot_pid=$!
+    joined=0
+    for ((i = 0; i < 60; i++)); do
+      log_has "$started" 'Player Spawned: smokebot' && { joined=1; break; }
+      sleep 1
+    done
+    if ((joined == 0)); then
+      bad aura-lion-buffs-owner "smokebot never spawned; crew log: $(tail -2 "$stage/crew.log" | tr '\n' '|')"
+    else
+      run tp smokebot 1005 "$Y" 5
+      sleep 2
+      run summon gameops:lion 1008 "$Y" 8
+      sleep 2
+      before=$(effects_of)
+      run execute as smokebot run scriptevent gameops:tame
+      got=
+      for ((i = 0; i < 15; i++)); do
+        got=$(effects_of)
+        [[ $got == *"strength=0"* ]] && break
+        sleep 2
+      done
+      if [[ $before != *"strength=none"* ]]; then
+        bad aura-lion-buffs-owner "setup failed: player already had Strength before taming (${before:-no effects line})"
+      elif [[ $got == *"strength=0"* ]]; then
+        ok aura-lion-buffs-owner
+      else
+        bad aura-lion-buffs-owner "no Strength within 30 s of taming (last: ${got:-no effects line})"
+      fi
+    fi
+  else
+    bad aura-lion-buffs-owner "crew bot did not build: $(tail -2 "$stage/build.err" | tr '\n' '|')"
   fi
 fi
 
