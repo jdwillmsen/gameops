@@ -150,6 +150,21 @@ func (a *Actuator) UseItem(slot int, held belief.Item) error {
 	}})
 }
 
+// UseRocket lights the firework rocket in a hotbar slot. Used in a glide it
+// pushes the unit along its look for a second; anywhere else the server
+// spends the rocket for nothing, and the model adds no push.
+func (a *Actuator) UseRocket(slot int, held belief.Item) error {
+	if err := a.UseItem(slot, held); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pose.gliding {
+		a.pose.boost = rocketBoostTicks
+	}
+	return nil
+}
+
 // ReleaseItem lets go of the use key. After a finished meal it ends the use;
 // before one it cancels the meal.
 func (a *Actuator) ReleaseItem(slot int, held belief.Item) error {

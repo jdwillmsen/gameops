@@ -68,6 +68,11 @@ type Input struct {
 	StartUsing bool
 	// Sneak holds the sneak key down for this tick.
 	Sneak bool
+	// Glide asks for an elytra glide: held in the air it starts one, held
+	// while gliding it carries on, and dropped it ends it. Forward and Jump
+	// are ignored while it flies, and the look steers. The caller must have
+	// the elytra on; the model cannot see it.
+	Glide bool
 }
 
 // Actuator is safe to call from a skill goroutine while Apply runs on the
@@ -217,7 +222,17 @@ func (a *Actuator) Tick(in Input) error {
 
 	p := a.pose
 	p.Yaw, p.Pitch = in.Yaw, in.Pitch
-	next, step := p.advance(in.Forward, in.Jump, in.Sprint, a.solid)
+	var next Pose
+	var step stepInfo
+	if in.Glide && (p.gliding || !p.OnGround) && WaterDepth(a.solid, p.Feet) == 0 {
+		next, step = p.glide(a.solid)
+	} else {
+		if p.gliding {
+			p = p.endGlide()
+		}
+		next, step = p.advance(in.Forward, in.Jump, in.Sprint, a.solid)
+	}
+	wasGliding := a.pose.gliding
 
 	flags := protocol.NewInputFlags(packet.InputFlagCount)
 	flags.Set(packet.InputFlagBlockBreakingDelayEnabled)
@@ -251,6 +266,15 @@ func (a *Actuator) Tick(in Input) error {
 		flags.Set(packet.InputFlagJumping)
 		flags.Set(packet.InputFlagJumpDown)
 		flags.Set(packet.InputFlagWantUp)
+	}
+	if next.gliding && next.glideAge <= glideStartTicks {
+		flags.Set(packet.InputFlagJumping)
+		flags.Set(packet.InputFlagJumpDown)
+		flags.Set(packet.InputFlagStartJumping)
+		flags.Set(packet.InputFlagStartGliding)
+	}
+	if wasGliding && !next.gliding {
+		flags.Set(packet.InputFlagStopGliding)
 	}
 	if next.OnGround {
 		flags.Set(packet.InputFlagVerticalCollision)
@@ -356,8 +380,15 @@ func (a *Actuator) Apply(pk packet.Packet) {
 			// mind; forgetting it would leave a stop unsent.
 			sprinting:  a.pose.sprinting,
 			sprintHalt: a.pose.sprintHalt,
+			// The glide goes on through a correction, on the velocity the
+			// server says it has.
+			gliding:  a.pose.gliding,
+			glideAge: a.pose.glideAge,
+			boost:    a.pose.boost,
+			glideV:   p.Delta,
 		}
 		switch {
+		case a.pose.gliding:
 		case p.OnGround:
 		case WaterDepth(a.solid, a.pose.Feet) > 0:
 			// The swimming model already folds drag and sinking into a step.
@@ -384,6 +415,7 @@ func (a *Actuator) Apply(pk packet.Packet) {
 		}
 	case *packet.Respawn, *packet.ChangeDimension:
 		a.pose.sprinting, a.pose.sprintHalt = false, false
+		a.pose.gliding, a.pose.boost = false, 0
 	default:
 		a.applyContainerLocked(pk)
 	}

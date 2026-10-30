@@ -34,6 +34,9 @@ type Actuator interface {
 	SelectHotbar(slot int, item belief.Item) error
 	Attack(target uint64, slot int, held belief.Item) error
 	UseItem(slot int, held belief.Item) error
+	// UseRocket lights a firework rocket, which pushes a gliding unit along
+	// its look.
+	UseRocket(slot int, held belief.Item) error
 	ReleaseItem(slot int, held belief.Item) error
 	PlaceOnTop(against protocol.BlockPos, hotbar int, held belief.Item, hash uint32) error
 	// PlaceBlock places one of item at the target; it reports ErrItemMoving
