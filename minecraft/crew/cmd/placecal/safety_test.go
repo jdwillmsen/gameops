@@ -256,26 +256,51 @@ func TestCheckProbeOriginRefusesTheWholePlatform(t *testing.T) {
 	}
 }
 
-func TestCheckProbeEmptyReachesTheWholePlatform(t *testing.T) {
+func TestCheckProbeEmptyFindsAThinStructureBetweenOldSamplePoints(t *testing.T) {
 	b := bay{ox: 1000, f: 220, oz: 1000}
-	con := &fakeCon{reply: func(string) (string, error) { return "Successfully found the block", nil }}
-	if err := checkProbeEmpty(context.Background(), &safeConsole{c: con}, b); err != nil {
-		t.Fatal(err)
-	}
-	for _, want := range []string{
-		"testforblock 990 220 990 air", "testforblock 1010 233 1010 air", "testforblock 990 221 1010 air",
-	} {
-		if !con.has(want) {
-			t.Errorf("never sampled %q", want)
-		}
-	}
-	busy := &safeConsole{c: &fakeCon{reply: func(c string) (string, error) {
-		if strings.Contains(c, "testforblock 1010 220 990 ") {
+	// One column at (+1, +3, +1): the old 5-cell sample grid never asked.
+	thin := fmt.Sprintf("testforblock %d %d %d ", 1001, 223, 1001)
+	con := &fakeCon{reply: func(c string) (string, error) {
+		if strings.HasPrefix(c, thin) {
 			return "The block is Stone (expected: Air)", nil
 		}
 		return "Successfully found the block", nil
-	}}}
-	if err := checkProbeEmpty(context.Background(), busy, b); err == nil || !strings.Contains(err.Error(), "not empty") {
-		t.Errorf("a block at the platform's corner passed: %v", err)
+	}}
+	err := checkProbeEmpty(context.Background(), &safeConsole{c: con}, b)
+	if err == nil || !strings.Contains(err.Error(), "probe platform") || !strings.Contains(err.Error(), "1001,223,1001") {
+		t.Fatalf("thin structure missed: %v", err)
+	}
+	empty := &safeConsole{c: &fakeCon{reply: func(string) (string, error) { return "Successfully found the block", nil }}}
+	if err := checkProbeEmpty(context.Background(), empty, b); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildProbePlatformTouchesNothingWhenAThinStructureIsThere(t *testing.T) {
+	b := bay{ox: 1000, f: 220, oz: 1000}
+	con := &fakeCon{reply: func(c string) (string, error) {
+		if strings.HasPrefix(c, "testforblock 1001 223 1001 ") {
+			return "The block is Stone (expected: Air)", nil
+		}
+		return "Successfully found the block", nil
+	}}
+	built, err := buildProbePlatform(context.Background(), &safeConsole{c: con}, b)
+	if err == nil || built {
+		t.Fatalf("built=%v err=%v", built, err)
+	}
+	for _, c := range con.cmds {
+		if strings.HasPrefix(c, "fill") || strings.HasPrefix(c, "setblock") {
+			t.Errorf("wrote to the world: %q", c)
+		}
+	}
+	clean := &fakeCon{reply: func(c string) (string, error) {
+		if strings.HasPrefix(c, "fill") {
+			return "441 blocks filled", nil
+		}
+		return "Successfully found the block", nil
+	}}
+	built, err = buildProbePlatform(context.Background(), &safeConsole{c: clean}, b)
+	if err != nil || !built || !clean.has("fill 990 220 990 1010 220 1010 stone") {
+		t.Errorf("clean platform: built=%v err=%v", built, err)
 	}
 }
