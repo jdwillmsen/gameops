@@ -11,7 +11,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/bot ./minecraft/afkbot/cmd/bot
 
-# gophertunnel's RakNet implementation is pure Go, so the only runtime needs
+# gophertunnel's RakNet and NetherNet (pion WebRTC) implementations are pure Go, so the only runtime needs
 # are the binary and TLS roots for the Xbox Live device-code login.
 # distroless/static bundles CA certs and a non-root user without a shell.
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab

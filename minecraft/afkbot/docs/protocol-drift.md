@@ -17,6 +17,9 @@ On a release that genuinely changes the schema, this trades a clean pre-login
 kick for a parse failure mid-join — the same reconnect loop either way, with
 the cause named in the log rather than inferred.
 
+Over NetherNet there is no unconnected ping; the bot does `GET /v1/join` on the
+signaling URL instead, which reports the same protocol number and version.
+
 A ping failure is not fatal: the bot falls back to its compiled-in number,
 which is what it would have used anyway. The ping is bounded at 5 seconds, so
 a server that is mid-restart costs one timeout rather than a hung connect.
