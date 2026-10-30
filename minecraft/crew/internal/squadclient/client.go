@@ -6,7 +6,7 @@
 //
 // The engine is injected by the agent's wiring and its interface lives
 // there; this package's methods are shaped to satisfy it. Reads (Leader,
-// Orders, Member, Down, Start, FetchProfile) may be called from any
+// Orders, Member, Down, Start, FetchProfile, FetchDuel) may be called from any
 // goroutine; writes happen only on the client's own.
 package squadclient
 
@@ -53,6 +53,10 @@ const (
 	// failures: a flapping crew-control must not flip a unit's tuning
 	// mid-fight, but a long outage must not freeze it for ever either.
 	profileStale = 5 * time.Minute
+	// A duel is read far more often than a profile and trusted far less:
+	// the cache is short and has no stale window, because a unit must
+	// stop fighting the moment the squad stops saying so.
+	duelEvery = 3 * time.Second
 
 	// Far above any real hello, status or call-out.
 	maxPostBytes  = 1 << 10
@@ -89,6 +93,7 @@ type Client struct {
 	// The profile's fetch pace and its stale window; tests shorten them.
 	profileEvery time.Duration
 	profileStale time.Duration
+	duelEvery    time.Duration
 
 	callouts chan squadmsg.Callout
 
@@ -107,6 +112,8 @@ type Client struct {
 	// apply, and read before the profile lock is taken, so the two locks
 	// never nest.
 	profileSeq int64
+	// duelSeq is the duel revision the last poll named, kept like profileSeq.
+	duelSeq int64
 	// lastOK is when the last poll answered, news or not.
 	lastOK time.Time
 
@@ -120,6 +127,16 @@ type Client struct {
 	profileTry    time.Time // the last attempt, answer or error
 	profileFrom   int64     // the stream revision the cached answer speaks for
 	profileTrySeq int64     // the stream revision the last attempt spoke for
+
+	// The squad's duel state, fetched on demand under its own lock for the
+	// same reason; see duel.go.
+	duelMu     sync.Mutex
+	duel       Duel
+	hasDuel    bool
+	duelAt     time.Time // the last answer, hit or miss
+	duelTry    time.Time // the last attempt, answer or error
+	duelFrom   int64     // the stream revision the cached answer speaks for
+	duelTrySeq int64     // the stream revision the last attempt spoke for
 }
 
 // New builds a client for one unit of one squad. role is the part the unit
@@ -135,6 +152,7 @@ func New(base *url.URL, unit, squad, name string, role squadmsg.Role, token stri
 		helloEvery:   helloEvery,
 		profileEvery: profileEvery,
 		profileStale: profileStale,
+		duelEvery:    duelEvery,
 		callouts:     make(chan squadmsg.Callout, 16),
 	}
 }
@@ -258,6 +276,7 @@ type pollAnswer struct {
 	Cursor     int64              `json:"cursor"`
 	Rev        int64              `json:"rev"`
 	ProfileSeq int64              `json:"profileSeq"`
+	DuelSeq    int64              `json:"duelSeq"`
 	Leader     *wireLeader        `json:"leader,omitempty"`
 	Members    []squadmsg.Member  `json:"members"`
 	Start      *squadmsg.Pos      `json:"start,omitempty"`
@@ -374,6 +393,7 @@ func (c *Client) apply(ans *pollAnswer) {
 	// heard without the unit asking; FetchProfile compares it with the
 	// revision its cache answers for.
 	c.profileSeq = ans.ProfileSeq
+	c.duelSeq = ans.DuelSeq
 	c.mu.Unlock()
 }
 
