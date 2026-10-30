@@ -220,3 +220,19 @@ func TestParseAcceptsTheOldStringTacticAndTheList(t *testing.T) {
 		t.Errorf("marshalled %s, want arrays", out)
 	}
 }
+
+func TestScoreDamageTakenCannotSinkAWinBelowATimeout(t *testing.T) {
+	worstWin := Scorecard{Outcome: OutcomeWin, DamageTaken: 100000}
+	bestTimeout := Scorecard{Outcome: OutcomeTimeout, DamageDealt: 1000}
+	if worstWin.Score() <= bestTimeout.Score() {
+		t.Errorf("worst win %v does not beat the best clean timeout %v", worstWin.Score(), bestTimeout.Score())
+	}
+	timeout := Scorecard{Outcome: OutcomeTimeout, DamageTaken: 100000}
+	loss := Scorecard{Outcome: OutcomeLoss, DamageTaken: 100000, DamageDealt: 1000}
+	if timeout.Score() <= loss.Score() {
+		t.Errorf("timeout %v does not beat loss %v at equal damage", timeout.Score(), loss.Score())
+	}
+	if a, b := (Scorecard{Outcome: OutcomeWin, DamageTaken: 10}), (Scorecard{Outcome: OutcomeWin, DamageTaken: 20}); a.Score() <= b.Score() {
+		t.Errorf("below the cap more damage must still score lower: %v vs %v", a.Score(), b.Score())
+	}
+}

@@ -53,6 +53,12 @@ const (
 	// are told apart by who bled less. At the old 0.1 a bar was worth 2 points,
 	// less than a second of speed bonus, so damage barely steered the trainer.
 	damageTakenWeight = 0.3
+	// The penalty is summed over the whole squad, so unbounded it could drag a
+	// hard-won fight below a clean timeout. A win is worth at least 100 and the
+	// best a timeout reaches is -20 + maxDealtCredit = -5, so capping the
+	// penalty at 60 (200 HP, ten bars) keeps the cheapest win at 40 or more,
+	// above any timeout, while damage still orders everything below the cap.
+	maxDamageTakenPenalty = 60.0
 	// Damage dealt is progress, so it is credited only to a fight that was not
 	// won: a won fight dealt the mobs' whole health, which says nothing about
 	// the profile, and a squad's sum double-counts a teammate's blows. A lost
@@ -88,7 +94,7 @@ func (s Scorecard) Score() float64 {
 	}
 	v += float64(s.Kills) * 2
 	v -= float64(s.TotalDeaths()) * 15
-	v -= s.DamageTaken * damageTakenWeight
+	v -= min(max(s.DamageTaken, 0)*damageTakenWeight, maxDamageTakenPenalty)
 	return v
 }
 
