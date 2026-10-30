@@ -104,6 +104,13 @@ type squadState struct {
 	// their claims.
 	profile    *profileWire
 	profileSeq int64
+
+	// duel is the squad's current duel state, set by the duel route on a
+	// lab-marked squad; duelSeq versions it for the unit polls and duelAt
+	// lets it lapse.
+	duel    *duelWire
+	duelSeq int64
+	duelAt  time.Time
 }
 
 // startTTL is how long a posted start point stays in the squad's answers.
