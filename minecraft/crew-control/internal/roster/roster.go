@@ -49,6 +49,13 @@ func (r Roster) Has(id string) bool {
 	return ok
 }
 
+// NameOf is the in-game name a unit plays under, which is how a duel names
+// the units it sets against each other.
+func (r Roster) NameOf(id string) (string, bool) {
+	u, ok := r.Get(id)
+	return u.Name, ok
+}
+
 func (r Roster) Get(id string) (Unit, bool) {
 	i, ok := r.byID[id]
 	if !ok {

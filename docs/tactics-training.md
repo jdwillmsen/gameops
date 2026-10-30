@@ -155,6 +155,14 @@ forgets a `go` nobody renewed after 45 seconds, so a director that died leaves
 the units hunting for under a minute. One lost renewal is tolerated; two in a
 row abort the round and withdraw the signal.
 
+A duel may name only crew units. The squad service refuses a `PUT` whose
+fighters are not members of that lab squad, or whose enemies are not members of
+some lab squad, by the in-game name the console's roster gives each unit (a
+console whose roster cannot name its units refuses every duel that names
+anyone). It serves the current lab member names with the duel as `crew`, and a
+unit hunts an enemy only when the name is both an enemy and in `crew`, so a
+human's name in a duel is never a target.
+
 `arenadirector duel` takes `--squad-url`, `--red-squad` and `--blue-squad`
 (all three or none; lab ids only, two different squads, the `--red` units in the
 first and the `--blue` units in the second). Without them it only tags and

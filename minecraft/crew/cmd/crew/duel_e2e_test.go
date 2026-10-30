@@ -176,7 +176,7 @@ func fightFor(t *testing.T, units []*duelUnit, ticks int) {
 func TestDuelEndToEndOnRealSquadsAndRealLives(t *testing.T) {
 	store := squad.NewStore()
 	mux := http.NewServeMux()
-	squad.Routes(mux, store, e2eUnitSet{"crew-r": true, "crew-b": true}, duelToken)
+	squad.Routes(mux, store, e2eUnitSet{"crew-r": "Rusty", "crew-b": "Tinder", "crew-a": "Agate"}, duelToken)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	base, _ := url.Parse(srv.URL)
@@ -197,7 +197,15 @@ func TestDuelEndToEndOnRealSquadsAndRealLives(t *testing.T) {
 		startDuelUnit(t, base, rusty, "crew-r", "lab-red", dir),
 		startDuelUnit(t, base, tinder, "crew-b", "lab-blue", dir),
 	}
-	waitFor(t, func() bool { return store.Has("lab-red") && store.Has("lab-blue") })
+	// Agate is Tinder's squad-mate; the squad service only lets a duel name
+	// units it has heard from.
+	agate := squadclient.New(base, "crew-a", "lab-blue", "", squadmsg.RoleStriker, duelToken, nopLog{})
+	agateCtx, stopAgate := context.WithCancel(context.Background())
+	t.Cleanup(stopAgate)
+	go agate.Run(agateCtx)
+	waitFor(t, func() bool {
+		return store.Has("lab-red") && store.Has("lab-blue") && store.Member("lab-blue", "crew-a")
+	})
 
 	policy, err := arena.NewSquadPolicy(base, "lab-red", "lab-blue", duelToken,
 		[]string{"Rusty"}, []string{"Tinder", "Agate"}, nil)
@@ -280,6 +288,9 @@ func TestDuelEndToEndOnRealSquadsAndRealLives(t *testing.T) {
 	}
 }
 
-type e2eUnitSet map[string]bool
+// e2eUnitSet is the roster: unit id to the in-game name it plays under.
+type e2eUnitSet map[string]string
 
-func (u e2eUnitSet) Has(id string) bool { return u[id] }
+func (u e2eUnitSet) Has(id string) bool { _, ok := u[id]; return ok }
+
+func (u e2eUnitSet) NameOf(id string) (string, bool) { n, ok := u[id]; return n, ok }

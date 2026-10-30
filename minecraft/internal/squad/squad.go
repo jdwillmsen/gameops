@@ -199,6 +199,9 @@ type Store struct {
 	squads  map[string]*squadState
 	unitsOf map[string]string // unit id -> squad id it currently claimed
 	bats    map[string]string // battalion id -> display name
+	// nameOf gives a unit id's in-game name, set once by Routes from the
+	// roster. Nil means duels cannot name anyone.
+	nameOf func(string) (string, bool)
 }
 
 func NewStore() *Store {

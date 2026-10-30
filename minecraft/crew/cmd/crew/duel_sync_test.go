@@ -53,7 +53,7 @@ func duelConfig(dir string) config.Config {
 
 func goDuel(eliminated ...string) squadclient.Duel {
 	return squadclient.Duel{State: squadclient.DuelGo, Round: "r1", Fighters: []string{"Rusty"},
-		Enemies: []string{"Tinder", "Agate"}, Eliminated: eliminated}
+		Enemies: []string{"Tinder", "Agate"}, Eliminated: eliminated, Crew: []string{"Rusty", "Tinder", "Agate"}}
 }
 
 func mayTarget(t *testing.T, dst *fakePvPTarget, player string) bool {
@@ -232,5 +232,38 @@ func TestDuelSyncRunStopsWithItsContext(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("run did not stop with its context")
+	}
+}
+
+// The squad service vouches for the crew names; an enemy it does not vouch for
+// is never hunted, however the duel came to name it. Closed by default: a
+// server that sends no crew list makes every enemy a stranger.
+func TestOnlyCrewUnitsMayBeTargetedWhateverTheDuelNames(t *testing.T) {
+	src, dst := &fakeDuelSource{}, &fakePvPTarget{}
+	ds := newDuelSync(duelConfig(controlDir(t, true)), src, dst, nopLog{})
+	duel := goDuel()
+	duel.Enemies = []string{"Tinder", "Steve99"}
+	src.set(duel, true)
+	ds.step(context.Background())
+	if !mayTarget(t, dst, "Tinder") {
+		t.Error("a crew enemy was refused")
+	}
+	if mayTarget(t, dst, "Steve99") {
+		t.Error("a human named as an enemy may be targeted")
+	}
+
+	duel.Crew = nil
+	src.set(duel, true)
+	ds.step(context.Background())
+	if mayTarget(t, dst, "Tinder") {
+		t.Error("with no crew list from the squad, an enemy may still be targeted")
+	}
+
+	duel.Crew = []string{"Rusty", "Tinder"}
+	duel.Eliminated = []string{"Tinder"}
+	src.set(duel, true)
+	ds.step(context.Background())
+	if mayTarget(t, dst, "Tinder") {
+		t.Error("an eliminated crew enemy may still be targeted")
 	}
 }

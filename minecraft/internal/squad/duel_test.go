@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -167,6 +169,12 @@ func TestDuelChangeWakesThePoll(t *testing.T) {
 	}
 }
 
+func namedStore() (*Store, *fakeClock) {
+	st, cl := newSquadRig()
+	st.nameOf = testUnits{"crew-18": true, "crew-19": true, "crew-20": true}.NameOf
+	return st, cl
+}
+
 const (
 	redUnit  = "crew-18"
 	blueUnit = "crew-19"
@@ -186,7 +194,7 @@ func mustSetDuel(t *testing.T, st *Store, id string, d duelWire) bool {
 // A duel nobody renews lapses within the TTL: a director that died, or whose
 // withdrawal failed, leaves the units hunting for under a minute.
 func TestDuelLapsesWithoutAHeartbeat(t *testing.T) {
-	st, cl := newSquadRig()
+	st, cl := namedStore()
 	cl.hello(st, redUnit, "lab-red", "striker")
 	cl.hello(st, blueUnit, "lab-blue", "striker")
 	mustSetDuel(t, st, "lab-red", testDuel)
@@ -210,7 +218,7 @@ func TestDuelLapsesWithoutAHeartbeat(t *testing.T) {
 }
 
 func TestDuelHeartbeatKeepsItAliveWithoutBumpingTheRevision(t *testing.T) {
-	st, cl := newSquadRig()
+	st, cl := namedStore()
 	cl.hello(st, redUnit, "lab-red", "striker")
 	cl.hello(st, blueUnit, "lab-blue", "striker")
 	if !mustSetDuel(t, st, "lab-red", testDuel) {
@@ -241,7 +249,7 @@ func TestDuelHeartbeatKeepsItAliveWithoutBumpingTheRevision(t *testing.T) {
 // A beat that arrives after the duel lapsed is a new duel: units that already
 // read "no fight" must be woken to refetch.
 func TestDuelBeatAfterALapseIsAFreshDuel(t *testing.T) {
-	st, cl := newSquadRig()
+	st, cl := namedStore()
 	cl.hello(st, redUnit, "lab-red", "striker")
 	cl.hello(st, blueUnit, "lab-blue", "striker")
 	mustSetDuel(t, st, "lab-red", testDuel)
@@ -289,7 +297,7 @@ func TestDuelServedUntilTheTTLWithoutBeats(t *testing.T) {
 }
 
 func TestDuelDiesWithTheSquad(t *testing.T) {
-	st, cl := newSquadRig()
+	st, cl := namedStore()
 	cl.hello(st, "crew-18", "alpha", "vanguard")
 	if _, err := st.SetDuel("alpha", duelWire{State: duelIdle}); err == nil {
 		t.Error("a production squad took a duel at the store")
@@ -305,5 +313,122 @@ func TestDuelDiesWithTheSquad(t *testing.T) {
 	}
 	if _, err := st.SetDuel("lab-/../fwb", duelWire{State: duelIdle}); err == nil {
 		t.Error("a path-shaped id took a duel")
+	}
+}
+
+// Anyone holding the shared unit token must not be able to point a unit at a
+// human: both sides of a duel have to be lab squad members the roster names.
+func TestDuelNamesMustBeLabSquadMembers(t *testing.T) {
+	r := duelRig(t)
+	put := func(body string) int {
+		return r.do(t, "PUT", "/v1/squads/lab-red/duel", body, nil).StatusCode
+	}
+	tests := []struct {
+		name string
+		body string
+		want int
+	}{
+		{"crew names across two lab squads", testGo, http.StatusNoContent},
+		{"a human among the enemies", `{"state":"go","fighters":["Rusty"],"enemies":["Steve"]}`, http.StatusForbidden},
+		{"a human beside a crew enemy", `{"state":"go","fighters":["Rusty"],"enemies":["Slate","Steve"]}`, http.StatusForbidden},
+		{"a human among the fighters", `{"state":"go","fighters":["Steve"],"enemies":["Slate"]}`, http.StatusForbidden},
+		{"a fighter from another squad", `{"state":"go","fighters":["Slate"],"enemies":["Tinder"]}`, http.StatusForbidden},
+		{"a case-shifted name", `{"state":"go","fighters":["Rusty"],"enemies":["slate"]}`, http.StatusForbidden},
+		{"a unit id is no name", `{"state":"go","fighters":["Rusty"],"enemies":["crew-19"]}`, http.StatusForbidden},
+		{"armed names a human too", `{"state":"armed","fighters":["Rusty"],"enemies":["Steve"]}`, http.StatusForbidden},
+		{"idle names nobody", `{"state":"idle"}`, http.StatusNoContent},
+		{"over names nobody", `{"state":"over","round":"r1"}`, http.StatusNoContent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := put(tt.body); got != tt.want {
+				t.Errorf("status %d, want %d", got, tt.want)
+			}
+		})
+	}
+	// The refused PUTs left the accepted one standing, not a human target.
+	if body := readBody(t, r.do(t, "GET", "/v1/squads/lab-red/duel", "", nil)); strings.Contains(body, "Steve") {
+		t.Errorf("a human reached the served duel: %s", body)
+	}
+}
+
+func TestDuelEnemiesOutsideLabSquadsAreRefused(t *testing.T) {
+	r := newRig(t, true)
+	r.hello(t, "lab-red", "crew-18", "vanguard")
+	r.hello(t, "alpha", "crew-19", "striker") // a production squad's unit
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel", `{"state":"go","fighters":["Rusty"],"enemies":["Slate"]}`, nil).StatusCode; got != http.StatusForbidden {
+		t.Errorf("a production unit as the enemy: %d, want 403", got)
+	}
+}
+
+func TestDuelNamedMemberWhoLapsedIsNoLongerAnEnemy(t *testing.T) {
+	st, cl := namedStore()
+	cl.hello(st, redUnit, "lab-red", "striker")
+	cl.hello(st, blueUnit, "lab-blue", "striker")
+	mustSetDuel(t, st, "lab-red", testDuel)
+	cl.after(memberTTL + time.Second)
+	cl.hello(st, redUnit, "lab-red", "striker")
+	if _, err := st.SetDuel("lab-red", testDuel); err == nil {
+		t.Error("a duel named an enemy whose claim had lapsed")
+	}
+}
+
+// A roster that cannot name its units makes a naming duel impossible rather
+// than unchecked.
+func TestDuelWithoutARosterNamerNamesNobody(t *testing.T) {
+	st, cl := newSquadRig()
+	cl.hello(st, redUnit, "lab-red", "striker")
+	cl.hello(st, blueUnit, "lab-blue", "striker")
+	if _, err := st.SetDuel("lab-red", testDuel); err == nil {
+		t.Error("a duel naming units was stored with no way to check the names")
+	}
+	if _, err := st.SetDuel("lab-red", duelWire{State: duelIdle}); err != nil {
+		t.Errorf("withdrawing a duel needs no names: %v", err)
+	}
+}
+
+type plainUnits map[string]bool
+
+func (u plainUnits) Has(id string) bool { return u[id] }
+
+func TestDuelOverRoutesWithAPlainRosterRefusesNames(t *testing.T) {
+	mux := http.NewServeMux()
+	st := NewStore()
+	Routes(mux, st, plainUnits{"crew-18": true}, token)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	r := &rig{store: st, srv: srv, ops: func() string { return "owner" }}
+	r.hello(t, "lab-red", "crew-18", "vanguard")
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel", testGo, nil).StatusCode; got != http.StatusForbidden {
+		t.Errorf("a roster that cannot name units took a duel: %d, want 403", got)
+	}
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel", `{"state":"idle"}`, nil).StatusCode; got != http.StatusNoContent {
+		t.Errorf("idle: %d", got)
+	}
+}
+
+// The unit reads the crew roster from the server's own membership, so what a
+// director wrote can never widen it.
+func TestDuelAnswerCarriesTheCrewNamesTheServerVouchesFor(t *testing.T) {
+	r := duelRig(t)
+	r.hello(t, "alpha", "crew-20", "ranger") // moves Tinder out of the lab
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel", testGo, nil).StatusCode; got != http.StatusForbidden {
+		t.Fatalf("an enemy that left the lab: %d, want 403", got)
+	}
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel", `{"state":"go","fighters":["Rusty"],"enemies":["Slate"]}`, nil).StatusCode; got != http.StatusNoContent {
+		t.Fatalf("put: %d", got)
+	}
+	var ans struct {
+		Crew []string `json:"crew"`
+	}
+	if err := json.Unmarshal([]byte(readBody(t, r.do(t, "GET", "/v1/squads/lab-red/duel", "", nil))), &ans); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Rusty", "Slate"}; !slices.Equal(ans.Crew, want) {
+		t.Errorf("crew = %v, want %v: lab squad members only, not the production unit", ans.Crew, want)
+	}
+	if got := r.do(t, "PUT", "/v1/squads/lab-red/duel",
+		`{"state":"go","fighters":["Rusty"],"enemies":["Slate"],"crew":["Steve"]}`, nil).StatusCode; got != http.StatusBadRequest {
+		t.Errorf("a director writing the crew list: %d, want 400", got)
 	}
 }

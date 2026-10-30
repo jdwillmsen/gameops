@@ -34,8 +34,11 @@ type pvpTarget interface {
 // duelView is one answer's worth of who this unit may hunt.
 type duelView struct {
 	enemies map[string]bool
-	out     map[string]bool
-	until   time.Time
+	// crew is the names the squad service vouches for as crew units. A duel
+	// that names a human is not a duel, so only a name in both sets is hunted.
+	crew  map[string]bool
+	out   map[string]bool
+	until time.Time
 }
 
 // squadPvP is the engine's rule for fighting players, fed by the squad. It
@@ -48,7 +51,7 @@ type squadPvP struct {
 
 func (p *squadPvP) MayTarget(player string) bool {
 	v := p.view.Load()
-	return v != nil && p.now().Before(v.until) && v.enemies[player] && !v.out[player]
+	return v != nil && p.now().Before(v.until) && v.enemies[player] && v.crew[player] && !v.out[player]
 }
 
 func nameSet(names []string) map[string]bool {
@@ -120,8 +123,8 @@ func (d *duelSync) step(ctx context.Context) {
 	case duel.State == squadclient.DuelArmed || duel.State == squadclient.DuelGo:
 		d.install()
 		if duel.State == squadclient.DuelGo && slices.Contains(duel.Fighters, d.self) {
-			d.pol.view.Store(&duelView{enemies: nameSet(duel.Enemies), out: nameSet(duel.Eliminated),
-				until: d.pol.now().Add(duelLease)})
+			d.pol.view.Store(&duelView{enemies: nameSet(duel.Enemies), crew: nameSet(duel.Crew),
+				out: nameSet(duel.Eliminated), until: d.pol.now().Add(duelLease)})
 		} else {
 			d.pol.view.Store(nil)
 		}

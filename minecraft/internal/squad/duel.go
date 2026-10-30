@@ -37,7 +37,18 @@ const (
 	duelTTL = 45 * time.Second
 )
 
-var errNoDuelSquad = errors.New("squad: not a lab squad the store holds")
+var (
+	errNoDuelSquad = errors.New("squad: not a lab squad the store holds")
+	errNotCrewUnit = errors.New("squad: a duel names someone who is not a member of a lab squad")
+)
+
+// UnitNamer says which in-game name a roster unit plays under. A duel names
+// players, and only the roster can tell a crew unit from a human, so a
+// Units value that cannot name its units makes the store refuse every duel
+// that names anyone.
+type UnitNamer interface {
+	NameOf(unit string) (string, bool)
+}
 
 // duelWire is the duel state a director PUTs and a unit GETs. Fighters are
 // the squad's own side, Enemies the other: a unit fights only when it is a
@@ -103,16 +114,86 @@ func (d duelWire) valid() bool {
 	return true
 }
 
+// memberNames is the in-game names of the squad's current members.
+func memberNames(sq *squadState, nameOf func(string) (string, bool)) map[string]bool {
+	out := make(map[string]bool, len(sq.members))
+	for unit := range sq.members {
+		if n, ok := nameOf(unit); ok {
+			out[n] = true
+		}
+	}
+	return out
+}
+
+// namesCrew fails closed: every fighter must be a current member of this
+// squad and every enemy a current member of some lab squad, by the in-game
+// name the roster gives the member. Without a namer nobody can be named.
+func (st *Store) namesCrew(own *squadState, d duelWire) bool {
+	if len(d.Fighters) == 0 && len(d.Enemies) == 0 {
+		return true
+	}
+	if st.nameOf == nil {
+		return false
+	}
+	fighters := memberNames(own, st.nameOf)
+	for _, n := range d.Fighters {
+		if !fighters[n] {
+			return false
+		}
+	}
+	lab := map[string]bool{}
+	for id, sq := range st.squads {
+		if labSquad(id) {
+			for n := range memberNames(sq, st.nameOf) {
+				lab[n] = true
+			}
+		}
+	}
+	for _, n := range d.Enemies {
+		if !lab[n] {
+			return false
+		}
+	}
+	return true
+}
+
+// LabCrew is the in-game names of every current member of a lab squad, in
+// name order. Empty when the roster cannot name units.
+func (st *Store) LabCrew() []string {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.prune(st.now())
+	out := []string{}
+	if st.nameOf == nil {
+		return out
+	}
+	seen := map[string]bool{}
+	for id, sq := range st.squads {
+		if !labSquad(id) {
+			continue
+		}
+		for n := range memberNames(sq, st.nameOf) {
+			if !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func sameDuel(a, b duelWire) bool {
 	return a.State == b.State && a.Round == b.Round && slices.Equal(a.Fighters, b.Fighters) &&
 		slices.Equal(a.Enemies, b.Enemies) && slices.Equal(a.Eliminated, b.Eliminated)
 }
 
 // SetDuel stores the squad's duel state, already checked at the door. It
-// refuses a squad the store does not hold or one not marked lab. changed is
-// false when the duel is the one already in force: that only renews its lease,
-// so a director's heartbeat costs no revision bump and no refetch by the
-// units. A changed duel bumps the squad's revision so a poll parked on the old one
+// refuses a squad the store does not hold or one not marked lab, and a duel
+// that names anyone who is not a lab squad member. changed is false when the
+// duel is the one already in force: that only renews its lease, so a
+// director's heartbeat costs no revision bump and no refetch by the units.
+// A changed duel bumps the squad's revision so a poll parked on the old one
 // answers and carries the new duelSeq.
 func (st *Store) SetDuel(id string, d duelWire) (changed bool, err error) {
 	st.mu.Lock()
@@ -122,6 +203,9 @@ func (st *Store) SetDuel(id string, d duelWire) (changed bool, err error) {
 	sq, ok := st.squads[id]
 	if !ok || !labSquad(id) {
 		return false, errNoDuelSquad
+	}
+	if !st.namesCrew(sq, d) {
+		return false, errNotCrewUnit
 	}
 	if sq.duel != nil && now.Sub(sq.duelAt) <= duelTTL && sameDuel(*sq.duel, d) {
 		sq.duelAt = now
@@ -148,6 +232,16 @@ func (st *Store) Duel(id string) (duelWire, bool) {
 	return *sq.duel, true
 }
 
+// duelAnswer is what a unit reads: the stored duel plus Crew, the in-game
+// names of every lab squad member right now. Crew is the server's word, never
+// the director's: it is not part of the PUT body, so a director cannot name
+// someone into it, and a unit that hunts only crew names stays off players
+// even if a duel got stored with one.
+type duelAnswer struct {
+	duelWire
+	Crew []string `json:"crew"`
+}
+
 // getDuel serves the squad's duel. No duel answers 404: the unit reads
 // that as "no fight", the same as a server without the route.
 func (a *API) getDuel(w http.ResponseWriter, r *http.Request) {
@@ -156,7 +250,7 @@ func (a *API) getDuel(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	writeJSON(w, http.StatusOK, d)
+	writeJSON(w, http.StatusOK, duelAnswer{duelWire: d, Crew: a.store.LabCrew()})
 }
 
 // putDuel stores a duel state. Only a lab squad takes one, whatever token
@@ -181,6 +275,9 @@ func (a *API) putDuel(w http.ResponseWriter, r *http.Request) {
 	}
 	changed, err := a.store.SetDuel(id, d)
 	switch {
+	case errors.Is(err, errNotCrewUnit):
+		http.Error(w, "a duel may name only lab squad members", http.StatusForbidden)
+		return
 	case err != nil:
 		http.NotFound(w, r)
 		return
