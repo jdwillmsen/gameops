@@ -8,9 +8,10 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MC_HOST`, `MC_USERNAME` | required | Server, and the Microsoft account name (the display name when `MC_OFFLINE` is true) |
-| `MC_OFFLINE` | `false` | Lab only: skip Microsoft sign-in and join with `MC_USERNAME` as a bare display name |
-| `MC_PORT` | `19132` | RakNet port |
+| `MC_HOST`, `MC_USERNAME` | required | Server, and the Microsoft account name (the display name when `MC_OFFLINE` is true). `MC_HOST` is a hostname for a RakNet server, or `http://host` / `https://host` for a NetherNet server's signaling port (see NetherNet servers) |
+| `MC_OFFLINE` | `false` | Lab only: skip Microsoft sign-in and join with `MC_USERNAME` as a bare display name. Refused at start against a NetherNet `MC_HOST` |
+| `MC_PORT` | `19132` | RakNet port, or the signaling TCP port for NetherNet (ignored when `MC_HOST` already carries one) |
+| `AUTH_CACHE_DIR` | `/data/auth` | Where the unit's Microsoft token is cached; put it on the data volume. Unused with `MC_OFFLINE` |
 | `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
@@ -30,6 +31,44 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. Units can share one directory: the first builds, the rest wait for it. The resource pack it is built from is fetched into `/tmp` and removed after the build |
+
+## NetherNet servers
+
+crew speaks RakNet or NetherNet and picks by `MC_HOST`, by the same rule as the
+agent. A bare hostname dials RakNet at `MC_HOST:MC_PORT`, as it always has. A
+value starting with `http://` or `https://` dials NetherNet through that URL's
+signaling port: `MC_HOST=http://192.168.1.87` with `MC_PORT=31134`, or
+`MC_HOST=http://192.168.1.87:31134`. Anything else after the scheme (a path,
+a query, credentials) is refused at start.
+
+A NetherNet server admits only a player it can identify at the transport, and
+turns an anonymous one away with error 37 before any packet is exchanged. So a
+NetherNet unit must be signed in, and `MC_OFFLINE=true` with a NetherNet
+`MC_HOST` is refused at start with a message saying so. A unit that cannot
+sign in stays on a RakNet server or stays off.
+
+Sign-in is one Microsoft device-code login per unit. The owner runs it in
+their own terminal, never through an agent session: start the unit with an
+empty `AUTH_CACHE_DIR`, open the printed URL, enter the code, and the token is
+cached in a file per `MC_USERNAME` under `AUTH_CACHE_DIR` (on the unit's data
+volume) and refreshed from there afterwards. The code is printed once, to standard output.
+
+What a unit needs from its chart for NetherNet:
+
+- `MC_HOST` as `http://<lan-ip>` with `MC_PORT` set to the server's signaling
+  port, or the full `http://<lan-ip>:<signaling-port>`. Either works; use one
+  form per chart so the two do not disagree.
+- `MC_OFFLINE` unset or `false`, and a persistent `AUTH_CACHE_DIR` holding the
+  unit's token.
+- Egress from the unit to the signaling TCP port and to the server's NetherNet
+  UDP range: signaling only exchanges the connection offer, and the game traffic
+  then flows over ICE/DTLS on UDP, which a TCP-only egress rule would block.
+- A connect budget of 45 s rather than 30 s is applied automatically: signaling,
+  ICE, DTLS and SCTP all finish before a NetherNet connection is handed over.
+
+The camera's atlas version, the protocol the unit announces and the connect all
+follow the same address. NetherNet has no unconnected ping, so the server's
+version and protocol are read from its signaling status instead.
 
 ## Idle life and defence
 
