@@ -20,7 +20,11 @@ RUN apk add --no-cache jq
 COPY --from=stage /out/ /packs/
 COPY minecraft/lab-packs/install.sh /install.sh
 
-# No USER on purpose: the pod's securityContext decides the user (uid 1000,
-# gid 3000 in the lab), which must be able to write the world files. A fixed
-# uid baked in here could not follow that.
+# Explicit non-root user equal to the lab pod's own (uid 1000, gid 3000), so the
+# default matches the world owner and a scanner sees a non-root image. The
+# pod's securityContext still decides at runtime.
+USER 1000:3000
+
+# Run-to-completion installer: there is nothing to probe.
+HEALTHCHECK NONE
 ENTRYPOINT ["/install.sh"]
