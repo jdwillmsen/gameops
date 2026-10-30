@@ -207,13 +207,15 @@ func checkProbeOrigin(b bay) error {
 	return nil
 }
 
-// probeSampleCells are cells spread across the whole platform volume, at
-// the floor row, just above it, mid-height and at the cleanup's top.
-func probeSampleCells(b bay) []protocol.BlockPos {
+// probeCells is every cell the probe's floor fill and cleanup can write:
+// the whole platform volume, floor row included. The cleanup blindly turns
+// all of it to air, so the guard must cover each cell — a sample would let a
+// thin lab structure between the sample points be destroyed.
+func probeCells(b bay) []protocol.BlockPos {
 	var cells []protocol.BlockPos
-	for _, y := range []int32{0, 1, probeHeight / 2, probeHeight} {
-		for x := int32(-probeRadius); x <= probeRadius; x += probeRadius / 2 {
-			for z := int32(-probeRadius); z <= probeRadius; z += probeRadius / 2 {
+	for y := int32(0); y <= probeHeight; y++ {
+		for x := int32(-probeRadius); x <= probeRadius; x++ {
+			for z := int32(-probeRadius); z <= probeRadius; z++ {
 				cells = append(cells, b.pos(x, y, z))
 			}
 		}
@@ -221,20 +223,23 @@ func probeSampleCells(b bay) []protocol.BlockPos {
 	return cells
 }
 
-// checkProbeEmpty fails when a cell sampled across the probe platform holds
-// a block, so the platform's fills cannot destroy lab blocks outside the bay.
+// checkProbeEmpty fails when any cell of the probe platform holds a block,
+// so the platform's fills cannot destroy lab blocks outside the bay.
 func checkProbeEmpty(ctx context.Context, con *safeConsole, b bay) error {
-	return checkCellsEmpty(ctx, con, b, probeSampleCells(b))
+	return checkCellsEmpty(ctx, con, b, "probe platform", probeCells(b))
 }
 
 // checkBayEmpty fails when a sampled cell holds a block. A cell whose chunk
 // has not loaded yet is asked again.
 func checkBayEmpty(ctx context.Context, con *safeConsole, b bay) error {
-	return checkCellsEmpty(ctx, con, b, sampleCells(b))
+	return checkCellsEmpty(ctx, con, b, "bay", sampleCells(b))
 }
 
-func checkCellsEmpty(ctx context.Context, con *safeConsole, b bay, cells []protocol.BlockPos) error {
+func checkCellsEmpty(ctx context.Context, con *safeConsole, b bay, what string, cells []protocol.BlockPos) error {
 	for _, p := range cells {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		cmd := fmt.Sprintf("testforblock %d %d %d air", p.X(), p.Y(), p.Z())
 		var last string
 		ok := false
@@ -248,7 +253,7 @@ func checkCellsEmpty(ctx context.Context, con *safeConsole, b bay, cells []proto
 			case strings.Contains(out, "Successfully found"):
 				ok = true
 			case strings.Contains(out, "expected"):
-				return fmt.Errorf("bay at %d,%d,%d is not empty: %s; clear it or pick another origin", b.ox, b.f, b.oz, last)
+				return fmt.Errorf("%s at %d,%d,%d is not empty (block at %d,%d,%d): %s; clear it or pick another origin", what, b.ox, b.f, b.oz, p.X(), p.Y(), p.Z(), last)
 			default:
 				select {
 				case <-ctx.Done():

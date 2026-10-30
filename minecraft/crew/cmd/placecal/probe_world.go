@@ -68,15 +68,10 @@ func executeProbe(ctx context.Context, c config, names []string, con *safeConsol
 	if err := addArea(con, b, area); err != nil {
 		return err
 	}
-	if err := checkBayEmpty(runCtx, con, b); err != nil {
-		return err
-	}
-	if err := checkProbeEmpty(runCtx, con, b); err != nil {
-		return err
-	}
-	built = true
-	if err := con.retry(runCtx, fmt.Sprintf("fill %d %d %d %d %d %d stone", b.ox-probeRadius, b.f, b.oz-probeRadius, b.ox+probeRadius, b.f, b.oz+probeRadius), "blocks filled"); err != nil {
-		return err
+	var perr error
+	built, perr = buildProbePlatform(runCtx, con, b)
+	if perr != nil {
+		return perr
 	}
 	if _, err := con.Exec(fmt.Sprintf("tp %q %.1f %d %.1f", u.name, float32(b.ox)+0.5, b.f+1, float32(b.oz)+4.5)); err != nil {
 		return err
@@ -612,4 +607,19 @@ func probeOccupied(p *prober) {
 		}
 	}
 	p.reset()
+}
+
+// buildProbePlatform lays the probe's stone floor once every cell the probe
+// can write is known to be air. built reports whether the floor fill was
+// attempted, which is what the cleanup must undo; a refused platform is left
+// untouched.
+func buildProbePlatform(ctx context.Context, con *safeConsole, b bay) (built bool, err error) {
+	if err := checkBayEmpty(ctx, con, b); err != nil {
+		return false, err
+	}
+	if err := checkProbeEmpty(ctx, con, b); err != nil {
+		return false, err
+	}
+	err = con.retry(ctx, fmt.Sprintf("fill %d %d %d %d %d %d stone", b.ox-probeRadius, b.f, b.oz-probeRadius, b.ox+probeRadius, b.f, b.oz+probeRadius), "blocks filled")
+	return true, err
 }
