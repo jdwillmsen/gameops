@@ -36,7 +36,6 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
-	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape"
@@ -114,8 +113,8 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	// server, and a unit whose sign-in or control-plane lookup is slow would
 	// otherwise be restarted before it ever answered. /readyz stays 503 until
 	// the unit is in the world.
-	tacticsView := newTacticsState(lf)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf), statusapi.WithSightings(lf), statusapi.WithTactics(tacticsView)), ReadHeaderTimeout: 5 * time.Second}
+	tactView := tacticsView(cfg, lf)
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusOptions(lf, tactView)...), ReadHeaderTimeout: 5 * time.Second}
 	var statusFailed atomic.Bool
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -147,7 +146,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		go sc.Run(ctx)
 		lf.SetSquad(sc)
 		if ps := newProfileSync(cfg, sc, lf, logAdapter{log}); ps != nil {
-			ps.state = tacticsView
+			ps.state = tactView
 			go ps.run(ctx, profilePoll)
 		}
 		if ds := newDuelSync(cfg, sc, lf, logAdapter{log}); ds != nil {
