@@ -93,3 +93,32 @@ func TestParseTakesAUnitsPlayerId(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveFindsAnIdOrAUniqueName(t *testing.T) {
+	r, err := Parse(`[
+		{"id":"crew-01","name":"Rusty","url":"http://crew-01:8080"},
+		{"id":"crew-02","name":"Twin","url":"http://crew-02:8080"},
+		{"id":"crew-03","name":"Twin","url":"http://crew-03:8080"},
+		{"id":"crew-04","name":"crew-01","url":"http://crew-04:8080"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		key, id string
+		ok      bool
+	}{
+		{"crew-02", "crew-02", true},
+		{"Rusty", "crew-01", true},
+		{"rusty", "", false},
+		{"Twin", "", false},
+		{"crew-01", "crew-01", true},
+		{"nobody", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		u, ok := r.Resolve(c.key)
+		if ok != c.ok || u.ID != c.id {
+			t.Errorf("Resolve(%q) = %q, %v; want %q, %v", c.key, u.ID, ok, c.id, c.ok)
+		}
+	}
+}

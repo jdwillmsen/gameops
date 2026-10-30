@@ -289,3 +289,41 @@ func TestProxyLogsUpstreamFailureButNotClientCancel(t *testing.T) {
 		t.Errorf("real upstream failure not logged: %q", failed)
 	}
 }
+
+func TestProxyAddressesAUnitByName(t *testing.T) {
+	unit := newFakeUnit(t, nil)
+	p := newProxy(t, unit.URL)
+	resp, err := http.Get(p.URL + "/units/Agate/v1/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "unit body" {
+		t.Fatalf("by name: %d %q", resp.StatusCode, body)
+	}
+	if seen := unit.seen(); len(seen) != 1 || seen[0].URL.Path != "/v1/state" {
+		t.Fatalf("upstream saw %v, want one /v1/state", seen)
+	}
+}
+
+func TestProxyNameRoutesStayOnTheAllowList(t *testing.T) {
+	unit := newFakeUnit(t, nil)
+	h := Handler(rosterFor(t, unit.URL), logging.New("error"))
+	for _, c := range []struct{ method, path string }{
+		{"GET", "/units/Agate/v1/tasks"},
+		{"GET", "/units/Agate/metrics"},
+		{"POST", "/units/Agate/v1/state"},
+		{"GET", "/units/agate/v1/state"},
+		{"GET", "/units/Agate/../crew-01/v1/tasks"},
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s: status %d, want 404", c.method, c.path, rec.Code)
+		}
+	}
+	if n := len(unit.seen()); n != 0 {
+		t.Errorf("upstream saw %d requests, want 0", n)
+	}
+}
