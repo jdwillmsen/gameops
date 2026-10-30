@@ -25,9 +25,12 @@ const AURAS = {
   },
 };
 // An unknown effect id only throws inside addEffect, where failures are swallowed; surface it once at load.
-for (const [type, spec] of Object.entries(AURAS)) {
-  if (!EffectTypes.get(spec.effect)) console.warn(`gameops:aura unknown effect ${spec.effect} for ${type}`);
-}
+// Deferred because BDS rejects native calls such as EffectTypes.get during early execution and aborts the whole script.
+system.run(() => {
+  for (const [type, spec] of Object.entries(AURAS)) {
+    if (!EffectTypes.get(spec.effect)) console.warn(`gameops:aura unknown effect ${spec.effect} for ${type}`);
+  }
+});
 // Lets a headless smoke test tell "script never loaded" from "script loaded, nothing to do".
 console.warn("gameops:wildlife script loaded");
 const SITTING_PROPERTY = "gameops:sitting";
