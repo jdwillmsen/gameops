@@ -12,6 +12,9 @@ import (
 // Armor, the offhand and containers arrive in other windows and are not kept.
 const inventorySize = 36
 
+// armourChestSlot is the chest's place in the armour window, after the helmet.
+const armourChestSlot = 1
+
 // hotbarSlots are the first slots of that inventory.
 const hotbarSlots = 9
 
@@ -63,6 +66,13 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 	case *packet.ContainerOpen:
 		t.window, t.opened = uint32(p.WindowID), map[int32]protocol.ItemStack{}
 	case *packet.InventoryContent:
+		if p.WindowID == protocol.WindowIDArmour {
+			t.chest = stackRef{}
+			if len(p.Content) > armourChestSlot {
+				t.chest = refOf(p.Content[armourChestSlot])
+			}
+			return true
+		}
 		if p.WindowID != 0 {
 			if t.opened != nil && p.WindowID == t.window {
 				for _, it := range p.Content {
@@ -76,6 +86,12 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 			t.inv[i] = refOf(p.Content[i])
 		}
 	case *packet.InventorySlot:
+		if p.WindowID == protocol.WindowIDArmour {
+			if p.Slot == armourChestSlot {
+				t.chest = refOf(p.NewItem)
+			}
+			return true
+		}
 		if p.WindowID == 0 && p.Slot < inventorySize {
 			t.inv[p.Slot] = refOf(p.NewItem)
 		} else if t.opened != nil && p.WindowID != 0 && p.WindowID == t.window {
@@ -177,4 +193,14 @@ func (t *Tracker) inventoryLocked() []Item {
 		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID, Wire: s.wire})
 	}
 	return out
+}
+
+func (t *Tracker) chestLocked() string {
+	if t.chest.empty() {
+		return ""
+	}
+	if name, ok := t.itemNames[t.chest.itemID]; ok {
+		return name
+	}
+	return fmt.Sprintf("item#%d", t.chest.itemID)
 }

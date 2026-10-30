@@ -120,6 +120,14 @@ type Pose struct {
 	// until the caller lets go of the sprint input: the server does not
 	// resume a sprint broken by a collision while the key is still held.
 	sprintHalt bool
+
+	// gliding is an elytra glide, which keeps its own velocity in glideV and
+	// the ticks since it began in glideAge. boost counts the ticks a rocket
+	// still pushes.
+	gliding  bool
+	glideV   mgl32.Vec3
+	glideAge uint8
+	boost    int
 }
 
 // Sprinting says whether the unit is sprinting as of its last tick.
