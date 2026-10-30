@@ -15,4 +15,11 @@ node_modules
 # go build output for the single main package
 /minecraft/crew-control/crew-control
 /minecraft/crew-control/cmd/crew-control/crew-control
+# go build output of the training commands, so a stray build is never committed
+/minecraft/crew/cmd/labcheck/labcheck
+/minecraft/crew/cmd/tacticsctl/tacticsctl
+/minecraft/crew/cmd/trainbridge/trainbridge
+/minecraft/crew/cmd/trainer/trainer
+/minecraft/crew/cmd/trainloop/trainloop
+/minecraft/crew/cmd/trainreport/trainreport
 __pycache__/
