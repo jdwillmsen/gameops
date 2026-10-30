@@ -390,7 +390,7 @@ func TestSomeItemsAreKnownToBeWronglyPicturedAndAreLeftWithout(t *testing.T) {
 		t.Fatal(err)
 	}
 	src.ids = []string{"leather", "leather_chestplate", "tripwire_hook"}
-	src.blocks = map[string]blockEntry{"tripwire_hook": {json.RawMessage(`"trip_wire"`)}}
+	src.blocks = map[string]blockEntry{"tripwire_hook": {Textures: json.RawMessage(`"trip_wire"`)}}
 	got := src.recipes()
 	// Leather armour is a grey base the dye is laid over, and leather is not armour.
 	if _, made := got["item/leather_chestplate"]; made {
@@ -621,5 +621,24 @@ func TestLayeredAndCubeItemsCountEveryTextureTheyNameAgainstTheLimit(t *testing.
 	}
 	if len(rejected) == 0 {
 		t.Error("no cube was left out though together they name twice the limit")
+	}
+}
+
+func TestATallPlantInTheHandIsTheTextureTheGameCarriesNotItsStem(t *testing.T) {
+	src := itemSources{textures: map[string]bool{"textures/blocks/double_plant_sunflower_front": true, "textures/blocks/double_plant_sunflower_bottom": true}}
+	if err := json.Unmarshal([]byte(`{"texture_data":{"sunflower_carried":{"textures":"textures/blocks/double_plant_sunflower_front"},"sunflower_bottom":{"textures":"textures/blocks/double_plant_sunflower_bottom"}}}`), &src.terrain); err != nil {
+		t.Fatal(err)
+	}
+	src.blocks = map[string]blockEntry{"sunflower": {
+		Textures: json.RawMessage(`{"down":"sunflower_bottom","side":"sunflower_additional","up":"sunflower_top"}`),
+		Carried:  json.RawMessage(`"sunflower_carried"`),
+	}}
+	if got := src.blockTexture("sunflower"); got != "textures/blocks/double_plant_sunflower_front" {
+		t.Errorf("a sunflower is drawn with %q, not the flower the game carries", got)
+	}
+	// With no carried texture to be had, the stem is better than nothing.
+	delete(src.terrain.Textures, "sunflower_carried")
+	if got := src.blockTexture("sunflower"); got != "textures/blocks/double_plant_sunflower_bottom" {
+		t.Errorf("a sunflower with nothing carried is drawn with %q", got)
 	}
 }
