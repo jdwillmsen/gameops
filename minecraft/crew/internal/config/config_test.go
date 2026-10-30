@@ -507,6 +507,20 @@ func TestLoadRejectsAMalformedNetherNetHost(t *testing.T) {
 	}
 }
 
+// The error reaches the log, and a URL can carry credentials, so the value is
+// never echoed.
+func TestAMalformedNetherNetHostErrorDoesNotEchoTheValue(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_HOST", "http://alice:s3cret@mc.example")
+	_, err := Load()
+	if err == nil {
+		t.Fatal("a URL with credentials was accepted")
+	}
+	if strings.Contains(err.Error(), "s3cret") || strings.Contains(err.Error(), "alice") {
+		t.Errorf("the error echoes the credentials: %v", err)
+	}
+}
+
 // A NetherNet server answers an unsigned player with error 37 and no hint why,
 // so the unit is refused here where the cause can be named.
 func TestLoadRefusesAnOfflineUnitOnNetherNet(t *testing.T) {
