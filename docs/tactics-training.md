@@ -158,6 +158,61 @@ first and the `--blue` units in the second). Without them it only tags and
 scores. `trainbridge` hands the same signal to the squads it already pushes the
 profiles to (`--squad`, `--squad-b`), so a duel there needs no extra flag.
 
+## Overnight run
+
+`trainloop` wraps the trainer for a whole night: it rotates the requested
+opponent families (train one family per round, then the next), runs the trainer
+as a library with the bridge as its evaluator, prints a `trainreport` summary
+after every family and at the end, and never promotes anything — champions land
+in the trainer store and wait for approval as above.
+
+Every cap is mandatory, so an overnight run cannot start unbounded. The example is a short first run: a lab fight takes minutes, so raise the caps only after watching one finish.
+
+```sh
+export CONTROL_TOKEN=...   # the shared crew-control token; never put it in an argument
+trainloop overnight \
+  --families zombie,skeleton --scenarios /path/to/scenarios.yaml \
+  --store ~/.local/share/crew-tactics-store --control-dir "$TACTICSCTL_DIR" \
+  --bridge "$(command -v trainbridge)" --lab crew-lab \
+  --layout <layout.json> --squad-url http://<crew-control> --squad lab-alpha \
+  --max-hours 1h --max-rounds 2 --gens-per-round 5 \
+  --fights-per-gen 4 --max-total-fights 60 --max-consecutive-failures 3
+```
+
+Run it inside `systemd-run --user` or tmux so an SSH drop does not SIGINT it;
+a lost terminal stops the campaign at the next check with exit 3 and the state
+file keeps the budget spent. The command refuses to start while any player
+outside `--crew-names` is online, the same pre-flight `arenadirector` gives
+every command that changes the server.
+
+Caps pay from what is left: `--max-hours` and `--max-total-fights` are
+whole-campaign budgets, and each round is told the remaining amount. After
+every round the campaign writes its state atomically to
+`<store>/overnight-state.json` (it holds `StartedAt`, `ConsumedMs`,
+`FightsUsed` and each finished round), and its scorecards append to
+`<store>/fights.jsonl`, which the summaries read. Re-running the same command
+resumes from the state file instead of resetting the caps, so an accidental
+double start can only finish sooner, never over-spend. Delete the state file
+deliberately, if you mean to start a fresh campaign with its own full budget.
+
+Stopping an overnight run:
+
+```sh
+tacticsctl training off          # checked between rounds, and before every fight
+touch <store>/KILL               # the campaign's own stop file (--stop-file)
+```
+
+Both stop the rotation between rounds with exit 3 and also end the fight in
+progress, because they are handed to the trainer as its switch and kill file.
+Exit codes: 0 finished inside its caps, 3 stopped by the switch, the stop file
+or an interrupt, 1 the consecutive-failure cap (fix the lab or the bridge, then
+start the same command again), 2 a malformed invocation — bad flags, a
+scenario book without the family's scenario, or a corrupt state file. The
+trainer's own generation cap ends only that round (`--gens-per-round` is
+per-family, so the rotation keeps going while budget is left). `--scenarios`
+accepts a YAML file, or a directory that holds exactly one; each round trains
+against that family's highest tier in the book.
+
 ## Promotion to production
 
 **Nothing consumes the production stage today.** No production unit fetches a
