@@ -311,8 +311,23 @@ func TestDuelDiesWithTheSquad(t *testing.T) {
 	if _, ok := st.Duel("lab-red"); ok {
 		t.Error("the duel outlived the squad's last claim")
 	}
-	if _, err := st.SetDuel("lab-/../fwb", duelWire{State: duelIdle}); err == nil {
-		t.Error("a path-shaped id took a duel")
+}
+
+// The store takes any id a hello gave it, so a squad whose id walks out of
+// the route can exist; the lab-squad shape check is what refuses it.
+func TestDuelRefusesAnIdTheLabShapeRejects(t *testing.T) {
+	st, cl := namedStore()
+	for _, id := range []string{"lab-/../fwb", "lab-RED", "lab-", "lab-red/x", "lab-a b"} {
+		cl.hello(st, redUnit, id, "striker")
+		if !st.Has(id) {
+			t.Fatalf("setup: the store does not hold %q", id)
+		}
+		if _, err := st.SetDuel(id, duelWire{State: duelIdle}); err == nil {
+			t.Errorf("a squad called %q took a duel", id)
+		}
+		if _, ok := st.Duel(id); ok {
+			t.Errorf("a squad called %q serves a duel", id)
+		}
 	}
 }
 
