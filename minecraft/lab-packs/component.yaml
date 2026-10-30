@@ -1,0 +1,17 @@
+name: lab-packs
+kind: pack
+language: node
+depends:
+  - packs/
+  - tools/packs/
+tasks:
+  build: sh -n minecraft/lab-packs/install.sh
+  test: tools/check-packs.sh && python3 -I tools/packs/test_check_packs.py && python3 -I packs/lab-mods-wildlife/assets-src/test_generators.py && node --test 'packs/lab-mods-wildlife/behavior_pack/scripts/*.test.js' && minecraft/lab-packs/test-install.sh
+  lint: sh -n minecraft/lab-packs/install.sh && shellcheck minecraft/lab-packs/install.sh minecraft/lab-packs/test-install.sh
+release:
+  tag: lab-packs
+  artifacts: [image]
+  image:
+    name: lab-packs
+    description: Installs the crew lab's Bedrock add-on packs into a world and registers them
+    short_description: Installs the crew lab's Bedrock add-on packs into a world
