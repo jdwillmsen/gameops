@@ -215,8 +215,12 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	if err != nil {
 		return nil, err
 	}
+	var duelPolicy func(red, blue []string) (arena.TargetPolicy, error)
+	if sq, ok := sink.(SquadSink); ok {
+		duelPolicy = func(red, blue []string) (arena.TargetPolicy, error) { return sq.duelPolicy(console, red, blue) }
+	}
 	return &bridge{
-		Deadline:   deadline,
+		Deadline: deadline, DuelPolicy: duelPolicy,
 		ControlDir: *control, Lab: *lab, StopFile: *stopFile,
 		Console: console, Layout: layout, Book: book, Sink: sink, Opponent: opp,
 		Warriors: splitNames(*warriors), WarriorKits: splitNames(*warriorKits), Crew: splitNames(*crew),

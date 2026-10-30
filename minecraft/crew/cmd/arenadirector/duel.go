@@ -24,6 +24,7 @@ import (
 type duelConfig struct {
 	lab, compose, layout string
 	scores, stopFile     string
+	squads               *duelSquads
 	duel                 arena.Duel
 }
 
@@ -46,6 +47,9 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 	allow := fs.String("duelists-allow", strings.Join(arena.DefaultDuelists, ","), "units that may duel; a duel clears their inventories and moves them")
 	roster := fs.String("duelists-roster", "", "optional file of unit names, one per line; the lines starting with crew-lab join --duelists-allow")
 	scores := fs.String("scores", "", "scorecard JSONL to append to (default ~/.local/state/duel-scorecards.jsonl)")
+	squadURL := fs.String("squad-url", "", "crew-control base URL; delivers the duel to the lab squads (token from CONTROL_TOKEN)")
+	redSquad := fs.String("red-squad", "", "lab squad id of the --red units, lab- prefixed; with --squad-url")
+	blueSquad := fs.String("blue-squad", "", "lab squad id of the --blue units, lab- prefixed; with --squad-url")
 	stopFile := fs.String("stop-file", "", "end the run when this file exists")
 	runID := fs.String("run-id", "", "run id on every scorecard (default duel-<time>)")
 	spacing := fs.Int("spacing", 12, "distance of each line from the floor centre")
@@ -66,6 +70,10 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	squads, err := parseDuelSquads(*squadURL, *redSquad, *blueSquad)
+	if err != nil {
+		return nil, err
+	}
 	id := *runID
 	if id == "" {
 		id = "duel-" + time.Now().UTC().Format("20060102T150405Z")
@@ -79,7 +87,7 @@ func parseDuel(args []string, errOut io.Writer) (*duelConfig, error) {
 		path = filepath.Join(home, ".local", "state", "duel-scorecards.jsonl")
 	}
 	return &duelConfig{
-		lab: *t.lab, compose: *t.compose, layout: *layoutPath, scores: path, stopFile: *stopFile,
+		lab: *t.lab, compose: *t.compose, layout: *layoutPath, scores: path, stopFile: *stopFile, squads: squads,
 		duel: arena.Duel{
 			Red: splitNames(*red), Blue: splitNames(*blue),
 			RedProfile: *redProfile, BlueProfile: *blueProfile,
@@ -154,13 +162,17 @@ func duel(args []string) {
 	}
 	d := cfg.duel
 	d.Console, d.Layout = console, layout
-	d.Policy = &arena.ConsolePolicy{Console: console}
+	if d.Policy, err = cfg.policy(console); err != nil {
+		fail("arenadirector: " + err.Error())
+	}
 	d.Sink = fileSink{path: cfg.scores}
 	d.Out = os.Stderr
 	if cfg.stopFile != "" {
 		d.Halted = func() bool { _, err := os.Stat(cfg.stopFile); return err == nil }
 	}
-	fmt.Fprintln(os.Stderr, "arenadirector: the units only fight each other once the combat engine implements arena.TargetPolicy; this run tags and scores them")
+	if cfg.squads == nil {
+		fmt.Fprintln(os.Stderr, "arenadirector: no --squad-url: the units hear no start signal, so this run only tags and scores them")
+	}
 
 	// An interrupt lets the round finish its cleanup instead of leaving
 	// units tagged and areas loaded.
