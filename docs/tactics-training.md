@@ -213,6 +213,90 @@ per-family, so the rotation keeps going while budget is left). `--scenarios`
 accepts a YAML file, or a directory that holds exactly one; each round trains
 against that family's highest tier in the book.
 
+## Live checks
+
+Five questions about the units can only be answered on the crew lab, with a real
+server and a real unit. `labcheck` asks them and prints, for each, `PASS`,
+`FAIL` or `INCONCLUSIVE` with the evidence. `INCONCLUSIVE` means the lab could
+not show either answer, and is never a pass. It needs the units to run a crew
+build that serves `seen` and the sprint counters on `/v1/state`; an older unit
+reads `INCONCLUSIVE`, not `FAIL`.
+
+```sh
+export CONTROL_TOKEN=...   # only with --squad-url; never put it in an argument
+labcheck --lab crew-lab --layout <layout.json> \
+  --status-url http://<crew-control>/units/{name}/v1/state \
+  --squad-url http://<crew-control> --red-squad lab-alpha --blue-squad lab-bravo \
+  [--units Rusty,Slate,Tinder] [--checks tp,zombie,creeper,phantom,sprint] [--json]
+```
+
+Expected output of a healthy lab, evidence abridged:
+
+```
+PASS         tp       tp with a facing was accepted and turned Rusty
+PASS         zombie   Rusty saw a zombie's health (20)
+PASS         creeper  Rusty saw the creeper's Charged flag
+PASS         phantom  the phantom closed 7.4 blocks on Rusty
+PASS         sprint   212 sprint ticks drew 3 corrections (limit 10)
+cleanup      ok: nothing the checks summoned is left
+```
+
+Each check, and what a `FAIL` or `INCONCLUSIVE` means:
+
+- **tp** teleports the first unit to where it already stands, turned 90 degrees,
+  with the same `tp "Name" x y z yaw pitch` the duel runner places units with, and
+  reads its facing back. `FAIL` with the console's reply: Bedrock refused the
+  syntax, so a duel's units are not placed facing each other. `FAIL`, "still
+  faces": the tp was accepted but the unit's own movement overrode the facing.
+  `INCONCLUSIVE`: the unit walked off, or was not in the world.
+- **zombie** summons one zombie, made harmless with weakness, in front of the first unit
+  and waits for the unit's `health_seen` for a zombie. `FAIL`: a zombie's health
+  packets never reach the unit, so `damage_dealt` stays zero and the trainer cannot
+  score damage dealt against zombies. `evidence.fresh` is false when the unit had
+  already seen a zombie earlier in the session.
+- **creeper** summons a creeper with the `minecraft:charged_creeper` spawn event,
+  frozen with slowness 255 so it can never reach the unit, and reads the unit's
+  `actor_flags` for it. `FAIL`: the unit saw the creeper but not its `Charged` flag,
+  so the creeper tactics cannot tell a charged blast from a plain one. `INCONCLUSIVE`: no new creeper sighting, usually because the unit
+  was out of range or out of the world.
+- **phantom** summons a phantom 10 blocks to the side and 6 up, made harmless, and
+  samples its position for `--window` (20 s). It `PASS`es when the phantom closes
+  `--phantom-close` blocks on the unit or flies `--phantom-move` blocks. `FAIL`: it
+  hung where it was put, so the `night-swarm` scenario's phantoms do not hunt.
+  `INCONCLUSIVE`: it died or vanished before three readings (a unit may have killed it).
+- **sprint** runs a one-round duel between the first two units, whose scorecards are
+  discarded, and compares each unit's `sprint_ticks` and `movement_corrections`
+  before and after. `FAIL`: more than `--max-corrections` (10) server corrections
+  while sprinting, so the sprint model has drifted from the server's. `INCONCLUSIVE`:
+  no unit sprinted, because the duel was aborted, the units heard no start signal
+  (pass `--squad-url`) or their profile does not use `player/strafe`, the tactic
+  that sprints.
+
+`labcheck` is lab-only and bounded. `--lab` must pass the same two checks as every
+other tool here (`arena.ValidateLabConsole` and `tacticsctl.LabOnly`), so a target
+with `fwb`, `prd`, `prod` or `live` in its name is refused, and that includes the
+cluster lab pod (`arena.KnownLab` carries `prd`), so today the target is a compose
+lab such as `crew-lab`. A refusal is exit 2 and nothing is sent. It also refuses
+while a player outside `--crew-names` is online (one `list`), and re-checks before
+every check. It touches only the units in
+`--units` and never an inventory: no `clear`, `give`, `replaceitem` or kit. The
+training switch must be on at the start (`--control-dir`, as above) and is
+re-read between steps, as is `--stop-file`. `--check-timeout` (3 m, at most 15 m)
+bounds a check and `--max-wall` (15 m, at most 1 h) the run.
+
+Every mob a check summons is tagged `labcheck` and named `labcheck`. Cleanup kills
+by tag and by name, recounts, and runs on every exit: a leftover from a crashed
+earlier run is swept first, and a timeout, an interrupt, the stop file and a player
+joining all end in the same cleanup. A cleanup that cannot remove everything, or
+cannot count what is left, prints `CLEANUP FAILED` and exits 1. Killing a zombie may
+drop rotten flesh, which a unit can pick up; that is the only way an inventory
+changes.
+
+Exit codes: 0 every check passed, 1 a check failed or the cleanup left something,
+4 nothing failed but a check was inconclusive, 2 refused or malformed (not
+the crew lab, a stranger online, a bad flag), 3 stopped by the training switch, the
+stop file or an interrupt.
+
 ## Promotion to production
 
 **Nothing consumes the production stage today.** No production unit fetches a
