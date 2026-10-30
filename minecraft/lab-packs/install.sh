@@ -20,11 +20,13 @@ pending=
 cleanup() { [ -z "$pending" ] || rm -rf "$pending"; }
 trap cleanup EXIT
 
-# Both lists are checked before anything is written so a corrupt one cannot
-# leave the world half-installed.
+# Everything is checked before anything is written so a corrupt list or
+# manifest cannot leave the world half-installed or a pack replaced but
+# unregistered.
 for list in "$world/world_behavior_packs.json" "$world/world_resource_packs.json"; do
   if [ -s "$list" ]; then
-    jq -e 'type == "array"' "$list" >/dev/null 2>&1 || die "$list is not a JSON array; refusing to touch the world"
+    jq -e 'type == "array" and all(.[]; type == "object")' "$list" >/dev/null 2>&1 \
+      || die "$list is not a JSON array of objects; refusing to touch the world"
   fi
 done
 
@@ -42,6 +44,9 @@ register() { # list manifest
   pending=
 }
 
+# A SIGTERM/SIGKILL mid-install can leave a "<dest>.new" folder (ash does not
+# run the EXIT trap on SIGTERM); the next run removes it by name. Nothing reads
+# it meanwhile because the server has not started yet when this runs.
 replace() { # source dest
   pending="$2.new"
   rm -rf "$2.new"
@@ -51,22 +56,35 @@ replace() { # source dest
   pending=
 }
 
-mkdir -p "$world/behavior_packs" "$world/resource_packs"
 themes=
 for dir in "$packs"/*/; do
   [ -d "$dir" ] || continue
-  theme=$(basename "$dir")
+  found=
   for kind in behavior resource; do
-    src=$dir${kind}_pack
+    manifest=$dir${kind}_pack/manifest.json
+    [ -d "$dir${kind}_pack" ] || continue
+    jq -e '(.header.uuid | type == "string") and (.header.version | type == "array")' "$manifest" >/dev/null 2>&1 \
+      || die "$manifest needs header.uuid (string) and header.version (array)"
+    found=1
+  done
+  [ -z "$found" ] || themes="$themes $(basename "$dir")"
+done
+
+mkdir -p "$world/behavior_packs" "$world/resource_packs"
+for theme in $themes; do
+  for kind in behavior resource; do
+    src=$packs/$theme/${kind}_pack
     [ -d "$src" ] || continue
     replace "$src" "$world/${kind}_packs/gameops-$theme"
     register "$world/world_${kind}_packs.json" "$src/manifest.json"
   done
-  themes="$themes $theme"
 done
 
 for theme in $themes; do
-  ver=$(jq -er '.header.version | map(tostring) | join(".")' "$packs/$theme/behavior_pack/manifest.json" 2>/dev/null \
-    || jq -er '.header.version | map(tostring) | join(".")' "$packs/$theme/resource_pack/manifest.json")
-  echo "installed gameops-$theme $ver"
+  for kind in behavior resource; do
+    manifest=$packs/$theme/${kind}_pack/manifest.json
+    [ -f "$manifest" ] || continue
+    echo "installed gameops-$theme $(jq -r '.header.version | map(tostring) | join(".")' "$manifest")"
+    break
+  done
 done

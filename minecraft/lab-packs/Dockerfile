@@ -20,7 +20,7 @@ RUN apk add --no-cache jq
 COPY --from=stage /out/ /packs/
 COPY minecraft/lab-packs/install.sh /install.sh
 
-# No USER on purpose: the files are written as the container's runtime user,
-# which must be whoever owns the lab's world dir. The chart's init container
-# sets securityContext for that; baking in a fixed uid here could not write it.
+# No USER on purpose: the pod's securityContext decides the user (uid 1000,
+# gid 3000 in the lab), which must be able to write the world files. A fixed
+# uid baked in here could not follow that.
 ENTRYPOINT ["/install.sh"]

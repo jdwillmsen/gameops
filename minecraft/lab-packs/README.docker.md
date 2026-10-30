@@ -10,6 +10,9 @@ theme in `/packs`, then registers each pack's uuid and version in the world's
 pack lists, keeping other entries. It needs no network and writes only inside
 the world directory.
 
+The image sets no user: the chart's pod securityContext decides it (1000:3000
+in the lab), and that user must be able to write the world files.
+
 ## Pull
 
 ```bash
