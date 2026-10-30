@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
@@ -199,5 +200,44 @@ func TestMetricsExposeTheFightCounters(t *testing.T) {
 		if !strings.Contains(body, name) {
 			t.Errorf("metrics lack %s", name)
 		}
+	}
+}
+
+type tacticsFixed Tactics
+
+func (f tacticsFixed) Tactics() Tactics { return Tactics(f) }
+
+func TestStateCarriesTheTactics(t *testing.T) {
+	at := time.Date(2026, 10, 30, 1, 2, 3, 0, time.UTC)
+	on := true
+	h := Handler(fixed{}, "dev", Unit{}, nil, WithTactics(tacticsFixed{Profile: "cand", Hash: "abc", AppliedAt: &at, TrainingEnabled: &on}))
+	var body struct {
+		Tactics *struct {
+			Profile         string     `json:"profile"`
+			Hash            string     `json:"hash"`
+			AppliedAt       *time.Time `json:"applied_at"`
+			TrainingEnabled *bool      `json:"training_enabled"`
+		} `json:"tactics"`
+	}
+	if err := json.NewDecoder(get(t, h, "/v1/state").Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	got := body.Tactics
+	if got == nil || got.Profile != "cand" || got.Hash != "abc" || got.AppliedAt == nil || !got.AppliedAt.Equal(at) || got.TrainingEnabled == nil || !*got.TrainingEnabled {
+		t.Fatalf("tactics = %+v", got)
+	}
+}
+
+func TestStateOmitsUnknownTacticsParts(t *testing.T) {
+	h := Handler(fixed{}, "dev", Unit{}, nil, WithTactics(tacticsFixed{Profile: "default", Hash: "abc"}))
+	raw := get(t, h, "/v1/state").Body.String()
+	if !strings.Contains(raw, `"tactics":{"profile":"default","hash":"abc"}`) {
+		t.Fatalf("body = %s", raw)
+	}
+}
+
+func TestStateHasNoTacticsWithoutASource(t *testing.T) {
+	if raw := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/v1/state").Body.String(); strings.Contains(raw, "tactics") {
+		t.Fatalf("body = %s", raw)
 	}
 }

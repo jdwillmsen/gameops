@@ -114,7 +114,8 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	// server, and a unit whose sign-in or control-plane lookup is slow would
 	// otherwise be restarted before it ever answered. /readyz stays 503 until
 	// the unit is in the world.
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf)), ReadHeaderTimeout: 5 * time.Second}
+	tacticsView := newTacticsState(lf)
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusapi.WithFight(lf), statusapi.WithTactics(tacticsView)), ReadHeaderTimeout: 5 * time.Second}
 	var statusFailed atomic.Bool
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -146,6 +147,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		go sc.Run(ctx)
 		lf.SetSquad(sc)
 		if ps := newProfileSync(cfg, sc, lf, logAdapter{log}); ps != nil {
+			ps.state = tacticsView
 			go ps.run(ctx, profilePoll)
 		}
 	} else if cfg.Role.IsWarrior() {

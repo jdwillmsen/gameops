@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadclient"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 )
@@ -38,6 +40,10 @@ type profileSync struct {
 	dst        profileTarget
 	controlDir string
 	log        squadclient.Logger
+
+	// state, when set, is told what the sync did so the status API can report
+	// it. The status server starts before the sync exists, hence the hand-off.
+	state *tacticsState
 
 	// applied is the key of the profile last handed to dst, so an unchanged
 	// answer costs no swap and no log line.
@@ -74,7 +80,9 @@ func (p *profileSync) run(ctx context.Context, every time.Duration) {
 func (p *profileSync) step(ctx context.Context) {
 	want := tactics.NewProfile(tacticsctl.DefaultName)
 	key := tacticsctl.DefaultName
-	if tacticsctl.TrainingEnabled(p.controlDir) {
+	training := tacticsctl.TrainingEnabled(p.controlDir)
+	p.state.noteTraining(training)
+	if training {
 		if pr, ok := p.src.FetchProfile(ctx); ok {
 			h, err := tacticsctl.Hash(pr)
 			if err != nil {
@@ -93,5 +101,45 @@ func (p *profileSync) step(ctx context.Context) {
 		return
 	}
 	p.applied = key
+	p.state.noteApplied(time.Now())
 	p.log.Info("squad_profile_applied", map[string]any{"profile": want.Name})
+}
+
+// profileReader is the unit's tuning in force.
+type profileReader interface {
+	Profile() tactics.Profile
+}
+
+// tacticsState reports what the unit fights with. The profile and its hash
+// come from the fighting side, so they are what is running and not what was
+// last fetched; the sync adds when it swapped the profile in and the kill
+// switch it last read. The zero sync parts stay unreported.
+type tacticsState struct {
+	src       profileReader
+	appliedAt atomic.Pointer[time.Time]
+	training  atomic.Pointer[bool]
+}
+
+func newTacticsState(src profileReader) *tacticsState { return &tacticsState{src: src} }
+
+// noteApplied and noteTraining accept a nil receiver so a unit with no sync
+// calls them without a check.
+func (t *tacticsState) noteApplied(at time.Time) {
+	if t != nil {
+		t.appliedAt.Store(&at)
+	}
+}
+
+func (t *tacticsState) noteTraining(on bool) {
+	if t != nil {
+		t.training.Store(&on)
+	}
+}
+
+func (t *tacticsState) Tactics() statusapi.Tactics {
+	pr := t.src.Profile()
+	// A profile the engine accepted always hashes; an empty hash only ever
+	// reads as "does not match" to the trainer.
+	h, _ := tactics.Hash(pr)
+	return statusapi.Tactics{Profile: pr.Name, Hash: h, AppliedAt: t.appliedAt.Load(), TrainingEnabled: t.training.Load()}
 }
