@@ -154,6 +154,10 @@ type Life struct {
 	pvp atomic.Pointer[PvPPolicy]
 	// tel counts a warrior's swings, hits, damage taken and deaths.
 	tel telemetry
+	// dealt adds up the health other entities lost to the warrior's swings,
+	// fed by watch from the read loop and the stepping goroutine.
+	dealt DamageCounter
+	watch *DamageWatcher
 	// makeKit replaces the withdraw a visit runs, for tests.
 	makeKit func(weapon bool, food int) skill.Skill
 }
@@ -167,6 +171,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}}
 	if role, ok := validRole(cfg.Role); ok {
 		l.warrior = &warriorState{role: role, p: tactics.Defaults()}
+		l.watch = NewDamageWatcher(&l.dealt)
 	}
 	return l
 }
@@ -177,6 +182,9 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 func (l *Life) Spawn(runtimeID uint64) {
 	l.ents.Spawn(runtimeID)
 	l.tel.spawn()
+	if l.watch != nil {
+		l.watch.Spawn(runtimeID)
+	}
 	l.mu.Lock()
 	l.selfID, l.hurt, l.healthSeen, l.dead, l.feetKnown = runtimeID, false, false, false, false
 	l.mu.Unlock()
@@ -188,6 +196,9 @@ func (l *Life) Reset() {
 	_, d := l.takeHurt(true)
 	l.telemetryTick(d)
 	l.tel.newLife()
+	if l.watch != nil {
+		l.watch.ClearSwings()
+	}
 	l.attacker, l.attackerUntil, l.attackerPlayer = 0, 0, false
 	clear(l.ignore)
 	clear(l.fightTicks)
@@ -221,6 +232,8 @@ func (l *Life) Apply(pk packet.Packet) {
 	defer l.mu.Unlock()
 	if l.warrior != nil {
 		l.tel.observe(pk, l.selfID, l.dead)
+		l.watch.Observe(pk)
+		l.noteHealthSeen(pk)
 	}
 	switch p := pk.(type) {
 	case *packet.ActorEvent:
