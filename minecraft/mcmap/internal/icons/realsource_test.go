@@ -136,6 +136,13 @@ func TestRealSource(t *testing.T) {
 		}
 	}
 
+	// What a player carries in a slot every day, and once had no picture.
+	for _, id := range []string{"grass_block", "shield", "short_grass", "tall_grass", "fern", "vine", "oak_leaves", "birch_leaves", "spruce_leaves", "cactus", "scaffolding", "sunflower", "waterlily", "dirt", "cobblestone", "diamond_sword"} {
+		if _, ok := set.Pictures[itemKey(id)]; !ok {
+			t.Errorf("no picture for the item %s", id)
+		}
+	}
+
 	if out := os.Getenv("MCMAP_REAL_SOURCE_OUT"); out != "" {
 		for key, body := range set.Pictures {
 			if err := os.WriteFile(filepath.Join(out, strings.ReplaceAll(key, "/", "__")+".png"), body, 0o644); err != nil {

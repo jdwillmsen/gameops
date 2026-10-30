@@ -161,8 +161,40 @@ func itemSpellings(id string) []string {
 }
 
 // tinted are the block textures the game colours by where they stand, which
-// are drawn grey in the samples and would be a wrong colour as a picture.
-var tinted = regexp.MustCompile(`leaves|tallgrass|fern|vine|grass_top|double_plant`)
+// are drawn grey in the samples and are multiplied by a colour to be a picture.
+var tinted = regexp.MustCompile(`leaves|tallgrass|fern|vine|grass_top|double_plant|waterlily`)
+
+// Colours the game gives a block that is coloured by its biome, taken as a
+// plains biome's, since a slot has no biome to ask. A leaf the game does not
+// colour is drawn as it is.
+const (
+	plainsGrass   = "#79c05a"
+	plainsFoliage = "#48b518"
+	birchFoliage  = "#80a755"
+	spruceFoliage = "#619961"
+	lilyPad       = "#208030"
+)
+
+// tintOf is the colour a block texture is multiplied by to be a picture, or
+// "" where the texture is already in its own colours.
+func tintOf(id, path string) string {
+	if !tinted.MatchString(path) {
+		return ""
+	}
+	switch {
+	case strings.Contains(id, "cherry") || strings.Contains(id, "azalea") || strings.Contains(id, "pale_oak") || strings.Contains(id, "poplar"):
+		return ""
+	case strings.HasPrefix(id, "birch"):
+		return birchFoliage
+	case strings.HasPrefix(id, "spruce"):
+		return spruceFoliage
+	case id == "waterlily":
+		return lilyPad
+	case strings.Contains(path, "grass") || strings.Contains(path, "fern") || id == "sunflower" || id == "lilac" || id == "rose_bush" || id == "peony":
+		return plainsGrass
+	}
+	return plainsFoliage
+}
 
 // single is the texture an atlas entry names when it names exactly one and
 // that is a texture this service would ask for.
@@ -176,6 +208,20 @@ func (a atlas) single(name string, allowed *regexp.Regexp) string {
 		return ""
 	}
 	return one
+}
+
+// held is the texture file the samples hold for a path, as the path or as a
+// TGA's, or "" where there is none.
+func (src itemSources) held(path string) string {
+	switch {
+	case path == "":
+		return ""
+	case src.textures[path]:
+		return path
+	case src.textures[path+tgaSuffix]:
+		return path + tgaSuffix
+	}
+	return ""
 }
 
 // blockTexture is the texture a block is drawn flat with: the one it has
@@ -192,14 +238,19 @@ func (src itemSources) blockTexture(id string) string {
 	case json.Unmarshal(entry.Textures, &one) == nil:
 		names = []string{one}
 	case json.Unmarshal(entry.Textures, &sides) == nil:
-		for _, side := range []string{"side", "south", "north", "east", "west", "up", "down"} {
+		order := []string{"side", "south", "north", "east", "west", "up", "down"}
+		// A tall plant's side is the face of its flower; the stalk is below.
+		if strings.Contains(sides["side"], "additional") {
+			order = []string{"down", "up"}
+		}
+		for _, side := range order {
 			if sides[side] != "" {
 				names = append(names, sides[side])
 			}
 		}
 	}
 	for _, name := range names {
-		if path := src.terrain.pathIn(name, 0, modelTexture); path != "" && src.textures[path] && !tinted.MatchString(path) {
+		if path := src.held(src.terrain.pathIn(name, 0, modelTexture)); path != "" {
 			return path
 		}
 	}
@@ -234,7 +285,7 @@ func (src itemSources) texture(id string) string {
 	// A block the blocks file does not list is still often an entry of the
 	// terrain atlas by its own id.
 	if _, listed := src.blocks[id]; !listed {
-		if path := src.terrain.single(id, modelTexture); path != "" && src.textures[path] && !tinted.MatchString(path) {
+		if path := src.held(src.terrain.single(id, modelTexture)); path != "" {
 			return path
 		}
 	}
@@ -250,11 +301,60 @@ func (src itemSources) recipes() map[string]Recipe {
 		if notPictured(id) {
 			continue
 		}
-		if path := src.texture(id); path != "" {
-			out[itemKey(id)] = Recipe{Flat: path}
+		if recipe, ok := src.special(id); ok {
+			out[itemKey(id)] = recipe
+		} else if path := src.texture(id); path != "" {
+			out[itemKey(id)] = flatOrTinted(id, path)
 		}
 	}
 	return out
+}
+
+// flatOrTinted is the picture of a texture drawn as it is, or multiplied by
+// the colour the game lays on it. A coloured one is a layer of a 16 unit
+// square, mostly air where it is a plant.
+func flatOrTinted(id, path string) Recipe {
+	tint := tintOf(id, path)
+	if tint == "" {
+		return Recipe{Flat: path}
+	}
+	return Recipe{
+		W: boxSide, H: boxSide, Main: [4]int{0, 0, boxSide, boxSide}, Sparse: true,
+		Layers: []Layer{{Texture: path, Units: [2]int{boxSide, boxSide}, Src: [4]int{0, 0, boxSide, boxSide}, Dst: [4]int{0, 0, boxSide, boxSide}, Tint: tint}},
+	}
+}
+
+// shieldSheet is the model texture a shield is drawn from. The item texture
+// atlas names it for the shield, which is a model, not a flat texture.
+const shieldSheet = "textures/entity/shield"
+
+// special is the picture of an item the game draws from a model or a tinted
+// cube, which no single flat texture is a picture of.
+func (src itemSources) special(id string) (Recipe, bool) {
+	switch id {
+	case "shield":
+		// The front of the shield is the face of its plate: 12 wide and 22
+		// tall, one unit in from the corner of a 64 unit texture.
+		if src.items.single("shield", modelTexture) != shieldSheet {
+			return Recipe{}, false
+		}
+		return Recipe{
+			W: 12, H: 22, Main: [4]int{0, 0, 12, 22},
+			Layers: []Layer{{Texture: shieldSheet, Units: [2]int{64, 64}, Src: [4]int{1, 1, 12, 22}, Dst: [4]int{0, 0, 12, 22}}},
+		}, true
+	case "grass_block":
+		// The side as the game draws it in a hand is a PNG with its fringe
+		// already green; the world's side is a TGA laid over dirt.
+		top, side := src.terrain.pathIn("grass_top", 0, modelTexture), "textures/blocks/grass_side_carried"
+		if top == "" || !src.textures[side] {
+			return Recipe{}, false
+		}
+		face := func(path, tint string) []Layer {
+			return []Layer{{Texture: path, Units: [2]int{boxSide, boxSide}, Src: [4]int{0, 0, boxSide, boxSide}, Dst: [4]int{0, 0, boxSide, boxSide}, Tint: tint}}
+		}
+		return Recipe{Block: &Block{W: boxSide, H: boxSide, D: boxSide, Top: face(top, plainsGrass), Left: face(side, ""), Right: face(side, "")}}, true
+	}
+	return Recipe{}, false
 }
 
 // addItems adds the items' recipes to the rest, in the order of their keys.
