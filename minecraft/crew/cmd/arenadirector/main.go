@@ -288,6 +288,9 @@ func boss(args []string) {
 	var trace io.Writer
 	var traceFile *os.File
 	if *tracePath != "" {
+		if samePath(*tracePath, path) {
+			fail("arenadirector: --trace must not be the run log")
+		}
 		f, err := os.OpenFile(*tracePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 		if err != nil {
 			fail("arenadirector: " + err.Error())
@@ -352,6 +355,19 @@ func boss(args []string) {
 	case err != nil:
 		fail("arenadirector: " + err.Error())
 	}
+}
+
+// samePath reports whether two paths name the same file, including through a
+// link, and falls back to comparing absolute paths when one does not exist.
+func samePath(a, b string) bool {
+	if ai, err := os.Stat(a); err == nil {
+		if bi, err := os.Stat(b); err == nil {
+			return os.SameFile(ai, bi)
+		}
+	}
+	aa, errA := filepath.Abs(a)
+	ba, errB := filepath.Abs(b)
+	return errA == nil && errB == nil && aa == ba
 }
 
 func defaultLogPath() (string, error) {

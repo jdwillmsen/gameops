@@ -75,7 +75,8 @@ type BossTest struct {
 
 	// Trace, when set, receives one JSON line per poll with the boss's and
 	// each warrior's position, so a stalled fight can be replayed.
-	Trace io.Writer
+	Trace       io.Writer
+	traceWarned bool
 
 	Out   io.Writer
 	Now   func() time.Time
@@ -419,7 +420,7 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 		if err != nil {
 			return BossRecord{}, err
 		}
-		b.trace(d, run, b.now().Sub(startTS))
+		b.trace(d, run, startTS)
 		reply, err := d.exec("testfor " + b.bossSelector())
 		if err != nil {
 			return BossRecord{}, err
@@ -473,6 +474,9 @@ func (b *BossTest) fight(ctx context.Context, d *Director, run int) (BossRecord,
 // traceSample is one poll of the fight. A missing position is null: the
 // mob was dead, unloaded or not yet respawned.
 type traceSample struct {
+	// TS is the fight's start, equal to its BossRecord.TS, because run
+	// numbers restart at 1 in every invocation.
+	TS       string                   `json:"ts"`
 	T        float64                  `json:"t"`
 	Run      int                      `json:"run"`
 	Boss     *TargetPosition          `json:"boss"`
@@ -487,7 +491,7 @@ type traceWarrior struct {
 
 // trace appends one sample. Telemetry never ends a fight: a failed query or a
 // write error just drops the sample.
-func (b *BossTest) trace(d *Director, run int, since time.Duration) {
+func (b *BossTest) trace(d *Director, run int, start time.Time) {
 	if b.Trace == nil {
 		return
 	}
@@ -502,7 +506,7 @@ func (b *BossTest) trace(d *Director, run int, since time.Duration) {
 		}
 		return &p
 	}
-	s := traceSample{T: roundTenth(since.Seconds()), Run: run, Warriors: map[string]*traceWarrior{}}
+	s := traceSample{TS: start.UTC().Format(time.RFC3339), T: roundTenth(b.now().Sub(start).Seconds()), Run: run, Warriors: map[string]*traceWarrior{}}
 	s.Boss = query("querytarget " + b.bossSelector())
 	for _, name := range b.Warriors {
 		cmd, err := rallyQueryCommand(name)
@@ -525,7 +529,10 @@ func (b *BossTest) trace(d *Director, run int, since time.Duration) {
 	if err != nil {
 		return
 	}
-	_, _ = b.Trace.Write(append(line, '\n'))
+	if _, err := b.Trace.Write(append(line, '\n')); err != nil && !b.traceWarned {
+		b.traceWarned = true
+		b.logf("arena: trace write failed, the trace has gaps: %v", err)
+	}
 }
 
 func (b *BossTest) pollEvery() time.Duration {
