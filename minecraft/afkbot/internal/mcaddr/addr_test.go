@@ -36,7 +36,7 @@ func TestResolve(t *testing.T) {
 }
 
 func TestResolveRejectsWhatTheClientRefuses(t *testing.T) {
-	for _, host := range []string{"http://", "http://:31134", "http://mc.example:31134/x", "http://u:p@mc.example:1", "http://mc.example?x=1", "http://[::1"} {
+	for _, host := range []string{"http://", "http://:31134", "http://mc.example:31134/x", "http://u:p@mc.example:1", "http://mc.example?x=1", "http://[::1", "http://mc.example:65536", "http://mc.example:0", "http://mc.example:99999"} {
 		if got, err := Resolve(host, 25565); err == nil {
 			t.Errorf("Resolve(%q) = %q, want an error", host, got)
 		}
