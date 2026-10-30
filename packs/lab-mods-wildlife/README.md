@@ -26,7 +26,7 @@ saved in a world depend on them.
 `/scriptevent` ids for lab testing, not gameplay:
 
 - `gameops:tame` tames the nearest `gameops:` animal within 64 blocks to the player who runs it.
-- `gameops:perf` logs one `gameops:perf mean_tick_ms=... ticks=200` line after 200 ticks.
+- `gameops:perf` logs one `gameops:perf mean_tick_ms=... ticks=200` line after 200 ticks. An idle server reads 50.0 ms whatever the load, so the probe only detects lag; the smoke also prints `docker stats` CPU and memory before and after summoning for cost.
 - `gameops:census` logs one `gameops:census tiger=<n> cheetah=<n> lion=<n> black_leopard=<n> brown_bear=<n> hyena=<n>` line counting loaded animals of each type in all three dimensions; it works from the server console.
 - At startup the script logs `gameops:wildlife script loaded`; `tools/lab-preview-smoke.sh` looks for it.
 

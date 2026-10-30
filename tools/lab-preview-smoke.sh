@@ -92,6 +92,10 @@ gone_within() {
   return 1
 }
 
+# Informational only. The tick probe below reads 50.0 ms on an idle 20 tps
+# server whatever the load, so it detects lag but not cost; CPU and memory show cost.
+stats() { echo "stats $1: $(docker stats --no-stream --format '{{.CPUPerc}} {{.MemUsage}}' "$LAB_PREVIEW_NAME")"; }
+
 perf() {
   local t line i
   t=$(now)
@@ -135,6 +139,7 @@ area 400 0 named
 area 600 0 tamed
 area 800 0 hyenas
 sleep 10
+stats before-summon
 base=$(perf || echo "")
 
 # c. census
@@ -221,6 +226,7 @@ fi
 
 # g. perf
 sleep 30
+stats after-summon
 after=$(perf || echo "")
 if [[ -z $base || -z $after ]]; then
   bad perf "no perf line (baseline='$base' after='$after')"
@@ -229,6 +235,10 @@ elif awk -v b="$base" -v a="$after" 'BEGIN { exit !(a <= b * 1.10) }'; then
 else
   bad perf "mean_tick_ms $after is over 110% of baseline $base"
 fi
+
+# Boot only covers startup; a handler throwing later also shows as a [Scripting] error.
+serr=$(logs_since "$(docker inspect -f '{{.State.StartedAt}}' "$LAB_PREVIEW_NAME")" | grep -E '\[Scripting\].*(ERROR|error|exception)' || true)
+if [[ -z $serr ]]; then ok script-errors; else bad script-errors "$(head -3 <<<"$serr")"; fi
 
 echo "RESULT count=$COUNT pass=$pass fail=$fail"
 [[ $fail -eq 0 ]]
