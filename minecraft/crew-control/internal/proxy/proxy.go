@@ -24,11 +24,12 @@ var cameraFiles = []string{
 	"atlas.png", "atlas.json", "items.png", "items.json", "sky.js", "stats",
 }
 
-// Handler serves only the allow-listed GET routes under /units/{id}/.
+// Handler serves only the allow-listed GET routes under /units/{id}/, where
+// {id} is a unit's id or its in-game name.
 func Handler(r roster.Roster, log *logging.Logger) http.Handler {
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			unit, ok := r.Get(pr.In.PathValue("id"))
+			unit, ok := r.Resolve(pr.In.PathValue("id"))
 			if !ok {
 				// The route guard has already checked the unit; if that ever
 				// breaks, an empty host makes the transport fail with a 502
@@ -38,9 +39,10 @@ func Handler(r roster.Roster, log *logging.Logger) http.Handler {
 				return
 			}
 			pr.SetURL(unit.URL)
-			// Strip the /units/{id} prefix; the mux has matched the rest
-			// against the allow-list, so it is safe to forward verbatim.
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/units/"+unit.ID)
+			// Strip the /units/{id} prefix, spelled as the caller wrote it; the
+			// mux has matched the rest against the allow-list, so it is safe
+			// to forward verbatim.
+			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/units/"+pr.In.PathValue("id"))
 			pr.Out.URL.RawPath = ""
 			pr.Out.URL.RawQuery = cameraQuery(pr.In)
 			// A unit accepts its camera websocket with the default origin
@@ -98,7 +100,7 @@ func guard(r roster.Roster, next http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
 		// Method is checked here rather than in the mux pattern, whose
 		// mismatch answer is 405 rather than the 404 of any other refusal.
-		if _, ok := r.Get(req.PathValue("id")); !ok || req.Method != http.MethodGet {
+		if _, ok := r.Resolve(req.PathValue("id")); !ok || req.Method != http.MethodGet {
 			http.NotFound(w, req)
 			return
 		}

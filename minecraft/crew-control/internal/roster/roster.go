@@ -57,6 +57,27 @@ func (r Roster) Get(id string) (Unit, bool) {
 	return r.units[i], true
 }
 
+// Resolve finds a unit by its id or, failing that, by its in-game name. An id
+// always wins, and a name two units share names neither, so a name can never
+// reach a different unit than the operator meant.
+func (r Roster) Resolve(key string) (Unit, bool) {
+	if u, ok := r.Get(key); ok {
+		return u, true
+	}
+	var found Unit
+	n := 0
+	for _, u := range r.units {
+		if u.Name == key {
+			found = u
+			n++
+		}
+	}
+	if n != 1 {
+		return Unit{}, false
+	}
+	return found, true
+}
+
 type rawUnit struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
