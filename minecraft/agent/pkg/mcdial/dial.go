@@ -11,15 +11,19 @@ package mcdial
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/df-mc/go-nethernet/endpoint"
 	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
+
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 )
 
 // Dial connects to address and returns once the world has spawned the player.
@@ -30,6 +34,12 @@ import (
 // the server is demonstrably up and the only thing outstanding is its world:
 // a freshly started server loads the world for its first player, and that
 // can outlast any deadline short enough to be a useful answer to "is it up".
+//
+// The transport follows the address: an http:// or https:// URL is a
+// NetherNet server's signaling port, anything else is a RakNet host:port. A
+// NetherNet server admits only a player it can identify at the transport, so
+// the dialer must carry a TokenSource; an anonymous dial is turned away
+// before any packet is exchanged.
 //
 // A dial that fails after the transport came up closes it, so the server is
 // told the client has left.
@@ -48,7 +58,7 @@ func Dial(ctx context.Context, dialer minecraft.Dialer, address string, connect,
 // leave tells the server the player is going and returns once that has been
 // sent, or after wait. It is safe to call more than once.
 func DialWithLeave(ctx context.Context, dialer minecraft.Dialer, address string, connect, spawn time.Duration) (*minecraft.Conn, func(wait time.Duration), error) {
-	return dialOn(ctx, &transport{connectBy: time.Now().Add(connect)}, dialer, address, spawn)
+	return dialOn(ctx, &transport{connectBy: time.Now().Add(connect), netherNet: mcproto.IsNetherNet(address)}, dialer, address, spawn)
 }
 
 func dialOn(ctx context.Context, transport *transport, dialer minecraft.Dialer, address string, spawn time.Duration) (*minecraft.Conn, func(wait time.Duration), error) {
@@ -66,11 +76,17 @@ func dialOn(ctx context.Context, transport *transport, dialer minecraft.Dialer, 
 	return conn, func(wait time.Duration) { once.Do(func() { transport.leave(conn, wait) }) }, nil
 }
 
-// transport is RakNet with the connect budget applied, which keeps hold of
-// the connection it dialled: the library returns no connection from a failed
-// dial, so this is the only handle on one it abandoned.
+// transport is RakNet or NetherNet with the connect budget applied, which
+// keeps hold of the connection it dialled: the library returns no connection
+// from a failed dial, so this is the only handle on one it abandoned.
+//
+// For NetherNet the connect budget covers signaling, ICE and the DTLS and
+// SCTP handshakes, all of which finish before the connection is handed over.
+// If any of them fails the NetherNet dialer closes what it built itself, so
+// the connection recorded here is always one that reached the login.
 type transport struct {
 	connectBy time.Time
+	netherNet bool
 
 	mu   sync.Mutex
 	conn net.Conn
@@ -80,6 +96,9 @@ type transport struct {
 func (t *transport) PingContext(ctx context.Context, address string) ([]byte, error) {
 	ctx, cancel := context.WithDeadline(ctx, t.connectBy)
 	defer cancel()
+	if t.netherNet {
+		return minecraft.NetherNet{Signaling: endpoint.NewClient()}.PingContext(ctx, address)
+	}
 	return raknet.Dialer{}.PingContext(ctx, address)
 }
 
@@ -87,14 +106,45 @@ func (t *transport) PingContext(ctx context.Context, address string) ([]byte, er
 func (t *transport) DialContext(ctx context.Context, address string) (net.Conn, error) {
 	ctx, cancel := context.WithDeadline(ctx, t.connectBy)
 	defer cancel()
-	conn, err := raknet.Dialer{}.DialContext(ctx, address)
+	var (
+		conn net.Conn
+		err  error
+	)
+	if t.netherNet {
+		// The library only reaches here without a token, i.e. anonymously,
+		// which a dedicated server turns away at the transport.
+		conn, err = minecraft.NetherNet{Signaling: endpoint.NewClient()}.DialContext(ctx, address)
+	} else {
+		conn, err = raknet.Dialer{}.DialContext(ctx, address)
+	}
 	if err != nil {
 		return nil, err
 	}
+	return t.keep(conn), nil
+}
+
+// DialContextIdentity implements the library's optional identity-bound dial,
+// which it prefers whenever it holds a signed-in token. NetherNet identifies
+// the player in the transport handshake itself, so the token and the
+// connection's key are handed to it here; RakNet has no such step.
+func (t *transport) DialContextIdentity(ctx context.Context, address, token string, key *ecdsa.PrivateKey) (net.Conn, error) {
+	if !t.netherNet {
+		return t.DialContext(ctx, address)
+	}
+	ctx, cancel := context.WithDeadline(ctx, t.connectBy)
+	defer cancel()
+	conn, err := minecraft.NetherNet{Signaling: endpoint.NewClient()}.DialContextIdentity(ctx, address, token, key)
+	if err != nil {
+		return nil, err
+	}
+	return t.keep(conn), nil
+}
+
+func (t *transport) keep(conn net.Conn) net.Conn {
 	t.mu.Lock()
 	t.conn = conn
 	t.mu.Unlock()
-	return conn, nil
+	return conn
 }
 
 // Listen implements minecraft.Network. A client never listens.

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/df-mc/go-nethernet"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 )
@@ -17,7 +18,10 @@ import (
 // player, and which -- like the real one -- refuses a login from a player it
 // believes is still connected.
 type slowWorld struct {
-	listener   *minecraft.Listener
+	listener *minecraft.Listener
+	// dialAddr overrides the listener's own address where clients reach the
+	// server some other way, as they do a NetherNet one.
+	dialAddr   string
 	spawnDelay time.Duration
 
 	mu      sync.Mutex
@@ -29,11 +33,40 @@ type slowWorld struct {
 
 func startSlowWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 	t.Helper()
-	listener, err := minecraft.ListenConfig{AuthenticationDisabled: true}.Listen("raknet", "127.0.0.1:0")
+	return startWorldOn(t, spawnDelay, nil, "127.0.0.1:0", "")
+}
+
+// startNetherNetWorld is the same server behind a NetherNet signaling port.
+func startNetherNetWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
+	t.Helper()
+	// The signaling server binds its own socket, so a port is reserved first
+	// and handed over: the URL clients dial has to be known up front.
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	hostport := l.Addr().String()
+	_ = l.Close()
+	return startWorldOn(t, spawnDelay, minecraft.NetherNet{ListenConfig: nethernet.ListenConfig{AllowAnonymous: true}}, hostport, "http://"+hostport)
+}
+
+func startWorldOn(t *testing.T, spawnDelay time.Duration, network minecraft.Network, listenAddr, dialAddr string) *slowWorld {
+	t.Helper()
+	cfg := minecraft.ListenConfig{AuthenticationDisabled: true}
+	var (
+		listener *minecraft.Listener
+		err      error
+	)
+	if network == nil {
+		listener, err = cfg.Listen("raknet", listenAddr)
+	} else {
+		listener, err = cfg.ListenNetwork(network, listenAddr)
+	}
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	w := &slowWorld{
+		dialAddr:   dialAddr,
 		listener:   listener,
 		spawnDelay: spawnDelay,
 		held:       map[string]bool{},
@@ -44,7 +77,12 @@ func startSlowWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 	return w
 }
 
-func (w *slowWorld) address() string { return w.listener.Addr().String() }
+func (w *slowWorld) address() string {
+	if w.dialAddr != "" {
+		return w.dialAddr
+	}
+	return w.listener.Addr().String()
+}
 
 func (w *slowWorld) refusals() int {
 	w.mu.Lock()
@@ -235,4 +273,73 @@ func TestLeaveTellsServerBeforeReturning(t *testing.T) {
 		t.Errorf("server refused %d logins, want 0", n)
 	}
 	leave(time.Second) // idempotent
+}
+
+// The same guarantees over NetherNet, whose connection is torn down by Close
+// itself rather than by a later tick -- so the server must learn of a gave-up
+// dial just the same.
+func TestNetherNetDialThatGivesUpBeforeSpawnLeavesNoSession(t *testing.T) {
+	world := startNetherNetWorld(t, 3*time.Second)
+
+	_, err := Dial(context.Background(), dialerFor("Agent"), world.address(), time.Second, 500*time.Millisecond)
+	if err == nil {
+		t.Fatal("Dial succeeded before the world could spawn the player")
+	}
+	if !strings.Contains(err.Error(), "awaiting spawn") {
+		t.Fatalf("Dial error = %q, want it to say the server had been reached", err)
+	}
+
+	select {
+	case name := <-world.left:
+		if name != "Agent" {
+			t.Fatalf("server saw %q leave, want Agent", name)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("server still holds the abandoned session: the client never told it it left")
+	}
+
+	conn, err := Dial(context.Background(), dialerFor("Agent"), world.address(), 20*time.Second, 20*time.Second)
+	if err != nil {
+		t.Fatalf("redial after giving up: %v (server refused %d logins)", err, world.refusals())
+	}
+	_ = conn.Close()
+}
+
+func TestNetherNetLeaveTellsServerBeforeReturning(t *testing.T) {
+	world := startNetherNetWorld(t, 0)
+
+	conn, leave, err := DialWithLeave(context.Background(), dialerFor("Agent"), world.address(), 20*time.Second, 20*time.Second)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	if err := conn.DoSpawnContext(context.Background()); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	leave(5 * time.Second)
+
+	select {
+	case name := <-world.left:
+		if name != "Agent" {
+			t.Fatalf("server saw %q leave, want Agent", name)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("server had not learned the player left")
+	}
+	leave(time.Second) // idempotent
+}
+
+// A signaling port with nothing behind it is a down server: the dial ends at
+// the connect budget and claims no session.
+func TestNetherNetDialGivesUpOnDeadSignalingAtConnectBudget(t *testing.T) {
+	started := time.Now()
+	_, err := Dial(context.Background(), dialerFor("Agent"), "http://127.0.0.1:1", time.Second, time.Minute)
+	if err == nil {
+		t.Fatal("Dial succeeded against nothing")
+	}
+	if strings.Contains(err.Error(), "awaiting spawn") {
+		t.Errorf("Dial error = %q, want no claim that the server was reached", err)
+	}
+	if waited := time.Since(started); waited > 5*time.Second {
+		t.Errorf("gave up after %v, want about the 1s connect budget", waited)
+	}
 }
