@@ -97,28 +97,35 @@ drops, missing baseline, healing and other attributes, killing blow, own
 health, respawn, dimension change, fight reset, caps, and two concurrent
 tests.
 
-## Wiring (not done)
+## Wiring (done)
 
-1. `noteSwing` also calls `watcher.Swing`; `Apply` also calls `Observe`;
-   `telemetryTick` calls `Tick`; `fightStarted` calls `FightStart`. Replace
-   the damage part of `telemetry` (`reportDamage` amounts) with the sink so one
-   health stream feeds both, and add the sink's `Dealt` to `FightStats` and so
-   to `/v1/state`.
-2. The arena side reads each squad member's `/v1/state` at the director's
-   `FightStart` and at `Finish` (through the crew-control proxy
-   `/units/{id}/v1/state`), and puts the difference in the scorecard:
-   `DamageTaken` = sum of the side's units, `DamageDealt` = sum of their
-   `Dealt`. In a duel use the opponent side's `Taken` for `DamageDealt`.
-3. Squad mob fights: to avoid the teammate double count, give the sink a
-   per-target ledger and let the aggregator take, per mob runtime ID, the
-   largest total any one unit saw. Runtime IDs are global to the server. That
-   is a change to the aggregator, not to the units.
+1. Unit: `noteSwing` also calls `watcher.Swing`, `Apply` calls `Observe`,
+   `telemetryTick` calls `Tick`, `fightStarted` calls `FightStart`. One
+   `DamageCounter` per `Life`; its `Dealt` is `damage_dealt` in
+   `FightStats`, so `/v1/state` serves `tasks.fight.{total,current}.damage_dealt`
+   next to `damage_taken`. `damage_taken` still comes from the telemetry's own
+   health reading; the sink's `Taken` is not used. Other entities' health is
+   also kept on `belief.Entity` (`Health`, `HealthKnown`).
+2. Arena: `HTTPDamage.Totals` reads taken and dealt in one request per unit.
+   The recorder puts the growth of each warrior's totals in `DamageTaken` and
+   `DamageDealt`; a failed reading leaves both zero. A duel card takes
+   `DamageTaken` from its own side and `DamageDealt` from the opponent side's
+   taken, and reads nothing for an aborted round. `arenadirector duel` has no
+   `--status-url` yet; the training bridge passes its source through.
+3. Still open: the per-target ledger for squad mob fights. A squad's summed
+   Dealt double-counts a teammate's blow, so `Score` credits Dealt only to a
+   fight that was not won, and caps it.
+4. Live check: the unit logs `health_seen` (entity type and first health) once
+   per mob type per session, capped at 32 types. One warrior and one zombie on
+   the lab should show `entity: zombie`; if it never appears, the [INF] below
+   is false and Dealt stays zero.
 
 ## Open
 
 - Confirm on the lab that an ordinary zombie's `UpdateAttributes` reach the
   client (one warrior, one zombie, log non-self `minecraft:health` changes). It
   is the one [INF] under the recommendation; the prototype is inert until then.
-- Scorecard weights: `Score` subtracts `DamageTaken * 0.1`
-  (`tactics/scorecard.go:69`). Once real values flow, check that scale against
-  a 20 HP unit before the trainer trusts it.
+- Scorecard weights were re-set for a 20 HP unit (`tactics/scorecard.go`):
+  taken costs 0.3 a point, so a lost bar (6) outweighs a minute of speed;
+  dealt earns 0.2 a point, capped at 15, only on a loss or timeout. Re-check
+  once real values flow.
