@@ -84,6 +84,47 @@ func TestScoreOrdersOutcomes(t *testing.T) {
 	}
 }
 
+func TestScoreFastWinWithLittleDamageBeatsASlowOne(t *testing.T) {
+	fast := Scorecard{Outcome: OutcomeWin, Seconds: 20, Kills: 4, DamageTaken: 2, DamageDealt: 80}
+	slow := Scorecard{Outcome: OutcomeWin, Seconds: 200, Kills: 4, DamageTaken: 2, DamageDealt: 80}
+	bled := Scorecard{Outcome: OutcomeWin, Seconds: 20, Kills: 4, DamageTaken: 20, DamageDealt: 80}
+	slowBled := Scorecard{Outcome: OutcomeWin, Seconds: 200, Kills: 4, DamageTaken: 18, DamageDealt: 80}
+	if !(fast.Score() > slow.Score() && fast.Score() > bled.Score() && fast.Score() > slowBled.Score()) {
+		t.Errorf("fast %v, slow %v, bled %v, slow and bled %v: the fast clean win must lead",
+			fast.Score(), slow.Score(), bled.Score(), slowBled.Score())
+	}
+	// A whole health bar lost is worth more than a minute of speed.
+	oneBar := Scorecard{Outcome: OutcomeWin, Seconds: 30, DamageTaken: 20}
+	minuteSlower := Scorecard{Outcome: OutcomeWin, Seconds: 90}
+	if oneBar.Score() >= minuteSlower.Score() {
+		t.Errorf("a bar lost scores %v, a minute slower %v", oneBar.Score(), minuteSlower.Score())
+	}
+}
+
+func TestScoreCreditsDamageDealtOnlyToFightsNotWon(t *testing.T) {
+	won := Scorecard{Outcome: OutcomeWin, Seconds: 30, DamageDealt: 400}
+	if won.Score() != (Scorecard{Outcome: OutcomeWin, Seconds: 30}).Score() {
+		t.Error("damage dealt moved the score of a won fight")
+	}
+	far := Scorecard{Outcome: OutcomeTimeout, DamageDealt: 18}
+	none := Scorecard{Outcome: OutcomeTimeout}
+	if far.Score() <= none.Score() {
+		t.Errorf("a timeout that got far scores %v, one that did nothing %v", far.Score(), none.Score())
+	}
+	// However much a loss dealt, it stays below a timeout that dealt nothing,
+	// and a timeout stays below a win.
+	bigLoss := Scorecard{Outcome: OutcomeLoss, DamageDealt: 5000}
+	if bigLoss.Score() >= none.Score() {
+		t.Errorf("a loss dealing 5000 scores %v, above a timeout dealing none (%v)", bigLoss.Score(), none.Score())
+	}
+	if (Scorecard{Outcome: OutcomeTimeout, DamageDealt: 5000}).Score() >= (Scorecard{Outcome: OutcomeWin, Seconds: 600, DamageTaken: 40}).Score() {
+		t.Error("a timeout outscored a slow, bloody win")
+	}
+	if (Scorecard{Outcome: OutcomeLoss, DamageDealt: -9}).Score() != (Scorecard{Outcome: OutcomeLoss}).Score() {
+		t.Error("negative damage dealt counted against a loss")
+	}
+}
+
 func TestTacticsForDefaultsToNoneAndKeepsOrder(t *testing.T) {
 	pr := NewProfile("p")
 	if len(pr.TacticsFor(FamilyCreeper)) != 0 {
