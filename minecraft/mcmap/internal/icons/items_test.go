@@ -159,7 +159,7 @@ func TestAnItemsTextureIsFoundByTheNamesTheGameGivesIt(t *testing.T) {
 	}
 }
 
-func TestABlocksItemIsItsSideAndNeverATextureTheGameColoursInPlace(t *testing.T) {
+func TestABlocksItemIsItsSideAndATextureTheGameColoursInPlaceIsTinted(t *testing.T) {
 	src := itemSources{textures: map[string]bool{}}
 	if err := json.Unmarshal([]byte(itemTerrain), &src.terrain); err != nil {
 		t.Fatal(err)
@@ -175,8 +175,8 @@ func TestABlocksItemIsItsSideAndNeverATextureTheGameColoursInPlace(t *testing.T)
 		"rubble":      "textures/blocks/rubble",
 		"striped_log": "textures/blocks/striped_side",
 		"glow_cube":   "textures/blocks/glow_cube",
-		// Drawn grey in the samples, and coloured by the biome in the game.
-		"lush_fern": "",
+		// Drawn grey in the samples; the picture multiplies it by a colour.
+		"lush_fern": "textures/blocks/lush_fern_leaf",
 		// Listed by a texture the atlas does not hold.
 		"ghost_item":  "",
 		"not_a_block": "",
@@ -522,6 +522,72 @@ func TestTheMarksForHealthAndHungerAreFetchedAsTheyCame(t *testing.T) {
 		}
 		if cfg, err := png.DecodeConfig(bytes.NewReader(raw)); err != nil || cfg.Width != 9 || cfg.Height != 9 {
 			t.Errorf("%s is %dx%d (%v), want 9x9", key, cfg.Width, cfg.Height, err)
+		}
+	}
+}
+
+func TestABiomeColouredTextureIsMultipliedByAPlainsColourAndNoOtherIsTinted(t *testing.T) {
+	for _, c := range []struct{ id, path, want string }{
+		{"short_grass", "textures/blocks/tallgrass", plainsGrass},
+		{"tall_grass", "textures/blocks/double_plant_grass_bottom", plainsGrass},
+		{"fern", "textures/blocks/fern.tga", plainsGrass},
+		{"oak_leaves", "textures/blocks/leaves_oak.tga", plainsFoliage},
+		{"birch_leaves", "textures/blocks/leaves_birch.tga", birchFoliage},
+		{"spruce_leaves", "textures/blocks/leaves_spruce.tga", spruceFoliage},
+		{"waterlily", "textures/blocks/waterlily", lilyPad},
+		// The game does not colour these in place.
+		{"cherry_leaves", "textures/blocks/leaves_cherry", ""},
+		{"azalea_leaves", "textures/blocks/leaves_azalea", ""},
+		{"pale_oak_leaves", "textures/blocks/pale_oak_leaves", ""},
+		{"cobblestone", "textures/blocks/cobblestone", ""},
+	} {
+		if got := tintOf(c.id, c.path); got != c.want {
+			t.Errorf("%s drawn from %s is tinted %q, want %q", c.id, c.path, got, c.want)
+		}
+	}
+	if r := flatOrTinted("oak_leaves", "textures/blocks/leaves_oak.tga"); r.Flat != "" || len(r.Layers) != 1 || r.Layers[0].Tint != plainsFoliage || r.check() != nil {
+		t.Errorf("a leaf is not a valid tinted layer: %+v", r)
+	}
+	if r := flatOrTinted("cobblestone", "textures/blocks/cobblestone"); r.Flat != "textures/blocks/cobblestone" || r.check() != nil {
+		t.Errorf("an uncoloured block is not drawn as it is: %+v", r)
+	}
+}
+
+func TestAShieldAndAGrassBlockAreDrawnFromTheirModelsAndNotAFlatTexture(t *testing.T) {
+	src := itemSources{
+		ids:      []string{"shield", "grass_block"},
+		textures: map[string]bool{"textures/blocks/grass_side_carried": true},
+	}
+	if err := json.Unmarshal([]byte(`{"texture_data":{"shield":{"textures":"textures/entity/shield"},"grass_top":{"textures":["textures/blocks/grass_top"]}}}`), &src.items); err != nil {
+		t.Fatal(err)
+	}
+	src.terrain = src.items
+	recipes := src.recipes()
+	shield, ok := recipes[itemKey("shield")]
+	if !ok || shield.check() != nil || shield.Layers[0].Texture != "textures/entity/shield" || shield.Layers[0].Src != [4]int{1, 1, 12, 22} {
+		t.Errorf("the shield is %+v", shield)
+	}
+	grass, ok := recipes[itemKey("grass_block")]
+	if !ok || grass.check() != nil || grass.Block == nil || grass.Block.Top[0].Tint != plainsGrass || grass.Block.Left[0].Tint != "" {
+		t.Errorf("the grass block is %+v", grass)
+	}
+	// With no model texture named, there is no shield to draw.
+	src.items = atlas{}
+	if _, ok := src.recipes()[itemKey("shield")]; ok {
+		t.Error("a shield is drawn from a texture the atlas does not name")
+	}
+}
+
+func TestATextureKeptAsATGAIsHeldByItsPath(t *testing.T) {
+	src := itemSources{textures: map[string]bool{"textures/blocks/fern.tga": true, "textures/blocks/dirt": true}}
+	for path, want := range map[string]string{
+		"textures/blocks/fern": "textures/blocks/fern.tga",
+		"textures/blocks/dirt": "textures/blocks/dirt",
+		"textures/blocks/none": "",
+		"":                     "",
+	} {
+		if got := src.held(path); got != want {
+			t.Errorf("held(%q) = %q, want %q", path, got, want)
 		}
 	}
 }

@@ -260,8 +260,19 @@ func (a atlas) pathIn(name string, index int, allowed *regexp.Regexp) string {
 			return ""
 		}
 	case json.Unmarshal(entry.Textures, &many) == nil:
-		if index < 0 || index >= len(many) || json.Unmarshal(many[index], &one) != nil {
+		if index < 0 || index >= len(many) {
 			return ""
+		}
+		// An entry may be a path, or an object that says which colour is laid
+		// over the path's texture.
+		var coloured struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(many[index], &one) != nil {
+			if json.Unmarshal(many[index], &coloured) != nil {
+				return ""
+			}
+			one = coloured.Path
 		}
 	default:
 		return ""
@@ -785,6 +796,10 @@ func (s *Source) wide(ctx context.Context, total *budget) (listing, http.Header,
 			}
 		} else if texture, ok := strings.CutSuffix(e.Path, tgaSuffix); ok && strings.HasPrefix(texture, "textures/entity/") {
 			out.tga[texture] = true
+		} else if ok && strings.HasPrefix(texture, "textures/blocks/") && !strings.HasSuffix(texture, "_mers") {
+			// Blocks drawn from a TGA, a cactus and a leaf among them, are
+			// kept apart from the PNGs by keeping the suffix.
+			out.textures[texture+tgaSuffix] = true
 		}
 		dir, name := "", e.Path
 		if i := strings.LastIndexByte(e.Path, '/'); i >= 0 {
