@@ -26,7 +26,8 @@ import (
 // Closing the connection does not tell the server anything on its own: the
 // RakNet layer marks the link as closing and sends the disconnect notice from
 // its own tick once the packets it still owes are acknowledged -- between
-// roughly one and five seconds later. A process that exits before that never
+// roughly one and five seconds later. A NetherNet close tears the link down
+// synchronously, so the wait is only needed there as slack. A process that exits before that never
 // sends it, and the server keeps the login until it times the session out,
 // which is the ten seconds a release used to cost every player. Two seconds
 // covers the ordinary case; waiting for the five-second ceiling would spend

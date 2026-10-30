@@ -279,9 +279,9 @@ func TestLeaveTellsServerBeforeReturning(t *testing.T) {
 // itself rather than by a later tick -- so the server must learn of a gave-up
 // dial just the same.
 func TestNetherNetDialThatGivesUpBeforeSpawnLeavesNoSession(t *testing.T) {
-	world := startNetherNetWorld(t, 3*time.Second)
+	world := startNetherNetWorld(t, 8*time.Second)
 
-	_, err := Dial(context.Background(), dialerFor("Agent"), world.address(), time.Second, 500*time.Millisecond)
+	_, err := Dial(context.Background(), dialerFor("Agent"), world.address(), 4*time.Second, time.Second)
 	if err == nil {
 		t.Fatal("Dial succeeded before the world could spawn the player")
 	}

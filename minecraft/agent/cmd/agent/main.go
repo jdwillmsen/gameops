@@ -13,10 +13,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
-	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -103,8 +101,12 @@ const freshJoinGrace = announceDrainDelay - time.Second
 const stableSessionThreshold = 60 * time.Second
 
 // connectTimeout bounds reaching the server at all. It is how long a server
-// that is down takes to be reported as a failed session.
-const connectTimeout = 30 * time.Second
+// that is down takes to be reported as a failed session. A NetherNet server is
+// not reached until signaling, ICE and the DTLS and SCTP handshakes have all
+// finished, which takes several round trips where RakNet takes one; the
+// library allows some of those steps up to 15s, so the budget leaves room for a
+// slow one without waiting out a dead server for long.
+const connectTimeout = 45 * time.Second
 
 // spawnTimeout bounds the wait for the world once the server has answered.
 // Far longer than connectTimeout on purpose: a server that has just started
@@ -369,7 +371,7 @@ func main() {
 	// not pay.
 	warmXboxToken(ts, log)
 
-	log.Info("starting", logging.Fields{"mc_host": cfg.MCHost, "mc_port": cfg.MCPort})
+	log.Info("starting", logging.Fields{"mc_host": cfg.MCHost, "mc_port": cfg.MCPort, "mc_address": cfg.MCAddress()})
 
 	// The agent's own effective presence when actors are configured, and
 	// always present otherwise.
@@ -788,7 +790,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// gophertunnel substitutes a placeholder. Geometry and the resource patch
 	// are left to the dialer, which supplies working humanoid defaults.
 	agentSkin := skin.For(cfg.MCUsername)
-	addr := net.JoinHostPort(cfg.MCHost, strconv.Itoa(cfg.MCPort))
+	addr := cfg.MCAddress()
 
 	// The server upgrades itself to Mojang's latest on restart, and a point
 	// release that only bumps the protocol number still gets this client
@@ -824,7 +826,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	defer leaveGame(ctx, conn, leaveGrace, log)
 
 	// conn.ReadPacket below only unblocks on the connection's own context,
-	// which gophertunnel derives from the RakNet link rather than from the
+	// which gophertunnel derives from the transport link rather than from the
 	// ctx passed to DialContext - so closing the connection is the only way
 	// a shutdown signal can interrupt a read on an idle server.
 	sessionDone := make(chan struct{})
