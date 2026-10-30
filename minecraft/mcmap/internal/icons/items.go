@@ -68,6 +68,8 @@ func parseItemIDs(raw []byte) ([]string, error) {
 // atlas for all its sides, or a name for each side.
 type blockEntry struct {
 	Textures json.RawMessage `json:"textures"`
+	// Carried is the atlas entry the game draws a block with in the hand.
+	Carried json.RawMessage `json:"carried_textures"`
 }
 
 func parseBlocks(raw []byte) (map[string]blockEntry, error) {
@@ -251,6 +253,12 @@ func (src itemSources) blockTexture(id string) string {
 				names = append(names, sides[side])
 			}
 		}
+	}
+	// A tall plant in the hand is its flower or its blades, which the world
+	// draws on two blocks; the game names the one it carries.
+	var carried string
+	if len(names) > 0 && strings.Contains(sides["side"], "additional") && json.Unmarshal(entry.Carried, &carried) == nil && carried != "" {
+		names = append([]string{carried}, names...)
 	}
 	for _, name := range names {
 		if path := src.held(src.terrain.pathIn(name, 0, modelTexture)); path != "" {
