@@ -40,13 +40,17 @@ type world struct {
 	size  int32
 	over  map[protocol.BlockPos]string
 	other string // the floor outside the island, when island is set
+	// sky makes the air above the floor known up to this height, so a unit
+	// can fly in it; without it everything above 8 is unknown, and unknown
+	// is solid.
+	sky int32
 }
 
 func (w *world) Block(p protocol.BlockPos) (string, bool) {
 	if b, ok := w.over[p]; ok {
 		return b, true
 	}
-	if p.X() < 0 || p.Z() < 0 || p.X() >= w.size || p.Z() >= w.size || p.Y() < -2 || p.Y() > 8 {
+	if p.X() < 0 || p.Z() < 0 || p.X() >= w.size || p.Z() >= w.size || p.Y() < -2 || p.Y() > max(8, w.sky) {
 		return "", false
 	}
 	switch {

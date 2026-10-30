@@ -19,7 +19,7 @@ func TestFamilyOfTypeIgnoresThePrefixAndDefaultsTheRest(t *testing.T) {
 func TestEveryFamilyTableEntryIsAKnownFamily(t *testing.T) {
 	known := map[Family]bool{
 		FamilyZombie: true, FamilySkeleton: true, FamilyCreeper: true, FamilySpider: true, FamilyBlaze: true,
-		FamilyEnderman: true, FamilyWitch: true, FamilyIllager: true, FamilyBrute: true, FamilyBoss: true,
+		FamilyEnderman: true, FamilyWitch: true, FamilyIllager: true, FamilyBrute: true, FamilyBoss: true, FamilyAir: true,
 	}
 	for typ, f := range families {
 		if !known[f] {

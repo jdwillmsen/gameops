@@ -132,6 +132,8 @@ const (
 	FamilyBrute    Family = "brute"
 	FamilyBoss     Family = "boss"
 	FamilyPlayer   Family = "player"
+	// FamilyAir is what flies out of a ground fighter's reach.
+	FamilyAir Family = "air"
 )
 
 // Profile is a versioned set of Params: a default plus per-family overrides.

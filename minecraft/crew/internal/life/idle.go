@@ -42,6 +42,11 @@ type idleState struct {
 // sends one: the server expects an input every tick from a player that is
 // alive, and moves a unit that sends none by knockback it never answers.
 func (l *Life) Idle(ctx context.Context, a skill.Actuator) error {
+	// A glide that outlived its fight comes down before anything else: the
+	// walking idle would drop the unit out of the sky.
+	if p := a.Pose(); p.Gliding() {
+		return l.glideDown(a, p)
+	}
 	// A fight may have ended with the shield raised or a bow half drawn;
 	// walking wants the hand.
 	l.stowShield(a)

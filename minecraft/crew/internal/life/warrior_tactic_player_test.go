@@ -105,7 +105,7 @@ func kitSword(r *pvpRig) { r.give(0, idDiamondSword, 1) }
 
 func TestPlayerTacticsAreRegisteredForThePlayerFamily(t *testing.T) {
 	got := TacticNames(tactics.FamilyPlayer)
-	want := []string{"player/axe-shield", "player/strafe"}
+	want := []string{"air/glide-player", "player/axe-shield", "player/strafe"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("TacticNames(player) = %v, want %v", got, want)
 	}

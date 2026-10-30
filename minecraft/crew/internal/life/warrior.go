@@ -374,6 +374,9 @@ func (l *Life) warriorTarget(pr tactics.Profile, p act.Pose, anchor mgl32.Vec3) 
 		focusRange:    func(e belief.Entity) float64 { return pr.For(familyOf(e)).FocusRange },
 		player:        l.mayFightPlayer,
 	}
+	if canFly(l.self()) {
+		q.flyHeight = airThreatHeight
+	}
 	best, found := focusTarget(l.ents, q)
 	// A creeper about to blast is answered first, as the reactive defence
 	// answers it: by leaving.
