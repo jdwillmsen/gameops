@@ -7,12 +7,12 @@ import (
 	"strings"
 )
 
-// DefaultCrewNames are the twenty crew units and the probe client: the only
+// DefaultCrewNames are the twenty-two crew units and the probe client: the only
 // players a boss test may share the server with.
 var DefaultCrewNames = []string{
 	"Agate", "Basalt", "Cobble", "Dusty", "Ember", "Flint", "Gravel", "Hazel",
 	"Ingot", "Jasper", "Kettle", "Loam", "Marble", "Nugget", "Onyx", "Pebble",
-	"Quartz", "Rusty", "Slate", "Tinder", "Probe",
+	"Quartz", "Rusty", "Slate", "Tinder", "Umber", "Vein", "Probe",
 }
 
 // NotAloneError reports the non-crew players that made a boss test refuse.

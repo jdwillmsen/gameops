@@ -47,8 +47,8 @@ func TestNonCrewIgnoresCrewNames(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"Steve99"}) {
 		t.Errorf("NonCrew = %q, want [Steve99]", got)
 	}
-	if len(DefaultCrewNames) != 21 {
-		t.Errorf("default crew names = %d, want the 20 crew plus Probe", len(DefaultCrewNames))
+	if len(DefaultCrewNames) != 23 {
+		t.Errorf("default crew names = %d, want the 22 crew plus Probe", len(DefaultCrewNames))
 	}
 }
 
