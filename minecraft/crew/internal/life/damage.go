@@ -136,6 +136,15 @@ func (w *DamageWatcher) FightStart() {
 	w.sink.FightStart()
 }
 
+// ClearSwings forgets the swings still open, for a life that ended: the clock
+// stands still while the unit is dead, so they would look fresh after the
+// respawn.
+func (w *DamageWatcher) ClearSwings() {
+	w.mu.Lock()
+	w.open = w.open[:0]
+	w.mu.Unlock()
+}
+
 // Observe is the read loop's half. It keeps sums only.
 func (w *DamageWatcher) Observe(pk packet.Packet) {
 	switch p := pk.(type) {

@@ -42,6 +42,8 @@ const (
 	// Hurt animations and deaths of other entities kept for the next tick: a
 	// crowd hurting itself must not grow the sets without bound.
 	maxSeenHurts = 64
+	// Mob types announced by a health_seen line per session.
+	maxHealthTypes = 32
 	// A health drop and a hurt animation of the one blow can arrive ticks
 	// apart; a lone hurt animation is given this long to be joined by a drop.
 	// A second blow cannot land sooner, inside the invulnerability frames.
@@ -58,6 +60,9 @@ type FightStats struct {
 	Swings      uint64  `json:"swings"`
 	HitsLanded  uint64  `json:"hits_landed"`
 	DamageTaken float64 `json:"damage_taken"`
+	// DamageDealt is health other entities lost soon after the unit's own
+	// swing or shot; an upper bound when several warriors fight one target.
+	DamageDealt float64 `json:"damage_dealt"`
 	Deaths      uint64  `json:"deaths"`
 }
 
@@ -93,6 +98,11 @@ type telemetry struct {
 	seenHurts map[uint64]struct{}
 	// Deaths of other entities, the killing blow's only sign for some.
 	seenDeaths map[uint64]struct{}
+	// healthTypes are the mob types whose health has been seen this session,
+	// and healthPending the sightings not yet logged: the read loop notes
+	// them and the stepping goroutine says so.
+	healthTypes   map[string]struct{}
+	healthPending []healthSighting
 
 	total, fight FightStats
 
@@ -124,6 +134,8 @@ func (t *telemetry) spawn() {
 	t.healthSeen = false
 	clear(t.seenHurts)
 	clear(t.seenDeaths)
+	clear(t.healthTypes)
+	t.healthPending = t.healthPending[:0]
 }
 
 // newLife forgets the swings and blows of the life that ended. The clock
@@ -172,6 +184,39 @@ func (t *telemetry) observe(pk packet.Packet, selfID uint64, dead bool) {
 			t.mu.Unlock()
 		}
 	}
+}
+
+// healthSighting is the first health reading of a mob type this session.
+type healthSighting struct {
+	typ    string
+	health float32
+}
+
+// noteHealthSeen queues the first health reading of a mob type, up to
+// maxHealthTypes types: the live check needs one line per type, and a crowd
+// of odd mobs must not turn it into a stream.
+func (t *telemetry) noteHealthSeen(typ string, hp float32) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.healthTypes[typ]; ok || len(t.healthTypes) >= maxHealthTypes {
+		return
+	}
+	if t.healthTypes == nil {
+		t.healthTypes = map[string]struct{}{}
+	}
+	t.healthTypes[typ] = struct{}{}
+	t.healthPending = append(t.healthPending, healthSighting{typ, hp})
+}
+
+func (t *telemetry) takeHealthSeen() []healthSighting {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.healthPending) == 0 {
+		return nil
+	}
+	out := t.healthPending
+	t.healthPending = nil
+	return out
 }
 
 // seen adds id to a set kept for the next tick, up to maxSeenHurts.
@@ -233,9 +278,12 @@ func (l *Life) Stats() (FightSummary, bool) {
 	if l.warrior == nil {
 		return FightSummary{}, false
 	}
+	d := l.dealt.Summary()
 	l.tel.mu.Lock()
 	defer l.tel.mu.Unlock()
-	return FightSummary{Total: l.tel.total, Current: l.tel.fight}, true
+	sum := FightSummary{Total: l.tel.total, Current: l.tel.fight}
+	sum.Total.DamageDealt, sum.Current.DamageDealt = d.Total.Dealt, d.Fight.Dealt
+	return sum, true
 }
 
 // noteSwing records a melee swing or a bow release at e, to be matched with
@@ -249,6 +297,7 @@ func (l *Life) noteSwing(e belief.Entity, ranged bool) {
 		t.open = append(t.open[:0], t.open[1:]...)
 	}
 	t.open = append(t.open, swing{tick: l.tick, target: e.ID, typ: name(e.Type), ranged: ranged})
+	l.watch.Swing(l.tick, e.ID, ranged)
 	t.mu.Lock()
 	t.total.Swings++
 	t.fight.Swings++
@@ -266,6 +315,7 @@ func (l *Life) fightStarted() {
 	t.fight = FightStats{}
 	t.mu.Unlock()
 	t.open = t.open[:0]
+	l.watch.FightStart()
 }
 
 // endFields adds the fight's summary to what defend_ended reports. A unit
@@ -291,6 +341,10 @@ func (l *Life) telemetryTick(d drained) {
 	}
 	t := &l.tel
 	l.pruneSwings()
+	l.watch.Tick(l.tick)
+	for _, h := range t.takeHealthSeen() {
+		l.logEvent("health_seen", map[string]any{"entity": h.typ, "health": round2(float64(h.health))})
+	}
 	if d.empty() && !t.hurtPending {
 		return
 	}
