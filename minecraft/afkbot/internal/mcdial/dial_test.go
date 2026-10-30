@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/df-mc/go-nethernet"
+	"github.com/df-mc/go-nethernet/endpoint"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 )
@@ -18,6 +20,7 @@ import (
 // believes is still connected.
 type slowWorld struct {
 	listener   *minecraft.Listener
+	addr       string
 	spawnDelay time.Duration
 
 	mu      sync.Mutex
@@ -33,7 +36,33 @@ func startSlowWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	return newSlowWorld(t, listener, listener.Addr().String(), spawnDelay)
+}
+
+// startSlowNetherNetWorld is the same server behind a NetherNet signaling
+// endpoint on loopback. It accepts anonymous clients because the test has no
+// Xbox identity to present; the identity-bound dial path is covered separately.
+func startSlowNetherNetWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
+	t.Helper()
+	signaling, err := endpoint.Serve("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("serve signaling: %v", err)
+	}
+	t.Cleanup(func() { _ = signaling.Close() })
+	network := minecraft.NetherNet{
+		Signaling:    signaling,
+		ListenConfig: nethernet.ListenConfig{AllowAnonymous: true},
+	}
+	listener, err := minecraft.ListenConfig{AuthenticationDisabled: true}.ListenNetwork(network, signaling.NetworkID())
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	return newSlowWorld(t, listener, "http://"+signaling.Addr().String(), spawnDelay)
+}
+
+func newSlowWorld(t *testing.T, listener *minecraft.Listener, address string, spawnDelay time.Duration) *slowWorld {
 	w := &slowWorld{
+		addr:       address,
 		listener:   listener,
 		spawnDelay: spawnDelay,
 		held:       map[string]bool{},
@@ -44,7 +73,7 @@ func startSlowWorld(t *testing.T, spawnDelay time.Duration) *slowWorld {
 	return w
 }
 
-func (w *slowWorld) address() string { return w.listener.Addr().String() }
+func (w *slowWorld) address() string { return w.addr }
 
 func (w *slowWorld) refusals() int {
 	w.mu.Lock()
