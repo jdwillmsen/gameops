@@ -271,3 +271,44 @@ func TestLoadPresenceErrorsNeverEchoTheToken(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAcceptsNetherNetURLAsHost(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_HOST", "http://192.168.1.87:31134")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Address(); got != "http://192.168.1.87:31134" {
+		t.Errorf("Address() = %q, want the URL untouched (MC_PORT must not be appended)", got)
+	}
+}
+
+func TestLoadRefusesMalformedNetherNetURL(t *testing.T) {
+	for _, host := range []string{"http://192.168.1.87", "http://host:31134/join", "https://:31134"} {
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("MC_HOST=%q was accepted; the NetherNet client would reject it on every reconnect", host)
+		}
+		if !strings.Contains(err.Error(), "MC_HOST") {
+			t.Errorf("error should name MC_HOST, got %q", err)
+		}
+	}
+}
+
+func TestAddressForRakNetJoinsHostAndPort(t *testing.T) {
+	setRequired(t)
+	t.Setenv("MC_PORT", "19133")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.Address(); got != "example.invalid:19133" {
+		t.Errorf("Address() = %q, want example.invalid:19133", got)
+	}
+}

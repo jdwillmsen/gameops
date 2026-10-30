@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/jdwillmsen/gameops/internal/presenceapi"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcaddr"
 )
 
 // Bedrock's maximum tick-distance, and the largest radius measured as granted
@@ -55,6 +57,8 @@ var actorIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 
 // Config is everything the bot needs to hold a player slot.
 type Config struct {
+	// Host is a hostname for RakNet, or the signaling URL of a NetherNet
+	// server (http://host:port), in which case Port is not used.
 	Host string
 	Port int
 	// Username is the token-cache key, not the gamertag other players see.
@@ -111,6 +115,11 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if mcaddr.IsNetherNet(host) {
+		if err := mcaddr.ValidateNetherNet(host); err != nil {
+			return Config{}, fmt.Errorf("MC_HOST: %w", err)
+		}
+	}
 	username, err := required("MC_USERNAME")
 	if err != nil {
 		return Config{}, err
@@ -149,6 +158,15 @@ func Load() (Config, error) {
 		ReconnectMaxMs: reconnectMax,
 		Presence:       presence,
 	}, nil
+}
+
+// Address is what the bot dials: the NetherNet URL as given, or host:port
+// for RakNet.
+func (c Config) Address() string {
+	if mcaddr.IsNetherNet(c.Host) {
+		return c.Host
+	}
+	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 }
 
 func required(name string) (string, error) {
