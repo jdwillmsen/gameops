@@ -28,7 +28,11 @@
 //
 // With --status-url (a unit state endpoint with {name} for the warrior) mob
 // scorecards carry the squad's damage taken, read from the units before and
-// after the fight; without it they carry zero.
+// after the fight; without it they carry zero. It also makes the bridge poll
+// each unit's reported tactics hash until it equals the pushed profile's, for
+// at most --apply-wait; a unit that does not, whether offline, on an older
+// build or on another profile, aborts the fight (exit 1). Without it only the
+// squad route is read back.
 //
 // The trainer sets TACTICSCTL_DIR (the control directory, read by --control-dir's
 // default) and TRAINER_STOP_FILE (--stop-file's default), so its kill file and
@@ -145,19 +149,21 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 	fightTimeout := fs.Duration("fight-timeout", 10*time.Minute, "hard limit for one fight, set-up included")
 	roundTimeout := fs.Duration("round-timeout", 2*time.Minute, "limit for the duel round itself")
 	poll := fs.Duration("poll", 3*time.Second, "delay between standing checks")
-	applyWait := fs.Duration("apply-wait", 6*time.Second, "wait between the two reads that confirm the squad serves the pushed profile; at least one unit poll")
+	applyWait := fs.Duration("apply-wait", 20*time.Second, "how long the units get to report the pushed profile on --status-url (polled every --poll); without it, the wait between the two squad-route reads")
 	settle := fs.Duration("settle", 25*time.Second, "wait for the arena chunks to load")
 	placeWait := fs.Duration("place-wait", 3*time.Second, "wait after placing the squad")
 	countdown := fs.Duration("countdown", 5*time.Second, "duel wait between the last set-up step and the start")
 	kitGap := fs.Duration("kit-gap", 3*time.Second, "duel wait after each kit")
 	spacing := fs.Int("spacing", 12, "duel distance of each line from the floor centre")
 	var damage arena.DamageSource
-	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken on mob scorecards (off by default)", func(v string) error {
+	var units arena.TacticsSource
+	fs.Func("status-url", "unit state url with {name} for the warrior, e.g. http://crew-control/units/{name}/v1/state; fills damage taken on mob scorecards and confirms each unit runs the pushed profile (off by default)", func(v string) error {
 		src, err := arena.NewHTTPDamage(v)
 		if err != nil {
 			return err
 		}
 		damage = src
+		units = &arena.HTTPTactics{URL: v}
 		return nil
 	})
 	emit := fs.String("emit", "all", "duel cards to print: all, or candidate for the candidate's alone")
@@ -219,7 +225,7 @@ func parse(args []string, errOut io.Writer) (*bridge, error) {
 		FightTimeout: *fightTimeout, RoundTimeout: *roundTimeout, Poll: *poll, Settle: *settle,
 		DryRun: *dryRun, ApplyWait: *applyWait,
 		PlaceWait: *placeWait, Countdown: *countdown, KitGap: *kitGap, Spacing: *spacing,
-		Emit: *emit, Out: errOut, Damage: damage,
+		Emit: *emit, Out: errOut, Damage: damage, Units: units,
 	}, nil
 }
 

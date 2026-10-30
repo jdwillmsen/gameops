@@ -108,12 +108,19 @@ The bridge treats a squad as a single-user resource:
   trainers on one squad would otherwise overwrite each other's candidate and
   score the wrong profile.
 - After the `PUT` it reads the profile back and requires the squad to serve
-  exactly the pushed profile (same hash). It waits `--apply-wait` (default 6 s,
-  one unit poll) and reads again. A unit that failed a fetch holds its old
-  profile for up to 30 s, and the unit exposes no applied-profile signal, so
-  this confirms what the route serves, not what the unit runs; leave the squad
-  idle between runs. If either read differs the bridge fights nothing, prints
-  one aborted card and exits 1.
+  exactly the pushed profile (same hash). With `--status-url` it then polls each
+  unit's `/v1/state` `tactics.hash` (every `--poll`) until it equals the pushed
+  profile's hash, for at most `--apply-wait` (default 20 s), and reads the squad
+  route once more. `tactics` also carries the profile name, when the unit swapped
+  it in (`applied_at`) and the kill switch as the unit last read it
+  (`training_enabled`); a unit with training off for it reports the default.
+  A unit that is offline, on a build without `tactics`, or on another profile
+  fails the check. Without `--status-url` only the squad route is read, with
+  `--apply-wait` as the pause between its two reads, which confirms what the
+  route serves, not what the unit runs. If any read differs the bridge fights
+  nothing, prints one aborted card and exits 1.
+- `{name}` in `--status-url` is the warrior's name; crew-control's unit proxy
+  resolves a name to its roster id when exactly one unit has it.
 - It puts the shipped default back on every exit path, including a `PUT` whose
   answer was lost.
 

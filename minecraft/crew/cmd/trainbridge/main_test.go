@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
@@ -124,5 +125,23 @@ func TestTrainerEnvironmentSetsControlDirAndStopFile(t *testing.T) {
 	os.WriteFile(filepath.Join(ctl, tacticsctl.TrainingFile), []byte("off\n"), 0o644)
 	if !b.stopped() {
 		t.Error("the trainer's control dir switch does not stop a running fight")
+	}
+}
+
+func TestStatusURLTurnsOnTheUnitCheck(t *testing.T) {
+	base := []string{"--lab", "crew-lab", "--layout", layoutFile, "--dry-run", "--profile-dir", t.TempDir()}
+	plain, err := parse(base, io.Discard)
+	if err != nil || plain.Units != nil || plain.Damage != nil {
+		t.Fatalf("without --status-url: %+v, %v", plain, err)
+	}
+	b, err := parse(append(base, "--status-url", "http://crew-control/units/{name}/v1/state"), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Units == nil || b.Damage == nil {
+		t.Fatalf("units %v damage %v, want both read from the one template", b.Units, b.Damage)
+	}
+	if b.ApplyWait != 20*time.Second {
+		t.Errorf("apply wait = %s, want 20s", b.ApplyWait)
 	}
 }

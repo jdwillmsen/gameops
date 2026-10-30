@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,6 +15,8 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/trainer"
@@ -837,5 +840,195 @@ func TestDeadlineFromEnv(t *testing.T) {
 	}
 	if _, err := deadlineFromEnv("soon"); err == nil {
 		t.Error("a malformed deadline was ignored")
+	}
+}
+
+// fakeUnits stands in for the units' state endpoints. A unit follows the
+// profile the sink was last pushed once lag polls have gone by; a unit in
+// stuck keeps reporting the named profile, and one in down is unreachable.
+type fakeUnits struct {
+	sink  *fakeSink
+	hash  func(name string) string
+	lag   int
+	stuck map[string]arena.UnitTactics
+	down  map[string]error
+	polls map[string]int
+}
+
+func (f *fakeUnits) Tactics(_ context.Context, unit string) (arena.UnitTactics, error) {
+	if f.polls == nil {
+		f.polls = map[string]int{}
+	}
+	f.polls[unit]++
+	if err := f.down[unit]; err != nil {
+		return arena.UnitTactics{}, err
+	}
+	if st, ok := f.stuck[unit]; ok {
+		return st, nil
+	}
+	if f.polls[unit] <= f.lag {
+		return arena.UnitTactics{Profile: "default", Hash: f.hash("default")}, nil
+	}
+	name := f.sink.pushed[unit]
+	return arena.UnitTactics{Profile: name, Hash: f.hash(name)}, nil
+}
+
+// unitRig adds fake units to the rig. Candidates are built by candidate() and
+// the opponent is the shipped default, so those two names cover every push.
+func unitRig(t *testing.T) (*rig, *fakeUnits) {
+	t.Helper()
+	r := newRig(t)
+	hashes := map[string]string{}
+	for _, p := range []tactics.Profile{candidate("cand-1"), tactics.NewProfile("default")} {
+		h, err := tactics.Hash(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hashes[p.Name] = h
+	}
+	u := &fakeUnits{sink: r.sink, hash: func(n string) string { return hashes[n] }}
+	r.b.Units = u
+	r.b.ApplyWait = 20 * time.Second
+	r.b.Poll = 3 * time.Second
+	return r, u
+}
+
+func TestMobFightsOnceEveryUnitReportsThePushedHash(t *testing.T) {
+	r, u := unitRig(t)
+	u.lag = 2
+	cards, err := r.b.Run(context.Background(), mobRequest("a"))
+	if err != nil || len(cards) != 1 || cards[0].Outcome == tactics.OutcomeAborted {
+		t.Fatalf("cards %+v err %v\n%s", cards, err, r.out)
+	}
+	for _, w := range r.b.Warriors {
+		if u.polls[w] != 3 {
+			t.Errorf("%s polled %d times, want 3 (two stale, one match)", w, u.polls[w])
+		}
+	}
+	if want := []string{"cand-1", "cand-1"}; !slices.Equal(r.sink.confirmed, want) {
+		t.Errorf("squad route confirmed %v, want a read before and after the unit check %v", r.sink.confirmed, want)
+	}
+}
+
+func TestDuelChecksEachTeamAgainstItsOwnProfile(t *testing.T) {
+	r, u := unitRig(t)
+	cards, err := r.b.Run(context.Background(), duelRequest("a"))
+	if err != nil || len(cards) == 0 || cards[0].Outcome == tactics.OutcomeAborted {
+		t.Fatalf("cards %+v err %v\n%s", cards, err, r.out)
+	}
+	for _, name := range append(slices.Clone(r.b.TeamA), r.b.TeamB...) {
+		if u.polls[name] == 0 {
+			t.Errorf("%s was never asked what it runs", name)
+		}
+	}
+	// A team A unit reporting the opponent's profile must not pass.
+	r2, u2 := unitRig(t)
+	u2.stuck = map[string]arena.UnitTactics{"Rusty": {Profile: "default", Hash: u2.hash("default")}}
+	cards, err = r2.b.Run(context.Background(), duelRequest("a"))
+	if err == nil || len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted || !strings.Contains(err.Error(), "Rusty") {
+		t.Fatalf("cards %+v err %v, want an aborted duel naming Rusty", cards, err)
+	}
+}
+
+func TestUnitOnAnotherProfileAbortsTheFight(t *testing.T) {
+	for name, req := range map[string]request{"mob": mobRequest("a"), "duel": duelRequest("a")} {
+		r, u := unitRig(t)
+		off := false
+		u.stuck = map[string]arena.UnitTactics{"Slate": {Profile: "default", Hash: u.hash("default"), TrainingEnabled: &off}}
+		started := r.clk.Now()
+		cards, err := r.b.Run(context.Background(), req)
+		if err == nil || errors.As(err, new(refusal)) {
+			t.Errorf("%s: err = %v, want a plain fault (exit 1)", name, err)
+		} else if !strings.Contains(err.Error(), "Slate") || !strings.Contains(err.Error(), "training off") {
+			t.Errorf("%s: err = %v, want the unit and why", name, err)
+		}
+		if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted {
+			t.Errorf("%s: cards = %+v, want one aborted card", name, cards)
+		}
+		if r.sim.spawned {
+			t.Errorf("%s: the fight started on a profile the unit does not run", name)
+		}
+		if len(r.sink.cleared) == 0 {
+			t.Errorf("%s: the units were not released", name)
+		}
+		if waited := r.clk.Now().Sub(started); waited < r.b.ApplyWait || waited > r.b.ApplyWait+r.b.Poll {
+			t.Errorf("%s: waited %s, want about --apply-wait %s", name, waited, r.b.ApplyWait)
+		}
+		if len(r.sink.confirmed) == 0 || len(r.sink.confirmed) > 2 {
+			t.Errorf("%s: squad route read %d times", name, len(r.sink.confirmed))
+		}
+	}
+}
+
+func TestOfflineUnitAbortsTheFight(t *testing.T) {
+	for name, why := range map[string]error{
+		"offline":   errors.New("connection refused"),
+		"old build": arena.ErrNoTactics,
+	} {
+		r, u := unitRig(t)
+		u.down = map[string]error{"Tinder": why}
+		cards, err := r.b.Run(context.Background(), mobRequest("a"))
+		if err == nil || errors.As(err, new(refusal)) || !strings.Contains(err.Error(), "Tinder") || !strings.Contains(err.Error(), why.Error()) {
+			t.Errorf("%s: err = %v, want a fault naming Tinder and why", name, err)
+		}
+		if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted || r.sim.spawned {
+			t.Errorf("%s: cards %+v spawned %v, want one aborted card and no fight", name, cards, r.sim.spawned)
+		}
+		if u.polls["Tinder"] < 2 {
+			t.Errorf("%s: an offline unit was polled %d times, want retries", name, u.polls["Tinder"])
+		}
+	}
+}
+
+func TestUnitsAreNotAskedWhenTheSquadRouteDisagrees(t *testing.T) {
+	r, u := unitRig(t)
+	r.sink.confirmErr = errors.New("squad serves profile \"default\"")
+	if _, err := r.b.Run(context.Background(), mobRequest("a")); err == nil {
+		t.Fatal("want a fault")
+	}
+	if len(u.polls) != 0 {
+		t.Errorf("units polled %v after the squad route already disagreed", u.polls)
+	}
+}
+
+func TestUnitCheckEndsWithItsContext(t *testing.T) {
+	r, u := unitRig(t)
+	u.down = map[string]error{"Rusty": errors.New("down")}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cards, _ := r.b.Run(ctx, mobRequest("a"))
+	if len(cards) != 1 || cards[0].Outcome != tactics.OutcomeAborted || r.sim.spawned {
+		t.Fatalf("cards %+v spawned %v, want an aborted card and no fight", cards, r.sim.spawned)
+	}
+	if len(r.sink.cleared) == 0 {
+		t.Error("the units were not released")
+	}
+}
+
+type unitTactics statusapi.Tactics
+
+func (u unitTactics) Tactics() statusapi.Tactics { return statusapi.Tactics(u) }
+
+type quiet struct{}
+
+func (quiet) Snapshot() belief.Snapshot { return belief.Snapshot{} }
+
+// The bridge reads exactly what the unit's real status handler writes.
+func TestHTTPTacticsReadsWhatTheStatusAPIServes(t *testing.T) {
+	want := candidate("cand-1")
+	hash, err := tactics.Hash(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(statusapi.Handler(quiet{}, "dev", statusapi.Unit{}, nil,
+		statusapi.WithTactics(unitTactics{Profile: want.Name, Hash: hash})))
+	defer srv.Close()
+	src, err := arena.NewHTTPTactics(srv.URL + "/{name}/v1/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := src.Tactics(context.Background(), "")
+	if err != nil || got.Hash != hash || got.Profile != "cand-1" {
+		t.Fatalf("tactics %+v err %v", got, err)
 	}
 }
