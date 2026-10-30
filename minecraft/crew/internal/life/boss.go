@@ -83,6 +83,8 @@ var bossProfiles = map[string]bossProfile{
 	"wither":         ranged(wardenProfile),
 	"elder_guardian": ranged(wardenProfile),
 	"ender_dragon":   dragonProfile,
+
+	"gameops:ground_dragon": groundDragonProfile,
 }
 
 // noRegroup is a regroupDown no squad reaches.
@@ -105,6 +107,17 @@ var dragonProfile = bossProfile{
 	flies:       true,
 	perchOnly:   true,
 }
+
+// groundDragonProfile is the ground-bound arena dragon: a short bite and a
+// dodgeable fireball, no boom or darkness and no melee cadence worth timing
+// a shield to. The warden's squad geometry fits it with a closer Ranger band.
+var groundDragonProfile = func() bossProfile {
+	p := ranged(wardenProfile)
+	p.rangerNear, p.rangerFar = 10, 20
+	p.strikerNear, p.strikerFar = 4, 8
+	p.boom = 0
+	return p
+}()
 
 func ranged(p bossProfile) bossProfile {
 	p.darkness, p.meleeEvery, p.shieldBreak = 0, 0, 0

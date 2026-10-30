@@ -45,7 +45,7 @@ var families = map[string]Family{
 	// A boss is a boss whatever else it resembles, since the boss fight
 	// already runs its own geometry.
 	"warden": FamilyBoss, "wither": FamilyBoss, "ender_dragon": FamilyBoss,
-	"elder_guardian": FamilyBoss,
+	"elder_guardian": FamilyBoss, "gameops:ground_dragon": FamilyBoss,
 }
 
 // FamilyOfType is the opponent family an entity type is fought as, with or
