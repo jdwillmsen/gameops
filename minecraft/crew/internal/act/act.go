@@ -85,6 +85,7 @@ type Actuator struct {
 	blockNames            BlockNames
 	lastCorrectionLog     time.Time
 	suppressedCorrections uint64
+	moves                 *MoveCounters
 	clipLogger            CorrectionLogger
 	clipLogged            map[string]time.Time
 	clipSuppressed        map[string]uint64
@@ -293,6 +294,9 @@ func (a *Actuator) Tick(in Input) error {
 		return err
 	}
 	a.pose = next
+	if next.sprinting && a.moves != nil {
+		a.moves.sprint.Add(1)
+	}
 	a.sneaking = in.Sneak
 	a.lastStepUp = step.stepUp
 	record := sentTick{tick: a.tick, pose: next, stepUp: step.stepUp, skill: a.skill}
@@ -322,6 +326,9 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	switch p := pk.(type) {
 	case *packet.CorrectPlayerMovePrediction:
 		metricCorrections.Inc()
+		if a.moves != nil {
+			a.moves.corrections.Add(1)
+		}
 		a.logCorrection(p)
 		a.noteCorrectionClip(p)
 		a.lastStepUp = false

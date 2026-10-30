@@ -241,3 +241,48 @@ func TestStateHasNoTacticsWithoutASource(t *testing.T) {
 		t.Fatalf("body = %s", raw)
 	}
 }
+
+type sightingsFixed struct {
+	s  life.Sightings
+	ok bool
+}
+
+func (f sightingsFixed) Sightings() (life.Sightings, bool) { return f.s, f.ok }
+
+func TestStateCarriesTheSessionsSightingsAndMovementCounts(t *testing.T) {
+	seen := sightingsFixed{ok: true, s: life.Sightings{
+		Health: []life.HealthSeen{{Seq: 1, Entity: "zombie", Health: 20}},
+		Flags:  []life.FlagSeen{{Seq: 2, Type: "creeper", Charged: true}},
+	}}
+	fight := fightFixed{ok: true, s: life.FightSummary{Total: life.FightStats{SprintTicks: 40, MovementCorrections: 3}}}
+	rec := get(t, Handler(fixed{}, "dev", Unit{}, nil, WithFight(fight), WithSightings(seen)), "/v1/state")
+	var body struct {
+		Seen  *life.Sightings `json:"seen"`
+		Tasks struct {
+			Fight struct {
+				Total map[string]any `json:"total"`
+			} `json:"fight"`
+		} `json:"tasks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("state is not JSON: %v", err)
+	}
+	if body.Seen == nil || body.Seen.Health[0].Entity != "zombie" || !body.Seen.Flags[0].Charged {
+		t.Errorf("seen = %+v, want the sightings handed to the handler", body.Seen)
+	}
+	if body.Tasks.Fight.Total["sprint_ticks"] != 40.0 || body.Tasks.Fight.Total["movement_corrections"] != 3.0 {
+		t.Errorf("fight total = %v, want sprint_ticks 40 and movement_corrections 3", body.Tasks.Fight.Total)
+	}
+}
+
+func TestStateOmitsSeenForAUnitThatKeepsNone(t *testing.T) {
+	for name, opts := range map[string][]Option{
+		"no source":     nil,
+		"not a warrior": {WithSightings(sightingsFixed{})},
+	} {
+		rec := get(t, Handler(fixed{}, "dev", Unit{}, nil, opts...), "/v1/state")
+		if strings.Contains(rec.Body.String(), `"seen"`) {
+			t.Errorf("%s: state carries seen: %s", name, rec.Body.String())
+		}
+	}
+}
