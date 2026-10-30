@@ -7,7 +7,7 @@ import {
 
 test("sprintPhase goes ready to active to tired to ready", () => {
   const cfg = { activeTicks: 160, tiredTicks: 160 };
-  let s = sprintPhase({ phase: "ready", until: 0 }, 0, cfg);
+  let s = sprintPhase({ phase: "ready", until: 0 }, 0, cfg, true);
   assert.deepEqual(s, { phase: "active", until: 160 });
   assert.deepEqual(sprintPhase(s, 100, cfg), s);
   s = sprintPhase(s, 160, cfg);
@@ -15,6 +15,22 @@ test("sprintPhase goes ready to active to tired to ready", () => {
   assert.deepEqual(sprintPhase(s, 319, cfg), s);
   s = sprintPhase(s, 320, cfg);
   assert.equal(s.phase, "ready");
+});
+
+test("sprintPhase stays ready until a fight triggers the burst", () => {
+  const cfg = { activeTicks: 160, tiredTicks: 160 };
+  const ready = { phase: "ready", until: 0 };
+  for (const tick of [0, 5, 1000, 100000]) assert.deepEqual(sprintPhase(ready, tick, cfg), ready);
+  assert.deepEqual(sprintPhase(ready, 1000, cfg, true), { phase: "active", until: 1160 });
+});
+
+test("sprintPhase accepts a trigger only when ready", () => {
+  const cfg = { activeTicks: 160, tiredTicks: 160 };
+  const active = { phase: "active", until: 160 };
+  assert.deepEqual(sprintPhase(active, 10, cfg, true), active);
+  const tired = { phase: "tired", until: 320 };
+  assert.deepEqual(sprintPhase(tired, 200, cfg, true), tired);
+  assert.deepEqual(sprintPhase(tired, 320, cfg, true), { phase: "ready", until: 320 });
 });
 
 test("packDamageMultiplier is 1 for one pet and caps at max", () => {

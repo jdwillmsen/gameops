@@ -1,10 +1,11 @@
 // Pure helpers; no @minecraft/server import so node --test can load them.
 
-export function sprintPhase(state, tick, cfg) {
+// A burst starts only when a fight triggers it; on a timer alone the rest phase made the animal slower than its base speed.
+export function sprintPhase(state, tick, cfg, triggered = false) {
   if (tick < state.until) return state;
   switch (state.phase) {
     case "ready":
-      return { phase: "active", until: tick + cfg.activeTicks };
+      return triggered ? { phase: "active", until: tick + cfg.activeTicks } : state;
     case "active":
       return { phase: "tired", until: tick + cfg.tiredTicks };
     default:

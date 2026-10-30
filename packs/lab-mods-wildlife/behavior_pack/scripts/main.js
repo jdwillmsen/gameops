@@ -41,6 +41,13 @@ const TAME_SEARCH_RADIUS = 64;
 const STATE_GRACE_TICKS = 6000;
 
 let sprintState = new Map();
+// Ids of burst animals that landed a hit since the last scan; collected here so the scan stays the only writer of sprintState.
+let hitters = new Set();
+
+world.afterEvents.entityHitEntity.subscribe((event) => {
+  const attacker = event.damagingEntity;
+  if (attacker.isValid && SPRINT[attacker.typeId]) hitters.add(attacker.id);
+});
 let auraState = new Map();
 
 function setPhase(entity, phase) {
@@ -53,12 +60,14 @@ function setPhase(entity, phase) {
 
 system.runInterval(() => {
   const tick = system.currentTick;
+  const triggers = hitters;
+  hitters = new Set();
   for (const dimId of DIMENSIONS) {
     for (const [type, cfg] of Object.entries(SPRINT)) {
       for (const entity of world.getDimension(dimId).getEntities({ type })) {
         if (!entity.isValid) continue;
         const prev = sprintState.get(entity.id);
-        const next = sprintPhase(prev ?? { phase: "ready", until: 0 }, tick, cfg);
+        const next = sprintPhase(prev ?? { phase: "ready", until: 0 }, tick, cfg, triggers.has(entity.id));
         sprintState.set(entity.id, { ...next, lastSeen: tick });
         if (!prev || next.phase !== prev.phase) setPhase(entity, next.phase);
       }
