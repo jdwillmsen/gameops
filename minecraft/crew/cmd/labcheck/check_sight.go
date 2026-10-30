@@ -15,6 +15,8 @@ const (
 	zombieAhead  = 6
 	// A mob is frozen for as long as a check can run.
 	freezeSeconds = 300
+
+	staleSighting = "already seen this session, restart the unit or use a fresh mob type"
 )
 
 // seenState reads a unit's sightings, or says why the check cannot.
@@ -44,13 +46,19 @@ func checkCreeper(ctx context.Context, e *Env) Result {
 		return *bad
 	}
 	known := latest(before)
+	// A unit logs a creeper in one flag state once per session, so a charged
+	// one it has already logged can never show up fresh.
+	if f, ok := chargedCreeper(before); ok {
+		return inconclusive(check, unit+" has a charged creeper sighting: "+staleSighting, ev{"unit": unit, "flags": f})
+	}
 	w, err := e.playerPose(unit)
 	if err != nil {
 		return inconclusive(check, "cannot read "+unit+"'s position first: "+err.Error(), ev{"unit": unit})
 	}
+	at := ahead(w, creeperAhead)
 	// The creeper is born charged by the spawn event proven in the mob-buffs
 	// research, and frozen so it can never walk up and blow.
-	if err := e.summon(ctx, "creeper", "minecraft:charged_creeper", ahead(w, creeperAhead)); err != nil {
+	if err := e.summon(ctx, "creeper", "minecraft:charged_creeper", at); err != nil {
 		return e.cut(check, "summoning the charged creeper", err)
 	}
 	e.effect("creeper", "slowness", freezeSeconds, 255)
@@ -67,9 +75,9 @@ func checkCreeper(ctx context.Context, e *Env) Result {
 		}
 		seen = creepers(s)
 		for _, f := range seen {
-			if f.Charged {
+			if f.Charged && f.Seq > known {
 				return pass(check, unit+" saw the creeper's Charged flag", ev{
-					"unit": unit, "flags": f, "fresh": f.Seq > known,
+					"unit": unit, "flags": f, "fresh": true,
 				})
 			}
 		}
@@ -99,6 +107,13 @@ func checkZombie(ctx context.Context, e *Env) Result {
 		return *bad
 	}
 	known := latest(before)
+	// A unit logs a mob type's health once per session, so a zombie it has
+	// already logged can never show up fresh.
+	for _, h := range before.Health {
+		if h.Entity == "zombie" {
+			return inconclusive(check, unit+" has a zombie health sighting: "+staleSighting, ev{"unit": unit, "health_seen": h})
+		}
+	}
 	w, err := e.playerPose(unit)
 	if err != nil {
 		return inconclusive(check, "cannot read "+unit+"'s position first: "+err.Error(), ev{"unit": unit})
@@ -119,9 +134,9 @@ func checkZombie(ctx context.Context, e *Env) Result {
 			return *bad
 		}
 		for _, h := range s.Health {
-			if h.Entity == "zombie" {
+			if h.Entity == "zombie" && h.Seq > known {
 				return pass(check, fmt.Sprintf("%s saw a zombie's health (%.0f)", unit, h.Health), ev{
-					"unit": unit, "health_seen": h, "fresh": h.Seq > known,
+					"unit": unit, "health_seen": h, "fresh": true,
 				})
 			}
 		}
@@ -142,6 +157,15 @@ func latest(s *life.Sightings) uint64 {
 		seq = max(seq, f.Seq)
 	}
 	return seq
+}
+
+func chargedCreeper(s *life.Sightings) (life.FlagSeen, bool) {
+	for _, f := range creepers(s) {
+		if f.Charged {
+			return f, true
+		}
+	}
+	return life.FlagSeen{}, false
 }
 
 func creepers(s *life.Sightings) []life.FlagSeen {

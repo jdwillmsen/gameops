@@ -190,16 +190,17 @@ func TestCreeperPassesWhenTheUnitSawChargedAndTheCreeperWasFrozen(t *testing.T) 
 	cleanAfter(t, l, rep)
 }
 
-func TestCreeperPassOnAnEarlierSightingIsMarkedNotFresh(t *testing.T) {
+func TestCreeperWithAnEarlierChargedSightingIsInconclusiveAndSummonsNothing(t *testing.T) {
 	l := newLab()
 	e := testEnv(l, &fakeUnits{state: func(string, int) (UnitState, error) {
 		return UnitState{Seen: seen(nil, []life.FlagSeen{{Seq: 1, Type: "creeper", Charged: true}})}, nil
 	}})
-	r, _ := runOne(e, "creeper")
-	want(t, r, Pass, "Charged")
-	if r.Evidence["fresh"] != false {
-		t.Errorf("evidence = %v, want fresh=false", r.Evidence)
+	r, rep := runOne(e, "creeper")
+	want(t, r, Inconclusive, "already seen this session, restart the unit or use a fresh mob type")
+	if len(l.mobs) != 0 {
+		t.Errorf("mobs = %+v, want none summoned for a sighting that cannot be fresh", l.mobs)
 	}
+	cleanAfter(t, l, rep)
 }
 
 func TestCreeperFailsWhenTheUnitSawItWithoutTheFlag(t *testing.T) {
@@ -255,6 +256,29 @@ func TestZombiePassesWhenHealthSeenShowsUp(t *testing.T) {
 	r, rep := runOne(e, "zombie")
 	want(t, r, Pass, "zombie's health")
 	cleanAfter(t, l, rep)
+}
+
+func TestZombieWithAnEarlierZombieSightingIsInconclusiveAndSummonsNothing(t *testing.T) {
+	l := newLab()
+	e := testEnv(l, &fakeUnits{state: func(string, int) (UnitState, error) {
+		return UnitState{Seen: seen([]life.HealthSeen{{Seq: 1, Entity: "zombie", Health: 20}}, nil)}, nil
+	}})
+	r, rep := runOne(e, "zombie")
+	want(t, r, Inconclusive, "already seen this session, restart the unit or use a fresh mob type")
+	if len(l.mobs) != 0 {
+		t.Errorf("mobs = %+v, want none summoned", l.mobs)
+	}
+	cleanAfter(t, l, rep)
+}
+
+func TestZombiePassIsAlwaysFresh(t *testing.T) {
+	l := newLab()
+	e := testEnv(l, healthUnits(2, life.HealthSeen{Seq: 4, Entity: "zombie", Health: 20}))
+	r, _ := runOne(e, "zombie")
+	want(t, r, Pass, "zombie's health")
+	if r.Evidence["fresh"] != true {
+		t.Errorf("evidence = %v, want fresh=true", r.Evidence)
+	}
 }
 
 func TestZombieFailsWhenNoHealthIsEverSeen(t *testing.T) {
@@ -409,14 +433,14 @@ func TestCleanupSweepsLeftoversBeforeAndAfter(t *testing.T) {
 func TestCleanupRetriesAMobThatSurvivesTheFirstKill(t *testing.T) {
 	l := newLab()
 	l.stubborn = 3
-	_, rep := runOne(testEnv(l, healthUnits(0, life.HealthSeen{Seq: 1, Entity: "zombie", Health: 20})), "zombie")
+	_, rep := runOne(testEnv(l, healthUnits(1, life.HealthSeen{Seq: 1, Entity: "zombie", Health: 20})), "zombie")
 	cleanAfter(t, l, rep)
 }
 
 func TestCleanupThatCannotRemoveEverythingIsReportedAndFailsTheRun(t *testing.T) {
 	l := newLab()
 	l.stubborn = 1000
-	_, rep := runOne(testEnv(l, healthUnits(0, life.HealthSeen{Seq: 1, Entity: "zombie", Health: 20})), "zombie")
+	_, rep := runOne(testEnv(l, healthUnits(1, life.HealthSeen{Seq: 1, Entity: "zombie", Health: 20})), "zombie")
 	if rep.Cleanup.OK || rep.Cleanup.Remaining == 0 {
 		t.Fatalf("cleanup = %+v, want a failure that counts the survivors", rep.Cleanup)
 	}
