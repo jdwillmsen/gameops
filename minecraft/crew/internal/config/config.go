@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 )
 
 const (
@@ -35,6 +37,9 @@ const (
 var unitIDPattern = regexp.MustCompile(`^crew-[0-9]{2,}$`)
 
 type Config struct {
+	// Host is a hostname for a RakNet server, or the scheme and host
+	// (http://192.168.1.87) of a NetherNet server's signaling port; see
+	// Address.
 	Host     string
 	Port     int
 	Username string
@@ -42,7 +47,7 @@ type Config struct {
 	UnitID string
 	// Offline joins with only a display name and no Microsoft sign-in. An
 	// online-mode server rejects such a client, so it is for a lab server
-	// with online mode off.
+	// with online mode off. A NetherNet server never admits one.
 	Offline bool
 
 	ViewDistance uint8
@@ -137,6 +142,15 @@ func Load() (Config, error) {
 	port, err := intInRange("MC_PORT", 19132, 1, maxPort)
 	if err != nil {
 		return Config{}, err
+	}
+	address, err := dialAddress(host, port)
+	if err != nil {
+		return Config{}, err
+	}
+	if offline && mcproto.IsNetherNet(address) {
+		return Config{}, errors.New("MC_OFFLINE=true cannot join a NetherNet server (MC_HOST is an http(s):// URL): " +
+			"it turns an unsigned player away at the transport with error 37, so the unit needs a Microsoft sign-in; " +
+			"unset MC_OFFLINE and sign the unit in, or point MC_HOST at a RakNet server")
 	}
 	viewDistance, err := uint8InRange("MC_VIEW_DISTANCE", 8, 1, maxViewDistance)
 	if err != nil {
@@ -258,6 +272,35 @@ func Load() (Config, error) {
 		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
 		JoinDelayS: joinDelay,
 	}, nil
+}
+
+// Address is what the Bedrock client dials. A Host that starts with http:// or
+// https:// selects NetherNet and yields the signaling URL with Port appended
+// unless the host already carries one; any other Host is a RakNet host:port.
+// The agent applies the same rule to its MC_HOST and MC_PORT, so both agree on
+// what a value means.
+func (c Config) Address() string {
+	addr, _ := dialAddress(c.Host, c.Port)
+	return addr
+}
+
+// NetherNet reports whether Address names a NetherNet server.
+func (c Config) NetherNet() bool { return mcproto.IsNetherNet(c.Address()) }
+
+func dialAddress(host string, port int) (string, error) {
+	lower := strings.ToLower(host)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return net.JoinHostPort(host, strconv.Itoa(port)), nil
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return "", fmt.Errorf("MC_HOST must be a bare http(s)://host[:port] URL when it names a NetherNet server, got %q", host)
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+	}
+	u.Path = ""
+	return u.String(), nil
 }
 
 // Role is a unit's job. Warrior and builder roles are separate kinds: only a
