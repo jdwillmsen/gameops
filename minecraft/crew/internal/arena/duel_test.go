@@ -695,3 +695,71 @@ func TestValidateComposeFile(t *testing.T) {
 		t.Error("an FWB lab was accepted")
 	}
 }
+
+func TestDuelBeatsOnEveryPollOfARunningRound(t *testing.T) {
+	r := newDuelRig()
+	r.d.Rounds = 1
+	r.run(t)
+	// A minute of 5s polls: the signal is renewed far oftener than the
+	// squads let one lapse.
+	if r.policy.Beats < 10 {
+		t.Errorf("%d beats over a one-minute round of 5s polls", r.policy.Beats)
+	}
+}
+
+func TestDuelSurvivesALoneMissedBeat(t *testing.T) {
+	r := newDuelRig()
+	r.d.Rounds = 1
+	// Misses at 3 and 5 are never two in a row.
+	r.policy.OnBeat = func(n int) error {
+		if n == 3 || n == 5 {
+			return errors.New("squad service blinked")
+		}
+		return nil
+	}
+	rounds := r.run(t)
+	if rounds[0].Outcome != DuelTimeout {
+		t.Errorf("round = %+v, want it to run to its timeout", rounds[0])
+	}
+}
+
+func TestDuelTwoMissedBeatsInARowAbortTheRoundAndDisarm(t *testing.T) {
+	r := newDuelRig()
+	r.d.Rounds = 2
+	r.policy.OnBeat = func(n int) error {
+		if n >= 3 {
+			return errors.New("squad service gone")
+		}
+		return nil
+	}
+	rounds, err := r.d.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "not renewed") {
+		t.Fatalf("err = %v, want a heartbeat failure", err)
+	}
+	if len(rounds) != 1 || rounds[0].Outcome != DuelAborted {
+		t.Fatalf("rounds = %+v, want the one round aborted", rounds)
+	}
+	if r.policy.Beats != 4 {
+		t.Errorf("%d beats; the round should end on the 2nd miss in a row (beat 4)", r.policy.Beats)
+	}
+	if last := r.policy.Calls[len(r.policy.Calls)-1]; last != "disarm" {
+		t.Errorf("the last policy call was %q, want disarm", last)
+	}
+	for _, c := range r.sink.Cards {
+		if c.Outcome != tactics.OutcomeAborted {
+			t.Errorf("card outcome %q; an aborted round must not teach the trainer", c.Outcome)
+		}
+	}
+}
+
+func TestDuelRefusesAPollTooSlowToBeatTheSignal(t *testing.T) {
+	r := newDuelRig()
+	r.d.Poll = MaxDuelPoll + time.Second
+	if _, err := r.d.Run(context.Background()); err == nil || len(r.f.Cmds) != 0 {
+		t.Errorf("a %s poll ran (err %v, %d commands)", r.d.Poll, err, len(r.f.Cmds))
+	}
+	r.d.Poll = MaxDuelPoll
+	if err := r.d.validate(); err != nil {
+		t.Errorf("the largest allowed poll: %v", err)
+	}
+}

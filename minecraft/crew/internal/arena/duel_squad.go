@@ -25,6 +25,9 @@ const (
 	maxSquadErrBody = 256
 	// The round id rides a squad's wire in a 32-character field.
 	maxRoundID = 32
+	// A beat is small and the next poll brings another, so it never waits
+	// as long as a state change does.
+	squadBeatWait = 5 * time.Second
 )
 
 // labSquadID is the whole shape of a lab squad id. The prefix alone would let
@@ -203,6 +206,18 @@ func (p *SquadPolicy) Go() error {
 	}
 	p.gone = true
 	ctx, cancel := context.WithTimeout(context.Background(), 2*squadPutWait)
+	defer cancel()
+	return p.putBoth(ctx, "go")
+}
+
+// Beat renews the start signal on both squads, which let it lapse when
+// nobody does. It sends nothing before the start signal: an armed duel
+// fires no one, so there is nothing a lapse could leave running.
+func (p *SquadPolicy) Beat() error {
+	if !p.gone {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), squadBeatWait)
 	defer cancel()
 	return p.putBoth(ctx, "go")
 }

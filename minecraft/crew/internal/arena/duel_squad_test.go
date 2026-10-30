@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -280,11 +281,12 @@ func TestDuelRunsOverTheSquadPolicy(t *testing.T) {
 	r.s.die(2, "Slate", 10*time.Second)
 	r.s.die(2, "Rusty", 20*time.Second)
 	r.run(t)
+	// Beats and eliminations repeat go; only the order of the states matters.
 	for sq, want := range map[string][]string{
-		"lab-red":  {"armed", "go", "go", "go", "over", "armed", "go", "go", "go", "over"},
-		"lab-blue": {"armed", "go", "go", "go", "over", "armed", "go", "go", "go", "over"},
+		"lab-red":  {"armed", "go", "over", "armed", "go", "over"},
+		"lab-blue": {"armed", "go", "over", "armed", "go", "over"},
 	} {
-		if got := f.states(sq); !reflect.DeepEqual(got, want) {
+		if got := slices.Compact(f.states(sq)); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s states = %v, want %v", sq, got, want)
 		}
 	}
@@ -341,4 +343,70 @@ func TestDuelWithdrawsTheSquadSignalOnEveryExit(t *testing.T) {
 			t.Errorf("blue squad ends %q, want over", got)
 		}
 	})
+}
+
+// The start signal is renewed on every poll with the eliminations so far, so
+// the squads' lapse never cuts a live round and a renewal never undoes a
+// withdrawal.
+func TestSquadPolicyBeatRenewsTheStartSignal(t *testing.T) {
+	f, base := newFakeSquads(t)
+	p := newSquadPolicy(t, base, nil)
+	if err := p.Arm(Roster{Red: []string{"Rusty", "Slate"}, Blue: []string{"Tinder", "Agate"}}); err != nil {
+		t.Fatal(err)
+	}
+	armed := len(f.states("lab-red"))
+	if err := p.Beat(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.states("lab-red")); got != armed {
+		t.Fatalf("a beat before go sent %d PUTs", got-armed)
+	}
+	if err := p.Go(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Eliminated("Tinder"); err != nil {
+		t.Fatal(err)
+	}
+	before := len(f.states("lab-blue"))
+	if err := p.Beat(); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(f.states("lab-blue")); got != before+1 {
+		t.Fatalf("a beat sent %d PUTs to a squad, want 1", got-before)
+	}
+	for _, sq := range []string{"lab-red", "lab-blue"} {
+		if d := f.last(sq); d.State != "go" || !reflect.DeepEqual(d.Eliminated, []string{"Tinder"}) || len(d.Fighters) == 0 || len(d.Enemies) == 0 {
+			t.Errorf("%s heard %+v on a beat", sq, d)
+		}
+	}
+	if err := p.Disarm(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Beat(); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.last("lab-red").State; got != "over" {
+		t.Errorf("a beat after the withdrawal left the squad at %q, want over", got)
+	}
+}
+
+func TestSquadPolicyBeatReportsAFailureWithoutTheToken(t *testing.T) {
+	f, base := newFakeSquads(t)
+	p := newSquadPolicy(t, base, nil)
+	if err := p.Arm(Roster{Red: []string{"Rusty", "Slate"}, Blue: []string{"Tinder", "Agate"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Go(); err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.status["lab-red"] = http.StatusServiceUnavailable
+	f.mu.Unlock()
+	err := p.Beat()
+	if err == nil {
+		t.Fatal("a refused beat reported success")
+	}
+	if strings.Contains(err.Error(), squadToken) {
+		t.Errorf("the beat's error leaks the token: %v", err)
+	}
 }

@@ -16,6 +16,19 @@ type FakePolicy struct {
 	OnDisarm func()
 	// ArmErr is returned from Arm.
 	ArmErr error
+	// OnBeat, when set, answers the n-th Beat (from 1). Beats are counted in
+	// Beats, not in Calls, so call-order checks do not depend on how long a
+	// round ran.
+	OnBeat func(n int) error
+	Beats  int
+}
+
+func (f *FakePolicy) Beat() error {
+	f.Beats++
+	if f.OnBeat != nil {
+		return f.OnBeat(f.Beats)
+	}
+	return nil
 }
 
 func (f *FakePolicy) Arm(r Roster) error {

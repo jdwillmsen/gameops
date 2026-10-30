@@ -149,8 +149,11 @@ swap between rounds. A lab unit whose training switch is on reads it and may
 hit a player only while the state is `go`, the player is an enemy and not yet
 out; an unreadable squad, an unknown state or a `go` that stops being renewed
 for a few seconds closes the rule again, and `idle`/`over` removes it. The
-director withdraws the signal on every exit path, an interrupt included, and
-the squad forgets a `go` nobody renewed after twelve minutes.
+director withdraws the signal on every exit path, an interrupt included. It
+also renews the `go` on every poll (the poll is capped at 15 s), and the squad
+forgets a `go` nobody renewed after 45 seconds, so a director that died leaves
+the units hunting for under a minute. One lost renewal is tolerated; two in a
+row abort the round and withdraw the signal.
 
 `arenadirector duel` takes `--squad-url`, `--red-squad` and `--blue-squad`
 (all three or none; lab ids only, two different squads, the `--red` units in the
