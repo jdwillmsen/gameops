@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/df-mc/go-nethernet/endpoint"
 	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft"
 )
@@ -42,6 +43,40 @@ type Advertisement struct {
 	Version  string
 }
 
+// IsNetherNet reports whether address names a NetherNet server rather than a
+// RakNet one. NetherNet is reached through its HTTP signaling port, so its
+// address is that port's URL; a RakNet address is a bare host:port.
+func IsNetherNet(address string) bool {
+	lower := strings.ToLower(address)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
+}
+
+// Advertise asks the server at address what it speaks, over whichever
+// transport the address names.
+//
+// A NetherNet server has no unconnected ping. Its signaling port answers the
+// same question with JSON, which is read as such instead of through the
+// RakNet-shaped pong the library can synthesise: that pong is a
+// semicolon-joined string with the MOTD unescaped, so a name containing one
+// would shift every field after it.
+func Advertise(ctx context.Context, address string) (Advertisement, error) {
+	if IsNetherNet(address) {
+		status, err := endpoint.NewClient().Status(ctx, address)
+		if err != nil {
+			return Advertisement{}, err
+		}
+		if status.Protocol <= 0 {
+			return Advertisement{}, fmt.Errorf("mcproto: status protocol is %d, want a positive number", status.Protocol)
+		}
+		return Advertisement{Protocol: int32(status.Protocol), Version: status.Version}, nil
+	}
+	pong, err := raknet.PingContext(ctx, address)
+	if err != nil {
+		return Advertisement{}, err
+	}
+	return ParsePong(string(pong))
+}
+
 // Negotiate picks the Protocol to dial the server at address with.
 //
 // It never fails the caller: on any ping or parse problem it returns the
@@ -52,11 +87,7 @@ func Negotiate(ctx context.Context, address string, onSpoof func(Advertisement))
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
-	pong, err := raknet.PingContext(ctx, address)
-	if err != nil {
-		return minecraft.DefaultProtocol
-	}
-	ad, err := ParsePong(string(pong))
+	ad, err := Advertise(ctx, address)
 	if err != nil {
 		return minecraft.DefaultProtocol
 	}

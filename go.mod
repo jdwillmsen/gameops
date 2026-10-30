@@ -7,6 +7,7 @@ toolchain go1.27.3
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/df-mc/dragonfly v0.11.5
+	github.com/df-mc/go-nethernet v1.0.25
 	github.com/df-mc/goleveldb v1.1.9
 	github.com/go-gl/mathgl v1.2.0
 	github.com/go-webauthn/webauthn v0.18.2
@@ -26,7 +27,6 @@ require (
 	github.com/brentp/intintmap v0.0.0-20251106190759-56907b1f8479 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-oidc/v3 v3.21.0 // indirect
-	github.com/df-mc/go-nethernet v1.0.25 // indirect
 	github.com/df-mc/go-playfab/v2 v2.0.3 // indirect
 	github.com/df-mc/go-xsapi/v2 v2.0.3 // indirect
 	github.com/df-mc/jsonc v1.0.5 // indirect

@@ -1,6 +1,10 @@
 package mcproto
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -108,5 +112,88 @@ func TestRollbackClearsTheSpoof(t *testing.T) {
 	}
 	if p := protocolFor(Advertisement{Protocol: baked.ID()}, baked, nil); p.ID() != baked.ID() {
 		t.Error("a server back on the compiled-in protocol still got a spoofed number")
+	}
+}
+
+func TestIsNetherNetTellsTheTransportFromTheAddress(t *testing.T) {
+	for address, want := range map[string]bool{
+		"http://192.168.1.87:31134": true,
+		"https://mc.example:31134":  true,
+		"HTTP://192.168.1.87:31134": true,
+		"192.168.1.87:19132":        false,
+		"mc.example.internal:19132": false,
+		"[::1]:19132":               false,
+		"httpbin.example.org:19132": false,
+		"":                          false,
+	} {
+		if got := IsNetherNet(address); got != want {
+			t.Errorf("IsNetherNet(%q) = %v, want %v", address, got, want)
+		}
+	}
+}
+
+// signaling serves /v1/join the way a NetherNet-only server does, with a name
+// that would break a semicolon-delimited pong.
+func signaling(t *testing.T, status string, code int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/join" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(status))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+const nnStatus = `{"name":"FWB;Server","protocol":2200,"version":"1.26.60","level":"FWB","players":1,"maxPlayers":20,"gameType":0}`
+
+func TestAdvertiseReadsANetherNetServersJoinEndpoint(t *testing.T) {
+	ad, err := Advertise(context.Background(), signaling(t, nnStatus, http.StatusOK))
+	if err != nil {
+		t.Fatalf("Advertise: %v", err)
+	}
+	if ad.Protocol != 2200 || ad.Version != "1.26.60" {
+		t.Errorf("advertisement = %+v, want protocol 2200 version 1.26.60", ad)
+	}
+}
+
+func TestAdvertiseRejectsAnUnusableNetherNetStatus(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body string
+		code int
+	}{
+		"server error": {nnStatus, http.StatusInternalServerError},
+		"not json":     {"<html>", http.StatusOK},
+		"zero":         {`{"protocol":0,"version":"1"}`, http.StatusOK},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Advertise(context.Background(), signaling(t, tc.body, tc.code)); err == nil {
+				t.Error("Advertise succeeded; the caller must fall back to the compiled-in protocol")
+			}
+		})
+	}
+}
+
+func TestNegotiateSpoofsFromANetherNetServer(t *testing.T) {
+	advertised := minecraft.DefaultProtocol.ID() + 5
+	status := fmt.Sprintf(`{"name":"x","protocol":%d,"version":"9.9.9","level":"x","players":0,"maxPlayers":1,"gameType":0}`, advertised)
+
+	var seen Advertisement
+	got := Negotiate(context.Background(), signaling(t, status, http.StatusOK), func(ad Advertisement) { seen = ad })
+	if got.ID() != advertised {
+		t.Errorf("announced %d, want the server's %d", got.ID(), advertised)
+	}
+	if seen.Version != "9.9.9" {
+		t.Errorf("spoof callback got %+v", seen)
+	}
+}
+
+func TestNegotiateFallsBackWhenNetherNetSignalingIsDown(t *testing.T) {
+	got := Negotiate(context.Background(), "http://127.0.0.1:1", nil)
+	if got.ID() != minecraft.DefaultProtocol.ID() {
+		t.Errorf("announced %d, want the compiled-in %d", got.ID(), minecraft.DefaultProtocol.ID())
 	}
 }
