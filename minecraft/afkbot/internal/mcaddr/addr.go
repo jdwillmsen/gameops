@@ -33,7 +33,11 @@ func Resolve(host string, port int) (string, error) {
 	if err != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
 		return "", fmt.Errorf("must be a bare http(s)://host[:port] URL when it names a NetherNet server, got %q", host)
 	}
-	if u.Port() == "" {
+	if p := u.Port(); p != "" {
+		if n, err := strconv.Atoi(p); err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("port in %q must be between 1 and 65535", host)
+		}
+	} else {
 		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
 	}
 	u.Path = ""
