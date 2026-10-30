@@ -190,7 +190,10 @@ func tintOf(id, path string) string {
 		return spruceFoliage
 	case id == "waterlily":
 		return lilyPad
-	case strings.Contains(path, "grass") || strings.Contains(path, "fern") || id == "sunflower" || id == "lilac" || id == "rose_bush" || id == "peony":
+	case id == "sunflower" || id == "lilac" || id == "rose_bush" || id == "peony":
+		// The game leaves a flower's stalk in its own green.
+		return ""
+	case strings.Contains(path, "grass") || strings.Contains(path, "fern"):
 		return plainsGrass
 	}
 	return plainsFoliage
@@ -346,7 +349,7 @@ func (src itemSources) special(id string) (Recipe, bool) {
 		// The side as the game draws it in a hand is a PNG with its fringe
 		// already green; the world's side is a TGA laid over dirt.
 		top, side := src.terrain.pathIn("grass_top", 0, modelTexture), "textures/blocks/grass_side_carried"
-		if top == "" || !src.textures[side] {
+		if src.held(top) == "" || !src.textures[side] {
 			return Recipe{}, false
 		}
 		face := func(path, tint string) []Layer {
@@ -374,15 +377,24 @@ func addItems(recipes map[string]Recipe, rejected map[string]string, items map[s
 		}
 	}
 	for _, key := range slices.Sorted(maps.Keys(items)) {
-		path := items[key].Flat
+		// A tinted layer or a cube names more than the one texture a flat
+		// picture does, and every one of them counts.
+		var fresh []string
+		for _, path := range items[key].textures() {
+			if !textures[path] {
+				fresh = append(fresh, path)
+			}
+		}
 		switch {
 		case len(recipes) >= room:
 			rejected[key] = fmt.Sprintf("over the limit of %d made pictures", room)
-		case !textures[path] && len(textures) >= maxModelTextures:
+		case len(textures)+len(fresh) > maxModelTextures:
 			rejected[key] = fmt.Sprintf("over the limit of %d textures", maxModelTextures)
 		default:
 			recipes[key] = items[key]
-			textures[path] = true
+			for _, path := range fresh {
+				textures[path] = true
+			}
 		}
 	}
 }
