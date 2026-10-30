@@ -134,6 +134,8 @@ Own rigs (`bear_rig.py` with a shoulder hump; `hyena_rig.py` with a sloping back
 
 ### Task 8: Bots
 
+> Superseded: the ids are left unlisted (`other`), not `provoked`, so a hurt unit never blames a nearby pet; test is `TestWildlifeIsNeverASuspect`.
+
 **Files:** Modify `minecraft/crew/internal/life/kinds.go` and the kinds test (`kinds_boss_test.go` style).
 
 **Interfaces:** each `gameops:<animal>` maps to `provoked` in `kinds`.
