@@ -25,6 +25,16 @@ const (
 	// a moment without it having died.
 	duelDeathMisses = 3
 
+	// duelBeatMisses is how many polls in a row may fail to renew the start
+	// signal before the round is given up. One lost beat must not end a live
+	// duel, but the squads let an unrenewed signal lapse, so a director that
+	// cannot reach them is no longer in control of the fight.
+	duelBeatMisses = 2
+
+	// MaxDuelPoll bounds the poll, and with it the beat interval, well
+	// inside the squads' signal lifetime so a missed beat or two is survived.
+	MaxDuelPoll = 15 * time.Second
+
 	// duelEdge is how far past the floor a standing duelist can be before it
 	// counts as out: a quick respawn at the world spawn leaves no down poll,
 	// only a position far from the arena.
@@ -212,6 +222,8 @@ func (d *Duel) validate() error {
 		return fmt.Errorf("arena: round timeout must be %s..%s", MinDuelRoundTimeout, MaxDuelRoundTimeout)
 	case d.MaxWall <= 0 || d.MaxWall > MaxDuelWall:
 		return fmt.Errorf("arena: wall-clock cap must be positive and at most %s", MaxDuelWall)
+	case d.pollEvery() > MaxDuelPoll:
+		return fmt.Errorf("arena: poll must be at most %s: it is also the start signal's heartbeat", MaxDuelPoll)
 	}
 	seen := map[string]bool{}
 	for _, n := range append(slices.Clone(d.Red), d.Blue...) {
@@ -430,12 +442,21 @@ func (d *Duel) round(ctx context.Context, h *Director, round int, runStart time.
 	}
 
 	checked := d.now()
+	beatMisses := 0
 	for {
 		if err := d.wait(ctx, d.pollEvery()); err != nil {
 			return finish(DuelAborted, "", err)
 		}
 		if err := d.stopped(ctx, runStart); err != nil {
 			return finish(DuelAborted, "", err)
+		}
+		if err := d.Policy.Beat(); err != nil {
+			d.logf("arena: duel heartbeat failed: %v", err)
+			if beatMisses++; beatMisses >= duelBeatMisses {
+				return finish(DuelAborted, "", fmt.Errorf("arena: start signal not renewed %d polls in a row: %w", beatMisses, err))
+			}
+		} else {
+			beatMisses = 0
 		}
 		if d.now().Sub(checked) >= playerCheckEvery {
 			checked = d.now()

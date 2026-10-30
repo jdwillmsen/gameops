@@ -109,7 +109,7 @@ type squadBackend interface {
 	SetStart(squadID string, p position) bool
 	SetProfile(squadID string, p profileWire) bool
 	Profile(squadID string) (profileWire, bool)
-	SetDuel(squadID string, d duelWire) bool
+	SetDuel(squadID string, d duelWire) (changed bool, err error)
 	Duel(squadID string) (duelWire, bool)
 	Has(id string) bool
 	Member(squadID, unit string) bool

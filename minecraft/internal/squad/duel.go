@@ -7,6 +7,7 @@ package squad
 // would leave the units hunting each other with nobody watching.
 
 import (
+	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -29,10 +30,14 @@ const (
 	maxDuelName = 32
 	// A duel with sixteen names a side is still a few KiB.
 	maxDuelLen = 4 << 10
-	// A round outlasts the director's longest round timeout by this margin
-	// before the squad forgets it was ever told to fight.
-	duelTTL = 12 * time.Minute
+	// A duel in force is renewed by the director on every poll; one nobody
+	// renews lapses after this, so a dead director or a failed withdrawal
+	// leaves the units hunting for under a minute, not a whole round. It
+	// must stay well above the director's poll so one lost beat ends nothing.
+	duelTTL = 45 * time.Second
 )
+
+var errNoDuelSquad = errors.New("squad: not a lab squad the store holds")
 
 // duelWire is the duel state a director PUTs and a unit GETs. Fighters are
 // the squad's own side, Enemies the other: a unit fights only when it is a
@@ -98,23 +103,34 @@ func (d duelWire) valid() bool {
 	return true
 }
 
-// SetDuel stores the squad's duel state, already checked at the door. ok
-// is false for a squad the store does not hold or one not marked lab. It
-// bumps the squad's revision so a poll parked on the old one answers and
-// carries the new duelSeq.
-func (st *Store) SetDuel(id string, d duelWire) bool {
+func sameDuel(a, b duelWire) bool {
+	return a.State == b.State && a.Round == b.Round && slices.Equal(a.Fighters, b.Fighters) &&
+		slices.Equal(a.Enemies, b.Enemies) && slices.Equal(a.Eliminated, b.Eliminated)
+}
+
+// SetDuel stores the squad's duel state, already checked at the door. It
+// refuses a squad the store does not hold or one not marked lab. changed is
+// false when the duel is the one already in force: that only renews its lease,
+// so a director's heartbeat costs no revision bump and no refetch by the
+// units. A changed duel bumps the squad's revision so a poll parked on the old one
+// answers and carries the new duelSeq.
+func (st *Store) SetDuel(id string, d duelWire) (changed bool, err error) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	now := st.now()
 	st.prune(now)
 	sq, ok := st.squads[id]
 	if !ok || !labSquad(id) {
-		return false
+		return false, errNoDuelSquad
+	}
+	if sq.duel != nil && now.Sub(sq.duelAt) <= duelTTL && sameDuel(*sq.duel, d) {
+		sq.duelAt = now
+		return false, nil
 	}
 	sq.duel, sq.duelAt = &d, now
 	sq.duelSeq++
 	sq.rev++
-	return true
+	return true, nil
 }
 
 // Duel is the squad's duel state while it is still in force. ok is false
@@ -163,10 +179,14 @@ func (a *API) putDuel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not a lab squad", http.StatusForbidden)
 		return
 	}
-	if !a.store.SetDuel(id, d) {
+	changed, err := a.store.SetDuel(id, d)
+	switch {
+	case err != nil:
 		http.NotFound(w, r)
 		return
 	}
-	a.broadcast(id)
+	if changed {
+		a.broadcast(id)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }

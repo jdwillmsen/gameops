@@ -60,6 +60,9 @@ func (r Roster) Enemy(self, other string) bool {
 //   - After Go a unit may target a player p exactly when Roster.Enemy(self, p)
 //     holds and p has not been reported through Eliminated.
 //   - After Disarm every unit is back to mob-only targeting.
+//   - Beat runs on every poll of a running round and keeps the start signal
+//     alive: a signal nobody renews lapses on its own, so a director that
+//     died leaves the units hunting only briefly.
 //
 // All methods must be idempotent. Disarm runs on every exit path, including
 // an interrupt, so a failed duel never leaves units hunting each other.
@@ -71,6 +74,7 @@ type TargetPolicy interface {
 	Arm(Roster) error
 	Go() error
 	Eliminated(name string) error
+	Beat() error
 	Disarm() error
 }
 
@@ -123,6 +127,9 @@ func (p *ConsolePolicy) Go() error { return p.tagAll(p.all(), "add", duelTagGo) 
 func (p *ConsolePolicy) Eliminated(name string) error {
 	return p.tagAll([]string{name}, "add", duelTagOut)
 }
+
+// Beat has nothing to renew: tags stay until Disarm removes them.
+func (p *ConsolePolicy) Beat() error { return nil }
 
 // Disarm keeps going past a failed command so one bad tag cannot leave the
 // rest marked, and reports the first failure.
