@@ -137,3 +137,19 @@ func TestResolvePrefersAnIdOverAName(t *testing.T) {
 		t.Errorf("Resolve(crew-01) = %q, %v; want the unit with that id", u.ID, ok)
 	}
 }
+
+func TestNameOfIsTheInGameNameOfAKnownUnit(t *testing.T) {
+	r, err := Parse(`[{"id":"crew-18","name":"Rusty","url":"http://crew-18:8080"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, ok := r.NameOf("crew-18"); !ok || n != "Rusty" {
+		t.Errorf("NameOf(crew-18) = %q, %v", n, ok)
+	}
+	if n, ok := r.NameOf("Rusty"); ok {
+		t.Errorf("a name is not an id: NameOf(Rusty) = %q, true", n)
+	}
+	if _, ok := r.NameOf("crew-99"); ok {
+		t.Error("an unknown unit has a name")
+	}
+}

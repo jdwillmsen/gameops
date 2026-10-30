@@ -111,6 +111,7 @@ type squadBackend interface {
 	Profile(squadID string) (profileWire, bool)
 	SetDuel(squadID string, d duelWire) (changed bool, err error)
 	Duel(squadID string) (duelWire, bool)
+	LabCrew() []string
 	Has(id string) bool
 	Member(squadID, unit string) bool
 	Delta(id string, since int64) (Delta, bool)
@@ -126,6 +127,11 @@ func Routes(mux *http.ServeMux, st *Store, units Units, token string) *API {
 		reread:      rereadEvery,
 		waits:       map[string]map[chan struct{}]struct{}{},
 		streamEvery: defaultStreamEvery, streamKeepalive: defaultStreamKeepalive}
+	if n, ok := units.(UnitNamer); ok {
+		st.mu.Lock()
+		st.nameOf = n.NameOf
+		st.mu.Unlock()
+	}
 	// Literal reads are public views. They carry the same console-safe
 	// shape as the stream: no member position and no operator id; the
 	// unit-facing poll serves both behind its token.

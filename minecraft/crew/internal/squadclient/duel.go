@@ -26,6 +26,9 @@ type Duel struct {
 	Fighters   []string `json:"fighters,omitempty"`
 	Enemies    []string `json:"enemies,omitempty"`
 	Eliminated []string `json:"eliminated,omitempty"`
+	// Crew is the in-game names the squad service vouches for as lab crew
+	// units. Enemies outside it are not hunted, whatever the duel says.
+	Crew []string `json:"crew,omitempty"`
 }
 
 // FetchDuel returns the squad's current duel. One fetch serves every call

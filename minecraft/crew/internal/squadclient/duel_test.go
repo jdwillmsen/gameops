@@ -165,7 +165,7 @@ func TestFetchDuelRefetchesWhenTheStreamMoves(t *testing.T) {
 func TestDuelEndsMeetThroughTheRealRoutes(t *testing.T) {
 	store := squad.NewStore()
 	mux := http.NewServeMux()
-	squad.Routes(mux, store, e2eUnits{"crew-18": true}, "wt-e2e")
+	squad.Routes(mux, store, namedUnits{"crew-18": "Rusty", "crew-19": "Slate"}, "wt-e2e")
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	base, err := url.Parse(srv.URL)
@@ -178,7 +178,13 @@ func TestDuelEndsMeetThroughTheRealRoutes(t *testing.T) {
 	c.statusEvery = 5 * time.Millisecond
 	c.duelEvery = time.Hour
 	runClient(t, c)
-	waitFor(t, func() bool { return store.Has("lab-red") }, "the hello to build the squad")
+	// The duel's enemy has to be a member of a lab squad too.
+	foe := New(base, "crew-19", "lab-blue", "", squadmsg.RoleStriker, "wt-e2e", newRecLog())
+	foe.sleep = fastSleep
+	foe.helloEvery = 20 * time.Millisecond
+	foe.statusEvery = 5 * time.Millisecond
+	runClient(t, foe)
+	waitFor(t, func() bool { return store.Has("lab-red") && store.Has("lab-blue") }, "the hellos to build the squads")
 
 	put := func(body string) {
 		t.Helper()
@@ -207,3 +213,11 @@ func TestDuelEndsMeetThroughTheRealRoutes(t *testing.T) {
 		return ok && d.State == DuelOver
 	}, "the end of the duel to reach the unit")
 }
+
+// namedUnits is a roster that knows each unit's in-game name, as the console's
+// does; the squad service checks a duel's names against it.
+type namedUnits map[string]string
+
+func (u namedUnits) Has(id string) bool { _, ok := u[id]; return ok }
+
+func (u namedUnits) NameOf(id string) (string, bool) { n, ok := u[id]; return n, ok }

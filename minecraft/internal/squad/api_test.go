@@ -22,6 +22,12 @@ type testUnits map[string]bool
 
 func (u testUnits) Has(id string) bool { return u[id] }
 
+// NameOf gives the three warrior slots the gamertags the duel tests name.
+func (u testUnits) NameOf(id string) (string, bool) {
+	n, ok := map[string]string{"crew-18": "Rusty", "crew-19": "Slate", "crew-20": "Tinder"}[id]
+	return n, ok && u[id]
+}
+
 var units = testUnits{"crew-18": true, "crew-19": true, "crew-20": true}
 
 type rig struct {
