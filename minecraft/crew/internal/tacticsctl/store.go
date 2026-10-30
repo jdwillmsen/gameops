@@ -2,8 +2,6 @@ package tacticsctl
 
 import (
 	"bufio"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,20 +94,8 @@ func (s *Store) SetTraining(on bool) error {
 	return writeAtomic(s.TrainingPath(), []byte(v), 0o644)
 }
 
-// Hash is the identity an approval names: the SHA-256 of the validated
-// profile's canonical JSON, lineage included.
-func Hash(pr tactics.Profile) (string, error) {
-	pr, err := pr.Validate()
-	if err != nil {
-		return "", err
-	}
-	b, err := json.Marshal(pr)
-	if err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:]), nil
-}
+// Hash is the identity an approval names; see tactics.Hash.
+func Hash(pr tactics.Profile) (string, error) { return tactics.Hash(pr) }
 
 func checkName(name string) error {
 	if name == DefaultName || !nameRE.MatchString(name) {
