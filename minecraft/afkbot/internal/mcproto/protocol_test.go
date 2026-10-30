@@ -1,6 +1,9 @@
 package mcproto
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -108,5 +111,43 @@ func TestRollbackClearsTheSpoof(t *testing.T) {
 	}
 	if p := protocolFor(Advertisement{Protocol: baked.ID()}, baked, nil); p.ID() != baked.ID() {
 		t.Error("a server back on the compiled-in protocol still got a spoofed number")
+	}
+}
+
+// The signaling endpoint's reply, as the live FWB server shaped it in the
+// JDW-109 spike.
+const joinStatus = `{"name":"FWB Server","protocol":2200,"version":"1.26.60","level":"FWB","players":1,"maxPlayers":20,"gameType":0}`
+
+func TestNegotiateOverNetherNetPingAnnouncesTheServersProtocol(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/join" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(joinStatus))
+	}))
+	defer srv.Close()
+
+	var spoofed Advertisement
+	got := Negotiate(context.Background(), srv.URL, func(ad Advertisement) { spoofed = ad })
+
+	if got.ID() != 2200 {
+		t.Errorf("protocol = %d, want the advertised 2200", got.ID())
+	}
+	if spoofed.Version != "1.26.60" {
+		t.Errorf("onSpoof version = %q, want 1.26.60", spoofed.Version)
+	}
+}
+
+func TestNegotiateOverNetherNetFallsBackWhenPingFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	got := Negotiate(context.Background(), srv.URL, nil)
+	if got.ID() != minecraft.DefaultProtocol.ID() {
+		t.Errorf("protocol = %d, want the compiled-in %d", got.ID(), minecraft.DefaultProtocol.ID())
 	}
 }
