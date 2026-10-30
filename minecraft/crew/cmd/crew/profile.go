@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/squadclient"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -23,6 +24,14 @@ const profilePoll = 5 * time.Second
 const labSquadPrefix = "lab-"
 
 func labSquad(id string) bool { return strings.HasPrefix(id, labSquadPrefix) }
+
+// tacticsEnabled says the unit takes part in tactics training: it is told so
+// by a control directory and sits in a lab squad. It is the one condition for
+// both the profile sync and the tactics object on /v1/state, so a production
+// unit reports and runs neither.
+func tacticsEnabled(cfg config.Config) bool {
+	return cfg.TacticsControlDir != "" && labSquad(cfg.Squad)
+}
 
 type profileSource interface {
 	FetchProfile(ctx context.Context) (tactics.Profile, bool)
@@ -53,7 +62,7 @@ type profileSync struct {
 // newProfileSync returns nil unless the unit is a lab warrior with a control
 // directory configured: unset leaves the shipped behaviour untouched.
 func newProfileSync(cfg config.Config, src profileSource, dst profileTarget, log squadclient.Logger) *profileSync {
-	if src == nil || cfg.TacticsControlDir == "" || !labSquad(cfg.Squad) {
+	if src == nil || !tacticsEnabled(cfg) {
 		return nil
 	}
 	return &profileSync{src: src, dst: dst, controlDir: cfg.TacticsControlDir, log: log}
@@ -121,6 +130,26 @@ type tacticsState struct {
 }
 
 func newTacticsState(src profileReader) *tacticsState { return &tacticsState{src: src} }
+
+// tacticsView is the unit's tactics report, or nil for a unit outside tactics
+// training, which has none to give.
+func tacticsView(cfg config.Config, src profileReader) *tacticsState {
+	if !tacticsEnabled(cfg) {
+		return nil
+	}
+	return newTacticsState(src)
+}
+
+// statusOptions are the optional parts of /v1/state. The tactics part is
+// added only for a non-nil view: a nil *tacticsState inside the option's
+// interface would not read as absent.
+func statusOptions(lf *life.Life, view *tacticsState) []statusapi.Option {
+	opts := []statusapi.Option{statusapi.WithFight(lf), statusapi.WithSightings(lf)}
+	if view != nil {
+		opts = append(opts, statusapi.WithTactics(view))
+	}
+	return opts
+}
 
 // noteApplied and noteTraining accept a nil receiver so a unit with no sync
 // calls them without a check.

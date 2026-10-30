@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,6 +15,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/statusapi"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tacticsctl"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
@@ -234,5 +238,31 @@ func TestTacticsStateReportsWhatTheUnitRuns(t *testing.T) {
 	off := state.Tactics()
 	if off.Hash != wantDefault || off.TrainingEnabled == nil || *off.TrainingEnabled {
 		t.Fatalf("after the kill switch: %+v", off)
+	}
+}
+
+func TestOnlyALabUnitServesTacticsOnState(t *testing.T) {
+	tracker := belief.New(time.Now)
+	lf := life.New(life.Config{Defend: true}, blocks.New(noNames{}, 4), tracker.Snapshot, nopLog{}, rand.New(rand.NewSource(1)))
+	dir := controlDir(t, true)
+	for name, c := range map[string]struct {
+		cfg  config.Config
+		want bool
+	}{
+		"lab unit":         {labConfig(dir), true},
+		"production squad": {config.Config{Role: "striker", Squad: "alpha", TacticsControlDir: dir}, false},
+		"flag unset":       {config.Config{Role: "striker", Squad: "lab-alpha"}, false},
+		"no squad":         {config.Config{Role: "striker", TacticsControlDir: dir}, false},
+	} {
+		rec := httptest.NewRecorder()
+		statusHandler(tracker, "dev", statusapi.Unit{}, nil, nil, "", statusOptions(lf, tacticsView(c.cfg, lf))...).
+			ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/state", nil))
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: %v: %s", name, err, rec.Body.String())
+		}
+		if _, has := body["tactics"]; has != c.want {
+			t.Errorf("%s: tactics key present = %v, want %v", name, has, c.want)
+		}
 	}
 }
