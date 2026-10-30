@@ -26,10 +26,12 @@ package mcproto
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/df-mc/go-nethernet/endpoint"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcaddr"
 	"github.com/sandertv/go-raknet"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -57,26 +59,37 @@ func Negotiate(ctx context.Context, address string, onSpoof func(Advertisement))
 	ctx, cancel := context.WithTimeout(ctx, pingTimeout)
 	defer cancel()
 
-	pong, err := ping(ctx, address)
-	if err != nil {
-		return minecraft.DefaultProtocol
-	}
-	ad, err := ParsePong(string(pong))
+	ad, err := Advertise(ctx, address)
 	if err != nil {
 		return minecraft.DefaultProtocol
 	}
 	return protocolFor(ad, minecraft.DefaultProtocol, onSpoof)
 }
 
-// ping asks the server at address to describe itself. A NetherNet server has
-// no unconnected ping; its signaling endpoint answers GET /v1/join with the
-// same facts as JSON, which the client library renders back into a RakNet
-// pong so ParsePong reads both transports.
-func ping(ctx context.Context, address string) ([]byte, error) {
+// Advertise asks the server at address what it speaks, over whichever
+// transport the address names.
+//
+// A NetherNet server has no unconnected ping. Its signaling port answers the
+// same question with JSON, which is read as such instead of through the
+// RakNet-shaped pong the library can synthesise: that pong is a
+// semicolon-joined string with the MOTD unescaped, so a name containing one
+// would shift every field after it.
+func Advertise(ctx context.Context, address string) (Advertisement, error) {
 	if mcaddr.IsNetherNet(address) {
-		return minecraft.NetherNet{}.PingContext(ctx, address)
+		status, err := endpoint.NewClient().Status(ctx, address)
+		if err != nil {
+			return Advertisement{}, err
+		}
+		if status.Protocol <= 0 || status.Protocol > math.MaxInt32 {
+			return Advertisement{}, fmt.Errorf("mcproto: status protocol is %d, want a positive int32", status.Protocol)
+		}
+		return Advertisement{Protocol: int32(status.Protocol), Version: status.Version}, nil
 	}
-	return raknet.PingContext(ctx, address)
+	pong, err := raknet.PingContext(ctx, address)
+	if err != nil {
+		return Advertisement{}, err
+	}
+	return ParsePong(string(pong))
 }
 
 // protocolFor is the decision on its own, so it can be tested without a

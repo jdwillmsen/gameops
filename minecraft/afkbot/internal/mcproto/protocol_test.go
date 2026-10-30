@@ -151,3 +151,17 @@ func TestNegotiateOverNetherNetFallsBackWhenPingFails(t *testing.T) {
 		t.Errorf("protocol = %d, want the compiled-in %d", got.ID(), minecraft.DefaultProtocol.ID())
 	}
 }
+
+// The status is read as JSON, so a ";" in the server name cannot shift the
+// protocol field the way it does in the synthesised pong.
+func TestNegotiateOverNetherNetIgnoresSemicolonInServerName(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"123;456","protocol":2200,"version":"1.26.60","level":"FWB","players":1,"maxPlayers":20,"gameType":0}`))
+	}))
+	defer srv.Close()
+
+	if got := Negotiate(context.Background(), srv.URL, nil); got.ID() != 2200 {
+		t.Errorf("protocol = %d, want the advertised 2200", got.ID())
+	}
+}
