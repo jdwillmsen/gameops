@@ -150,6 +150,9 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 			ps.state = tacticsView
 			go ps.run(ctx, profilePoll)
 		}
+		if ds := newDuelSync(cfg, sc, lf, logAdapter{log}); ds != nil {
+			go ds.run(ctx, duelPoll)
+		}
 	} else if cfg.Role.IsWarrior() {
 		log.Warn("squad_off", logging.Fields{"note": "CREW_ROLE is set but CONTROL_URL is not; the warrior leads itself and hears no orders"})
 	}
