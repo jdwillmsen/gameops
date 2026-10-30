@@ -52,6 +52,21 @@ def check_version(value, where, rep):
         rep.fail(f"{where}: version must be three non-negative integers, got {value!r}")
 
 
+def check_script_entry(path, index, entry, rep):
+    """Bedrock only finds a missing entry when it loads the pack, so catch it here."""
+    where = f"{path} modules[{index}]"
+    if not isinstance(entry, str) or not entry:
+        rep.fail(f"{where} needs a non-empty string entry, got {entry!r}")
+        return
+    pack = os.path.dirname(path)
+    # The entry is resolved against the pack, so an absolute path or a ".." could reach any file.
+    parts = entry.replace("\\", "/").split("/")
+    if os.path.isabs(entry) or entry.startswith(("/", "\\")) or ".." in parts:
+        rep.fail(f"{where} entry {entry!r} escapes the pack")
+    elif not os.path.isfile(os.path.join(pack, entry)):
+        rep.fail(f"{where} entry {entry!r} does not exist under {pack}")
+
+
 def check_manifest(path, manifest, module_type, rep):
     """Returns (header uuid, version, all uuids declared in this manifest)."""
     if manifest.get("format_version") != 2:
@@ -72,6 +87,8 @@ def check_manifest(path, manifest, module_type, rep):
         allowed = (module_type, "script") if module_type == "data" else (module_type,)
         if mod.get("type") not in allowed:
             rep.fail(f"{path}: modules[{i}].type must be {module_type!r}, got {mod.get('type')!r}")
+        if module_type == "data" and mod.get("type") == "script":
+            check_script_entry(path, i, mod.get("entry"), rep)
         if mid:
             uuids.append(mid)
     return hid, header.get("version"), uuids

@@ -63,9 +63,53 @@ class CheckPacks(unittest.TestCase):
         script = {"type": "script", "language": "javascript", "entry": "scripts/main.js",
                   "uuid": "00000000-0000-4000-8000-000000000001", "version": [0, 0, 1]}
         self.edit(os.path.join("behavior_pack", "manifest.json"), lambda d: d["modules"].append(dict(script)))
+        self.write_script("scripts/main.js")
         self.assertEqual(self.errors(), [])
         self.edit(os.path.join("resource_pack", "manifest.json"), lambda d: d["modules"].append(dict(script)))
         self.assertFails("modules[1].type must be 'resources'")
+
+    def write_script(self, rel):
+        path = os.path.join(self.pack, "behavior_pack", rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("// entry\n")
+
+    def add_script_module(self, **overrides):
+        mod = {"type": "script", "language": "javascript", "entry": "scripts/main.js",
+               "uuid": "00000000-0000-4000-8000-000000000001", "version": [0, 0, 1]}
+        mod.update(overrides)
+        mod = {k: v for k, v in mod.items() if v is not None}
+        self.edit(os.path.join("behavior_pack", "manifest.json"), lambda d: d["modules"].append(mod))
+
+    def test_script_entry_file_must_exist(self):
+        self.add_script_module()
+        self.assertFails("entry 'scripts/main.js' does not exist")
+
+    def test_script_entry_must_be_a_non_empty_string(self):
+        for entry in ("", None, 7):
+            with self.subTest(entry=entry):
+                self.tearDown()
+                self.setUp()
+                self.add_script_module(entry=entry)
+                self.assertFails("needs a non-empty string entry")
+
+    def test_script_entry_must_stay_inside_the_pack(self):
+        self.write_script("scripts/main.js")
+        outside = os.path.join(self.pack, "outside.js")
+        with open(outside, "w") as f:
+            f.write("//\n")
+        for entry in ("../outside.js", "scripts/../../outside.js", outside, "/etc/passwd"):
+            with self.subTest(entry=entry):
+                self.tearDown()
+                self.setUp()
+                self.write_script("scripts/main.js")
+                self.add_script_module(entry=entry)
+                self.assertFails("escapes the pack")
+
+    def test_shipped_wildlife_pack_is_clean(self):
+        rep = check_packs.Report()
+        check_packs.check_pack_dir(os.path.join(HERE, "..", "..", "packs", "lab-mods-wildlife"), rep)
+        self.assertEqual(rep.errors, [])
 
     def test_uuid_shared_between_packs(self):
         def fn(d):
