@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 )
@@ -15,6 +17,10 @@ const (
 	zombieAhead  = 6
 	// A mob is frozen for as long as a check can run.
 	freezeSeconds = 300
+	// creeperClearance is how near another crew unit may stand to the creeper's
+	// summon point: slowness stops its walking but not its fuse, and a charged
+	// blast reaches well past the usual three blocks.
+	creeperClearance = 8
 
 	staleSighting = "already seen this session, restart the unit or use a fresh mob type"
 )
@@ -56,6 +62,11 @@ func checkCreeper(ctx context.Context, e *Env) Result {
 		return inconclusive(check, "cannot read "+unit+"'s position first: "+err.Error(), ev{"unit": unit})
 	}
 	at := ahead(w, creeperAhead)
+	if near, err := e.crowded(at, unit); err != nil {
+		return inconclusive(check, "cannot tell whether another unit stands near the creeper: "+err.Error(), ev{"unit": unit})
+	} else if near != "" {
+		return inconclusive(check, fmt.Sprintf("%s is within %d blocks of where the charged creeper would stand", near, creeperClearance), ev{"unit": unit, "near": near})
+	}
 	// The creeper is born charged by the spawn event proven in the mob-buffs
 	// research, and frozen so it can never walk up and blow.
 	if err := e.summon(ctx, "creeper", "minecraft:charged_creeper", at); err != nil {
@@ -166,6 +177,32 @@ func chargedCreeper(s *life.Sightings) (life.FlagSeen, bool) {
 		}
 	}
 	return life.FlagSeen{}, false
+}
+
+// crowded names a crew unit other than the subject standing within
+// creeperClearance of the spot, or "" when there is none. A unit that is not
+// in the world is not near anything.
+func (e *Env) crowded(at spot, subject string) (string, error) {
+	where := pose{X: float64(at.X), Y: float64(at.Y), Z: float64(at.Z)}
+	seen := map[string]bool{subject: true}
+	for _, name := range slices.Concat(e.Opts.Units, e.Opts.CrewNames) {
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		p, err := e.playerPose(name)
+		var none errNoTargets
+		if errors.As(err, &none) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if p.dist(where) <= creeperClearance {
+			return name, nil
+		}
+	}
+	return "", nil
 }
 
 func creepers(s *life.Sightings) []life.FlagSeen {

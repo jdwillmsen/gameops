@@ -252,13 +252,19 @@ Each check, and what a `FAIL` or `INCONCLUSIVE` means:
 - **zombie** summons one zombie, made harmless with weakness, in front of the first unit
   and waits for the unit's `health_seen` for a zombie. `FAIL`: a zombie's health
   packets never reach the unit, so `damage_dealt` stays zero and the trainer cannot
-  score damage dealt against zombies. `evidence.fresh` is false when the unit had
-  already seen a zombie earlier in the session.
+  score damage dealt against zombies. A unit logs a zombie's health once per
+  session, so it `PASS`es only on a reading newer than the run; a zombie already
+  logged is `INCONCLUSIVE` ("already seen this session") and nothing is summoned.
+  Restart the unit to run it again.
 - **creeper** summons a creeper with the `minecraft:charged_creeper` spawn event,
   frozen with slowness 255 so it can never reach the unit, and reads the unit's
   `actor_flags` for it. `FAIL`: the unit saw the creeper but not its `Charged` flag,
   so the creeper tactics cannot tell a charged blast from a plain one. `INCONCLUSIVE`: no new creeper sighting, usually because the unit
-  was out of range or out of the world.
+  was out of range or out of the world, or the unit already logged a charged creeper
+  this session (restart it). Slowness does not stop a creeper's fuse and a charged
+  blast is large, so the check refuses (`INCONCLUSIVE`) when any other unit stands
+  within 8 blocks of the summon point; it does not touch `mobgriefing`, which is
+  server-wide.
 - **phantom** summons a phantom 10 blocks to the side and 6 up, made harmless, and
   samples its position for `--window` (20 s). It `PASS`es when the phantom closes
   `--phantom-close` blocks on the unit or flies `--phantom-move` blocks. `FAIL`: it

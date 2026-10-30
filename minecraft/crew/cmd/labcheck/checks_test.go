@@ -203,6 +203,27 @@ func TestCreeperWithAnEarlierChargedSightingIsInconclusiveAndSummonsNothing(t *t
 	cleanAfter(t, l, rep)
 }
 
+func TestCreeperRefusesWhenAnotherUnitStandsNearTheSummonPoint(t *testing.T) {
+	l := newLab()
+	// Rusty at 10.5,10.5 facing +z: the creeper would stand at z=20.
+	l.units["Slate"] = &pose{X: 14, Y: 64, Z: 17, Yaw: 0}
+	e := testEnv(l, flagUnits(1, life.FlagSeen{Seq: 1, Type: "creeper", Charged: true}))
+	r, rep := runOne(e, "creeper")
+	want(t, r, Inconclusive, "Slate is within 8 blocks")
+	if len(l.mobs) != 0 {
+		t.Errorf("mobs = %+v, want no creeper beside a unit", l.mobs)
+	}
+	cleanAfter(t, l, rep)
+}
+
+func TestCreeperRunsWhenTheOtherUnitIsFarAndOthersAreOffline(t *testing.T) {
+	l := newLab()
+	e := testEnv(l, flagUnits(1, life.FlagSeen{Seq: 1, Type: "creeper", Charged: true}))
+	e.Opts.CrewNames = []string{"Rusty", "Slate", "Tinder"}
+	r, _ := runOne(e, "creeper")
+	want(t, r, Pass, "Charged")
+}
+
 func TestCreeperFailsWhenTheUnitSawItWithoutTheFlag(t *testing.T) {
 	l := newLab()
 	e := testEnv(l, flagUnits(2, life.FlagSeen{Seq: 1, Type: "creeper"}))
