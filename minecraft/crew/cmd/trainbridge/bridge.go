@@ -57,15 +57,19 @@ type bridge struct {
 
 	// Damage, when set, fills damage taken on mob scorecards.
 	Damage arena.DamageSource
+	// Units, when set, is asked what each unit is running, so a profile is
+	// scored only once the units themselves report it.
+	Units arena.TacticsSource
 
 	// DryRun writes the candidate to the sink and stops: it never fights and
 	// never scores, since the file sink has no consumer.
 	DryRun bool
 
-	// ApplyWait is how long the units get to take a pushed profile before it
-	// is read back a second time. A unit fetches on a poll, and one failed
-	// fetch holds it on its old profile for far longer than that, so the
-	// wait is for the squad route's answer to settle, not a promise.
+	// ApplyWait bounds how long the units get to take a pushed profile. With
+	// Units set it is the time they have to report the pushed hash; without,
+	// it is the pause between the two squad-route reads. A unit fetches on a
+	// poll, and one failed fetch holds it on its old profile for far longer
+	// than that, so the wait is for the answer to settle, not a promise.
 	ApplyWait time.Duration
 
 	// FightTimeout is a hard wall around the whole fight, set-up included.
@@ -247,9 +251,10 @@ type handoff struct {
 	profile tactics.Profile
 }
 
-// confirm reads every handoff back from the sink, waits for the units to
-// settle on it and reads again; a fight is scored only when both reads show
-// the squad serving exactly the pushed profile.
+// confirm reads every handoff back from the sink, then has the units show
+// they run it, and reads the sink once more; a fight is scored only when the
+// squad route and, when the units can be asked, each unit's own report agree
+// on exactly the pushed profile.
 func (b *bridge) confirm(ctx context.Context, hs []handoff) error {
 	check := func() error {
 		for _, h := range hs {
@@ -262,10 +267,84 @@ func (b *bridge) confirm(ctx context.Context, hs []handoff) error {
 	if err := check(); err != nil {
 		return err
 	}
-	if err := b.wait(ctx, b.ApplyWait); err != nil {
+	if b.Units != nil {
+		if err := b.confirmUnits(ctx, hs); err != nil {
+			return fmt.Errorf("profile not confirmed: %w", err)
+		}
+	} else if err := b.wait(ctx, b.ApplyWait); err != nil {
 		return err
 	}
 	return check()
+}
+
+// unitWant is a unit and the profile hash it must report.
+type unitWant struct {
+	unit, hash string
+	profile    string
+}
+
+// confirmUnits polls each unit's reported tactics until every one carries the
+// hash of the profile pushed to it, for at most ApplyWait. A unit that stays
+// offline, runs an older build, has training switched off for it or reports
+// another profile fails the confirmation with what was last seen.
+func (b *bridge) confirmUnits(ctx context.Context, hs []handoff) error {
+	var pending []unitWant
+	for _, h := range hs {
+		hash, err := tactics.Hash(h.profile)
+		if err != nil {
+			return err
+		}
+		for _, u := range h.units {
+			pending = append(pending, unitWant{unit: u, hash: hash, profile: h.profile.Name})
+		}
+	}
+	every := b.Poll
+	if every <= 0 {
+		every = time.Second
+	}
+	deadline := b.now().Add(b.ApplyWait)
+	for {
+		last := make(map[string]string, len(pending))
+		var still []unitWant
+		for _, w := range pending {
+			got, err := b.Units.Tactics(ctx, w.unit)
+			switch {
+			case err == nil && got.Hash == w.hash:
+				continue
+			case err != nil:
+				last[w.unit] = err.Error()
+			default:
+				last[w.unit] = describeTactics(got)
+			}
+			still = append(still, w)
+		}
+		pending = still
+		if len(pending) == 0 {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		left := deadline.Sub(b.now())
+		if left <= 0 {
+			parts := make([]string, len(pending))
+			for i, w := range pending {
+				parts[i] = fmt.Sprintf("%s should run %q (%.12s) but %s", w.unit, w.profile, w.hash, last[w.unit])
+			}
+			return fmt.Errorf("units did not report the pushed profile within %s: %s", b.ApplyWait, strings.Join(parts, "; "))
+		}
+		if err := b.wait(ctx, min(every, left)); err != nil {
+			return err
+		}
+	}
+}
+
+func describeTactics(t arena.UnitTactics) string {
+	s := fmt.Sprintf("runs %q (%.12s)", t.Profile, t.Hash)
+	if t.TrainingEnabled != nil && !*t.TrainingEnabled {
+		s += " with training off on the unit"
+	}
+	return s
 }
 
 // lock holds the lab squads of the units for the whole fight.
