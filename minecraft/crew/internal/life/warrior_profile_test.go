@@ -3,6 +3,7 @@ package life
 import (
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -82,7 +83,11 @@ func TestFamilyOfKeepsEveryTypeItKnewBefore(t *testing.T) {
 		}
 	}
 	for typ := range bossProfiles {
-		if got := familyOf(belief.Entity{ID: 1, Type: "minecraft:" + typ}); got != tactics.FamilyBoss {
+		id := "minecraft:" + typ
+		if strings.Contains(typ, ":") {
+			id = typ
+		}
+		if got := familyOf(belief.Entity{ID: 1, Type: id}); got != tactics.FamilyBoss {
 			t.Errorf("boss %s files under %q, want boss", typ, got)
 		}
 	}

@@ -3,7 +3,7 @@ package life
 import "testing"
 
 func TestBossProfilesAreChosenByEntityType(t *testing.T) {
-	for _, mob := range []string{"warden", "minecraft:warden", "wither", "minecraft:elder_guardian"} {
+	for _, mob := range []string{"warden", "minecraft:warden", "wither", "minecraft:elder_guardian", "gameops:ground_dragon"} {
 		if _, ok := bossOf(mob); !ok {
 			t.Errorf("%s: no boss profile", mob)
 		}
