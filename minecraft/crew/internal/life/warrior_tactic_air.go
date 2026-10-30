@@ -144,6 +144,11 @@ func (t *airTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 	}
 	st := airStates.of(l)
 	st.watch(l, e)
+	if gliding && (l.warrior.healWant || l.warrior.order().Kind == OrderHold ||
+		l.warrior.order().Kind == OrderRegroup || l.warrior.order().Kind == OrderRetreat) {
+		st.enter(l, airLand)
+		return true, l.glideDown(a, p)
+	}
 	if _, armed := rocketAt(s); gliding && (!armed || !l.airborne(e)) {
 		st.enter(l, airLand)
 		return true, l.glideDown(a, p)
@@ -317,6 +322,19 @@ func rocketAt(s belief.Snapshot) (belief.Item, bool) {
 func canFly(s belief.Snapshot) bool {
 	_, armed := rocketAt(s)
 	return armed && s.Chest == elytraName
+}
+
+// airTacticFor says whether the profile lists an air tactic for e's family.
+func (l *Life) airTacticFor(pr tactics.Profile, e belief.Entity) bool {
+	fam := familyOf(e)
+	for _, n := range pr.TacticsFor(fam) {
+		if t, ok := tacticNamed(n, fam); ok {
+			if _, air := t.(*airTactic); air {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // airborne says whether e hangs in the air: no solid cell within a few

@@ -48,15 +48,18 @@ type focusQuery struct {
 	// focused, for a unit that can fly to it, and which keeps a target in
 	// focus while the unit dives past it; zero is the walkers' threatHeight.
 	flyHeight float64
+	// climbable says which threats flyHeight applies to: only those the unit
+	// can fly to, so a mob on a cliff stays a walker's business.
+	climbable func(belief.Entity) bool
 }
 
 // withinHeight says whether e is level enough with the anchor to be focused.
 func (q focusQuery) withinHeight(e belief.Entity) bool {
 	dy := math.Abs(float64(e.Pos.Y() - q.anchor.Y()))
-	if q.flyHeight > 0 {
-		return dy <= q.flyHeight
+	if dy <= threatHeight {
+		return true
 	}
-	return dy <= threatHeight
+	return q.flyHeight > 0 && q.climbable != nil && dy <= q.flyHeight && q.climbable(e)
 }
 
 // focusTarget picks the squad's shared target: the lowest-health threat
