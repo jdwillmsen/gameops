@@ -71,6 +71,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if cfg.PortConflict() {
+		log.Warn("mc_port_ignored", logging.Fields{
+			"reason":  "MC_HOST is a URL that carries its own port, which wins",
+			"mc_host": cfg.Host,
+			"mc_port": cfg.Port,
+		})
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

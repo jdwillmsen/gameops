@@ -19,8 +19,11 @@ farms depend on is kept with as little in it as possible to go wrong.
 
 Bedrock 1.26.60 servers speak NetherNet only; older ones speak RakNet. The bot
 picks by `MC_HOST`: a value starting `http://` or `https://` is the NetherNet
-signaling URL (TCP, e.g. `http://192.168.1.87:31134`, plus the server's UDP
-range for ICE), anything else is a RakNet hostname joined with `MC_PORT`.
+signaling URL (TCP, plus the server's UDP range for ICE), anything else is a
+RakNet hostname joined with `MC_PORT`. For a URL, `MC_PORT` fills in a missing
+port (`MC_HOST=http://192.168.1.87` + `MC_PORT=31134`); a port in the URL wins,
+with one warning at startup if `MC_PORT` is also set and differs. This is the
+agent's rule too.
 Moving a bot between them is an address change, not a flag. NetherNet needs a
 signed-in account, which the token cache already provides.
 
@@ -28,9 +31,9 @@ signed-in account, which the token cache already provides.
 
 | Variable | Required | Default | Range | Meaning |
 |---|---|---|---|---|
-| `MC_HOST` | yes | — | non-empty | RakNet: server hostname. NetherNet: the signaling URL, `http://host:port` (no path); `MC_PORT` is then ignored ([transports](#transports)) |
+| `MC_HOST` | yes | — | non-empty | RakNet: server hostname. NetherNet: the signaling URL, `http(s)://host[:port]` (no path; a port here beats `MC_PORT`) ([transports](#transports)) |
 | `MC_USERNAME` | yes | — | non-empty | Key the auth token caches under, **not** the gamertag the server shows |
-| `MC_PORT` | no | `19132` | 1–65535 | RakNet server port; unused when `MC_HOST` is a URL |
+| `MC_PORT` | no | `19132` | 1–65535 | Server port; for a URL it fills in a missing port only |
 | `MC_VIEW_DISTANCE` | no | `12` | 1–64 | Chunk radius to request. The default is Bedrock's maximum tick-distance; the server grants what is asked for, so a smaller value holds proportionally less world ([why][radius]) |
 | `AUTH_CACHE_DIR` | no | `/data/auth` | — | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | 1–3600000 | Backoff floor |

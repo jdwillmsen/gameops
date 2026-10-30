@@ -8,7 +8,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -58,9 +57,12 @@ var actorIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 // Config is everything the bot needs to hold a player slot.
 type Config struct {
 	// Host is a hostname for RakNet, or the signaling URL of a NetherNet
-	// server (http://host:port), in which case Port is not used.
+	// server (http(s)://host[:port]). Port fills in a URL that has none.
 	Host string
 	Port int
+	// PortSet records that MC_PORT was given, so a URL port that disagrees
+	// with it can be reported rather than silently winning.
+	PortSet bool
 	// Username is the token-cache key, not the gamertag other players see.
 	// Xbox Live supplies the gamertag after login; this only decides which
 	// cached token is used, which is why two bots with different values here
@@ -115,11 +117,6 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if mcaddr.IsNetherNet(host) {
-		if err := mcaddr.ValidateNetherNet(host); err != nil {
-			return Config{}, fmt.Errorf("MC_HOST: %w", err)
-		}
-	}
 	username, err := required("MC_USERNAME")
 	if err != nil {
 		return Config{}, err
@@ -127,6 +124,9 @@ func Load() (Config, error) {
 	port, err := positiveInt("MC_PORT", 19132, maxPort)
 	if err != nil {
 		return Config{}, err
+	}
+	if _, err := mcaddr.Resolve(host, port); err != nil {
+		return Config{}, fmt.Errorf("MC_HOST: %w", err)
 	}
 	viewDistance, err := positiveUint8("MC_VIEW_DISTANCE", maxTickDistance, maxViewDistance)
 	if err != nil {
@@ -151,6 +151,7 @@ func Load() (Config, error) {
 	return Config{
 		Host:           host,
 		Port:           port,
+		PortSet:        strings.TrimSpace(os.Getenv("MC_PORT")) != "",
 		Username:       username,
 		ViewDistance:   viewDistance,
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),
@@ -160,13 +161,19 @@ func Load() (Config, error) {
 	}, nil
 }
 
-// Address is what the bot dials: the NetherNet URL as given, or host:port
-// for RakNet.
+// Address is what the bot dials: the NetherNet URL with MC_PORT filled in
+// when the URL has no port, or host:port for RakNet. Load has already proved
+// it resolves.
 func (c Config) Address() string {
-	if mcaddr.IsNetherNet(c.Host) {
-		return c.Host
-	}
-	return net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
+	addr, _ := mcaddr.Resolve(c.Host, c.Port)
+	return addr
+}
+
+// PortConflict reports a NetherNet URL whose own port differs from an
+// explicit MC_PORT. The URL's port is the one dialled.
+func (c Config) PortConflict() bool {
+	p := mcaddr.URLPort(c.Host)
+	return p != "" && c.PortSet && p != strconv.Itoa(c.Port)
 }
 
 func required(name string) (string, error) {

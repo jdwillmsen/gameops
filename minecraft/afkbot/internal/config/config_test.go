@@ -272,21 +272,53 @@ func TestLoadPresenceErrorsNeverEchoTheToken(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsNetherNetURLAsHost(t *testing.T) {
-	setRequired(t)
-	t.Setenv("MC_HOST", "http://192.168.1.87:31134")
+func TestAddressForNetherNetURL(t *testing.T) {
+	for host, want := range map[string]string{
+		"http://192.168.1.87":        "http://192.168.1.87:31134",
+		"https://mc.example/":        "https://mc.example:31134",
+		"http://192.168.1.87:19999":  "http://192.168.1.87:19999",
+		"http://192.168.1.87:31134/": "http://192.168.1.87:31134",
+	} {
+		setRequired(t)
+		t.Setenv("MC_HOST", host)
+		t.Setenv("MC_PORT", "31134")
 
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load with MC_HOST=%q: %v", host, err)
+		}
+		if got := cfg.Address(); got != want {
+			t.Errorf("MC_HOST=%q: Address() = %q, want %q", host, got, want)
+		}
 	}
-	if got := cfg.Address(); got != "http://192.168.1.87:31134" {
-		t.Errorf("Address() = %q, want the URL untouched (MC_PORT must not be appended)", got)
+}
+
+func TestPortConflict(t *testing.T) {
+	for _, tc := range []struct {
+		host, port string
+		want       bool
+	}{
+		{"http://h:31134", "19999", true},
+		{"http://h:31134", "31134", false},
+		{"http://h:31134", "", false},
+		{"http://h", "31134", false},
+		{"h", "31134", false},
+	} {
+		setRequired(t)
+		t.Setenv("MC_HOST", tc.host)
+		t.Setenv("MC_PORT", tc.port)
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("Load %+v: %v", tc, err)
+		}
+		if got := cfg.PortConflict(); got != tc.want {
+			t.Errorf("%+v: PortConflict() = %v, want %v", tc, got, tc.want)
+		}
 	}
 }
 
 func TestLoadRefusesMalformedNetherNetURL(t *testing.T) {
-	for _, host := range []string{"http://192.168.1.87", "http://host:31134/join", "https://:31134"} {
+	for _, host := range []string{"http://host:31134/join", "https://:31134", "http://u@host"} {
 		setRequired(t)
 		t.Setenv("MC_HOST", host)
 

@@ -7,7 +7,9 @@ package mcaddr
 
 import (
 	"fmt"
+	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -18,16 +20,35 @@ func IsNetherNet(address string) bool {
 	return strings.HasPrefix(a, "http://") || strings.HasPrefix(a, "https://")
 }
 
-// ValidateNetherNet checks the shape the NetherNet client accepts, so a bad
-// address fails at startup instead of on every reconnect: a URL with a port
-// and no path.
-func ValidateNetherNet(address string) error {
-	u, err := url.Parse(address)
+// Resolve returns the address to dial for an MC_HOST/MC_PORT pair, the same
+// rule the agent applies: a NetherNet URL keeps its own port and otherwise
+// takes port; anything else is a RakNet host:port. A trailing '/' is dropped.
+// It rejects what the NetherNet client would refuse on every reconnect, so a
+// bad address fails at startup.
+func Resolve(host string, port int) (string, error) {
+	if !IsNetherNet(host) {
+		return net.JoinHostPort(host, strconv.Itoa(port)), nil
+	}
+	u, err := url.Parse(host)
+	if err != nil || u.Hostname() == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.User != nil {
+		return "", fmt.Errorf("must be a bare http(s)://host[:port] URL when it names a NetherNet server, got %q", host)
+	}
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+	}
+	u.Path = ""
+	return u.String(), nil
+}
+
+// URLPort returns the port a NetherNet URL carries, or "" when it has none or
+// host is not a URL.
+func URLPort(host string) string {
+	if !IsNetherNet(host) {
+		return ""
+	}
+	u, err := url.Parse(host)
 	if err != nil {
-		return fmt.Errorf("not a valid URL: %w", err)
+		return ""
 	}
-	if u.Hostname() == "" || u.Port() == "" || u.Path != "" || u.RawQuery != "" || u.User != nil {
-		return fmt.Errorf("%q must look like http://host:port, with a port and no path", address)
-	}
-	return nil
+	return u.Port()
 }
