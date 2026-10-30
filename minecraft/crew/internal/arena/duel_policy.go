@@ -53,12 +53,8 @@ func (r Roster) Enemy(self, other string) bool {
 	return ok && a != b
 }
 
-// TargetPolicy is what the warriors' combat engine must implement for a duel.
-//
-// Today the engine skips every player when it picks a target (the focus and
-// enemy-near checks in internal/life ignore entities flagged Player), so a
-// bot-vs-bot fight cannot happen until the engine stream honours this
-// contract:
+// TargetPolicy is how a duel's state reaches the warriors' combat engine, which
+// skips every player unless told otherwise (life.PvPPolicy):
 //
 //   - After Arm and before Go a unit holds fire.
 //   - After Go a unit may target a player p exactly when Roster.Enemy(self, p)
@@ -68,10 +64,9 @@ func (r Roster) Enemy(self, other string) bool {
 // All methods must be idempotent. Disarm runs on every exit path, including
 // an interrupt, so a failed duel never leaves units hunting each other.
 //
-// TODO(engine): implement TargetPolicy in the squad service (a roster message
-// to each duelist) and pass it to Duel.Policy. ConsolePolicy below is the
-// console half only: it tags the duelists in the world and cannot reach the
-// engine.
+// SquadPolicy carries the state to the units through their lab squads;
+// ConsolePolicy below only tags the duelists in the world, which the engine
+// cannot read.
 type TargetPolicy interface {
 	Arm(Roster) error
 	Go() error
