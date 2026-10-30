@@ -10,18 +10,17 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/liveness"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcaddr"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcauth"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcproto"
@@ -41,6 +40,12 @@ const stableSession = 60 * time.Second
 // connectTimeout bounds reaching the server at all. It is how long a server
 // that is down takes to be reported as a failed session.
 const connectTimeout = 30 * time.Second
+
+// netherNetConnectTimeout replaces connectTimeout for NetherNet addresses.
+// Reaching the server there is signaling over HTTP, then ICE, DTLS and SCTP
+// before the first game packet, and the Xbox and PlayFab sign-in that runs
+// first counts against the same budget.
+const netherNetConnectTimeout = 60 * time.Second
 
 // spawnTimeout bounds the wait for the world once the server has answered.
 // Far longer than connectTimeout on purpose: a server that has just started
@@ -183,7 +188,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// regenerated every connect: Bedrock skins are uploaded by the client from
 	// its own installation, and a headless client has none.
 	botSkin := skin.For(cfg.Username)
-	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
+	addr := cfg.Address()
 
 	// The server upgrades itself to Mojang's latest on restart, and a point
 	// release that only bumps the protocol number still gets this client
@@ -209,7 +214,11 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		},
 	}
 
-	conn, err := mcdial.Dial(ctx, dialer, addr, connectTimeout, spawnTimeout)
+	connect := connectTimeout
+	if mcaddr.IsNetherNet(addr) {
+		connect = netherNetConnectTimeout
+	}
+	conn, err := mcdial.Dial(ctx, dialer, addr, connect, spawnTimeout)
 	if err != nil {
 		return fmt.Errorf("dial: %w", err)
 	}
