@@ -201,3 +201,38 @@ func TestRunStopsWithItsContext(t *testing.T) {
 		t.Fatal("run outlived its context")
 	}
 }
+
+func TestTacticsStateReportsWhatTheUnitRuns(t *testing.T) {
+	tracker := belief.New(time.Now)
+	lf := life.New(life.Config{Defend: true}, blocks.New(noNames{}, 4), tracker.Snapshot, nopLog{}, rand.New(rand.NewSource(1)))
+	state := newTacticsState(lf)
+
+	before := state.Tactics()
+	wantDefault, _ := tactics.Hash(tactics.NewProfile("default"))
+	if before.Profile != "default" || before.Hash != wantDefault || before.AppliedAt != nil || before.TrainingEnabled != nil {
+		t.Fatalf("before any sync: %+v", before)
+	}
+
+	dir := controlDir(t, true)
+	src := &fakeProfileSource{}
+	cand := candidate("champ-1", 13)
+	src.set(cand, true)
+	ps := newProfileSync(labConfig(dir), src, lf, nopLog{})
+	ps.state = state
+	ps.step(context.Background())
+
+	got := state.Tactics()
+	wantHash, _ := tacticsctl.Hash(cand)
+	if got.Profile != "champ-1" || got.Hash != wantHash || got.AppliedAt == nil || got.TrainingEnabled == nil || !*got.TrainingEnabled {
+		t.Fatalf("after the sync: %+v", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, tacticsctl.TrainingFile), []byte("off\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ps.step(context.Background())
+	off := state.Tactics()
+	if off.Hash != wantDefault || off.TrainingEnabled == nil || *off.TrainingEnabled {
+		t.Fatalf("after the kill switch: %+v", off)
+	}
+}
