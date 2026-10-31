@@ -1,6 +1,7 @@
 package skill
 
 import (
+	"context"
 	"testing"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -91,4 +92,34 @@ func TestEntityUseFailsWithoutTheItem(t *testing.T) {
 	if st, err := r.run(sk, 50); st != Failed || err == nil {
 		t.Fatalf("status %v, err %v", st, err)
 	}
+}
+
+// The last feed uses up the item and the last hit can remove the target; the
+// task is still done.
+func TestEntityUseIsDoneEvenIfTheTargetAndItemAreGone(t *testing.T) {
+	w := flatWorld(12)
+	r := newRig(t, w, feetAt(1, 1, 2))
+	r.give(0, idCobblestone, 1)
+	present := true
+	e := belief.Entity{ID: 5, Type: "gameops:lion", Pos: mgl32.Vec3{2.5, 1, 3.5}}
+	guard := WithGuard(Guard{Each: func(f func(belief.Entity)) {
+		if present {
+			f(e)
+		}
+	}})
+	sk := NewEntityUse(w, r.self, EntityRef{ID: 5}, Hit, "cobblestone", 1, 3, guard)
+	for i := 0; i < 20; i++ {
+		st, err := sk.Step(context.Background(), r)
+		if st == Done {
+			return
+		}
+		if st == Failed {
+			t.Fatalf("failed: %v", err)
+		}
+		if p, _ := sk.(Progresser); p.Progress() == 1 {
+			present = false
+			r.give(0, 0, 0)
+		}
+	}
+	t.Fatal("never finished")
 }
