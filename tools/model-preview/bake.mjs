@@ -40,11 +40,13 @@ export function bake({ name, layers, length, fps, context }) {
         for (const ch of CHANNELS) {
           const spec = channels[ch];
           if (!spec) continue;
+          if (typeof spec === "object" && !Array.isArray(spec)) throw new Error(`${name}: keyframed ${bone}.${ch} is not supported, only constant or expression arrays`);
           const vec = Array.isArray(spec) ? spec : [spec, spec, spec];
           const v = vec.map((e) => evalExpr(e, ctx));
           const kf = ((bones[bone] ??= {})[ch] ??= {});
           const key = t.toFixed(4);
-          kf[key] = kf[key] ? kf[key].map((x, k) => x + v[k]) : v;
+          // Bedrock layers add rotation and position but multiply scale.
+          kf[key] = kf[key] ? kf[key].map((x, k) => (ch === "scale" ? x * v[k] : x + v[k])) : v;
         }
       }
     }
