@@ -102,6 +102,22 @@ func (a *Actuator) SelectHotbar(slot int, item belief.Item) error {
 // Attack hits an entity with the held stack and swings the arm, which the
 // server expects alongside the hit. slot is the hotbar slot the stack is in.
 func (a *Actuator) Attack(target uint64, slot int, held belief.Item) error {
+	return a.useOnEntity(protocol.UseItemOnEntityActionAttack, target, slot, held)
+}
+
+// InteractEntity uses the held stack on an entity the way a right click does:
+// feeding a wild animal to tame it, or toggling the sit of a tamed pet with an
+// empty hand. slot is the hotbar slot the stack is in.
+//
+// Verified against BDS 1.26.60.6: the caller selects the hotbar slot first
+// (SelectHotbar), and this one Interact transaction plus the arm swing is
+// enough. The gameops tamables tame on a fed wild animal and toggle sit on an
+// empty-handed click on the owner's pet, with no MouseOver Interact packet.
+func (a *Actuator) InteractEntity(target uint64, slot int, held belief.Item) error {
+	return a.useOnEntity(protocol.UseItemOnEntityActionInteract, target, slot, held)
+}
+
+func (a *Actuator) useOnEntity(action int32, target uint64, slot int, held belief.Item) error {
 	if slot < 0 || slot >= hotbarSlots {
 		return fmt.Errorf("slot %d is not on the hotbar", slot)
 	}
@@ -113,7 +129,7 @@ func (a *Actuator) Attack(target uint64, slot int, held belief.Item) error {
 	}
 	if err := a.w.WritePacket(&packet.InventoryTransaction{TransactionData: &protocol.UseItemOnEntityTransactionData{
 		TargetEntityRuntimeID: target,
-		ActionType:            protocol.UseItemOnEntityActionAttack,
+		ActionType:            action,
 		HotBarSlot:            int32(slot),
 		HeldItem:              inst,
 		Position:              a.pose.Feet.Add(mgl32.Vec3{0, eyeHeight, 0}),
