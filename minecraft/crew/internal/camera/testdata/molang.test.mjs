@@ -32,7 +32,7 @@ test('the walk expression from the wildlife pack', () => {
 
 test('unknown queries read 0, bad text is refused', () => {
   assert.equal(ev('query.nothing_like_this + 1'), 1);
-  for (const bad of ['', '1 +', 'math.nope(1)', 'foo.bar', '(1', '1 2', 'a;b', 'globalThis', 'x'.repeat(600)]) {
+  for (const bad of ['', '1 +', 'math.nope(1)', 'foo.bar', '(1', '1 2', 'a;b', 'globalThis', 'x'.repeat(600), '__proto__(1)', 'constructor(1)', 'math.constructor(1)']) {
     assert.equal(m.compile(bad), null, bad);
   }
   assert.equal(m.compile('('.repeat(100) + '1' + ')'.repeat(100)), null);

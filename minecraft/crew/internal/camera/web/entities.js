@@ -683,7 +683,8 @@ export function createEntities(scene) {
       },
       variable: { attack_time: swing >= 0 && swing < 1 ? swing : 0 },
     };
-    const posed = pose(built.anim, ctx);
+    let posed;
+    try { posed = pose(built.anim, ctx); } catch { return; }
     for (const b of built.bones) {
       const p = posed.get(b.name);
       const r = p ? [b.baseDeg[0] + p.rot[0], b.baseDeg[1] + p.rot[1], b.baseDeg[2] + p.rot[2]] : b.baseDeg;
