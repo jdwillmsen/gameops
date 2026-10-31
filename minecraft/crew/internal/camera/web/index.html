@@ -343,7 +343,7 @@ let mats = [];            // index = id - 1
 const blocks = new Map(); // "cx,cy,cz" -> Uint16Array(4096)
 const meshes = new Map(); // key -> [opaque, translucent]
 const me = { x: 0, y: 70, z: 0, yaw: 0, pitch: 0 };
-window.__dbg = { get entMeshes() { return ents.meshes; }, scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
+window.__dbg = { renderer, get entMeshes() { return ents.meshes; }, scene, camera, me, blocks, meshes, get mats() { return mats; }, atlasReady: () => !!atlas };
 
 // Meshing runs in a worker (mesher.js); the page keeps the cells only to
 // apply block edits and report its size.

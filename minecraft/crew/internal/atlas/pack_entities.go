@@ -352,7 +352,9 @@ func (eb *entityBuilder) packModel(def entityDef, rcs map[string]renderControlle
 		}
 		out.Variants = append(out.Variants, []Layer{l})
 	}
-	out.Default = out.Variants[0]
+	// Its own copy: the sheet places each layer once, and a layer shared with
+	// the first variant would be placed twice and drawn from the wrong texels.
+	out.Default = append([]Layer(nil), out.Variants[0]...)
 	if len(out.Variants) == 1 {
 		out.Variants = nil
 	}
