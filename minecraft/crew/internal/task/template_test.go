@@ -547,3 +547,32 @@ func TestDecodeErrorsQuoteNoCoordinate(t *testing.T) {
 		t.Errorf("error %q quotes the coordinate", err)
 	}
 }
+
+func TestEntityTemplatesParseOnlyInHarnessMode(t *testing.T) {
+	body := []byte(`{"template":"interact_entity","target":{"type":"gameops:tiger"},"item":"beef","times":3}`)
+	EnableHarness(false)
+	if _, err := ParseTemplate(body); err == nil {
+		t.Fatal("interact_entity parsed outside harness mode")
+	}
+	EnableHarness(true)
+	defer EnableHarness(false)
+	tpl, err := ParseTemplate(body)
+	if err != nil || tpl.Times != 3 || tpl.Every != defaultEvery || tpl.Target.Type != "gameops:tiger" || tpl.Item != "beef" {
+		t.Fatalf("got %+v, %v", tpl, err)
+	}
+	for _, bad := range []string{
+		`{"template":"attack_entity","target":{}}`,
+		`{"template":"attack_entity","target":{"type":"Bad Type"}}`,
+		`{"template":"attack_entity","target":{"id":4},"times":99}`,
+		`{"template":"attack_entity","target":{"id":4},"item":"../x"}`,
+		`{"template":"equip_item","item":"A b"}`,
+		`{"template":"interact_entity","target":{"id":4},"extra":1}`,
+	} {
+		if _, err := ParseTemplate([]byte(bad)); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+	if _, err := ParseTemplate([]byte(`{"template":"equip_item","item":""}`)); err != nil {
+		t.Errorf("empty hand refused: %v", err)
+	}
+}

@@ -18,6 +18,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CONTROL_URL`, `CONTROL_TOKEN` | unset | crew-control's base URL and its `WORK_TOKEN`; set both or neither. When set, the unit long-polls crew-control for tasks, stop and per-task `cancel_task` commands and reports their progress, with the contents of the last chest the task closed (dropped and resent once without them if crew-control answers 400 or 413). Unset, it takes tasks only from the Task API |
 | `TASK_TIMEOUT_S` | `900` | Longest a task may run before it fails with `timed out` (30 to 3600) |
 | `IDLE_WANDER` | `true` | A unit with no task looks about and takes short walks. `false` leaves it standing, though it still sends an input every tick |
+| `CREW_HARNESS` | `false` | Test harness only, for a throwaway preview server: opens the `interact_entity`, `attack_entity` and `equip_item` task templates and lists every known entity (position, tamed, sitting, owner, target) in `/v1/state`. Never set it on the lab |
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |

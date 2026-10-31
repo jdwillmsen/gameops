@@ -255,7 +255,7 @@ func TestOnlyALabUnitServesTacticsOnState(t *testing.T) {
 		"no squad":         {config.Config{Role: "striker", TacticsControlDir: dir}, false},
 	} {
 		rec := httptest.NewRecorder()
-		statusHandler(tracker, "dev", statusapi.Unit{}, nil, nil, "", statusOptions(lf, tacticsView(c.cfg, lf))...).
+		statusHandler(tracker, "dev", statusapi.Unit{}, nil, nil, "", statusOptions(lf, tacticsView(c.cfg, lf), false)...).
 			ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/state", nil))
 		var body map[string]json.RawMessage
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

@@ -118,12 +118,13 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}), skill.WithGuard(guard))
 	}, nil, tracker.Snapshot, time.Duration(cfg.TaskTimeoutS)*time.Second, logAdapter{log})
 	runner.SetRole(string(cfg.Role))
+	task.EnableHarness(cfg.Harness)
 	// Before anything that waits on the network: the liveness probe hits this
 	// server, and a unit whose sign-in or control-plane lookup is slow would
 	// otherwise be restarted before it ever answered. /readyz stays 503 until
 	// the unit is in the world.
 	tactView := tacticsView(cfg, lf)
-	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusOptions(lf, tactView)...), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.StatusAddr, Handler: statusHandler(tracker, version, unitInfo(cfg), hub, runner, cfg.TasksToken, statusOptions(lf, tactView, cfg.Harness)...), ReadHeaderTimeout: 5 * time.Second}
 	var statusFailed atomic.Bool
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

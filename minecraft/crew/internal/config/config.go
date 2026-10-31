@@ -79,6 +79,9 @@ type Config struct {
 	IdleRadius int
 	// Defend lets a unit fight hostile mobs and back away from players' blows.
 	Defend bool
+	// Harness opens the entity task templates and the entity list in the
+	// state body. It is for a throwaway preview server, never the lab.
+	Harness bool
 	// Eat lets a hungry unit eat food from its hotbar.
 	Eat bool
 	// Role is the unit's job. A warrior role (vanguard, striker, ranger)
@@ -201,6 +204,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	harness, err := boolDefault("CREW_HARNESS", false)
+	if err != nil {
+		return Config{}, err
+	}
 	eat, err := boolDefault("EAT", true)
 	if err != nil {
 		return Config{}, err
@@ -258,6 +265,7 @@ func Load() (Config, error) {
 		IdleWander: idleWander,
 		IdleRadius: idleRadius,
 		Defend:     defend,
+		Harness:    harness,
 		Eat:        eat,
 		Role:       role,
 		Lab:        lab,
