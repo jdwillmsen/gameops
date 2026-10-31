@@ -26,6 +26,36 @@ These names are stable, because tamed pets saved in a world depend on them; neve
 
 Tamed state for the auras is the `minecraft:is_tamed` marker in `gameops:tamed`.
 
+## Reading the logs
+
+The script writes one structured line per wildlife event with `console.warn`, so it is visible only
+when the server prints content-log warnings to the console (the lab sets `CONTENT_LOG_LEVEL=verbose` and
+`CONTENT_LOG_CONSOLE_OUTPUT_ENABLED=true`; a server without them logs these lines only to the ContentLog
+file in `/data/logs`). Each line is `gameops:event ` followed by one JSON object. The first keys
+never change: `ev`, `type` (entity type), `id` (entity id), `owner` (player id, or `null` for a wild animal or a pet
+tamed before the owner was stored). Other keys may be added, so parse by name. `tick` is the game tick.
+
+```
+kubectl -n jdwillmsen-prd logs jdwillmsen-crew-lab-prd-minecraft-bedrock-0 -c jdwillmsen-crew-lab-prd-minecraft-bedrock | grep 'gameops:event'
+kubectl ... logs ... | grep -o 'gameops:event .*' | sed 's/^gameops:event //' | jq -c 'select(.ev=="tamed")'
+```
+
+| `ev` | When | Extra keys | Example |
+|---|---|---|---|
+| `tamed` | The tame event fired (real feeding or `gameops:tame`) | none | `gameops:event {"ev":"tamed","type":"gameops:lion","id":"-4294967295","owner":"2535...","tick":9120}` |
+| `sit` / `stand` | The pet was told to sit or stand | none | `gameops:event {"ev":"sit","type":"gameops:tiger","id":"-8589934591","owner":"2535...","tick":9300}` |
+| `aura` | A pet's aura was applied. At `info` at most once per 600 ticks per animal; every application at `debug` | `effect`, `amplifier`, `duration` (ticks), `kinds` (who can receive it), `targets` (up to 8 ids), `target_count` | `gameops:event {"ev":"aura","type":"gameops:lion","id":"-4294967295","owner":"2535...","effect":"strength","amplifier":0,"duration":200,"kinds":["owner","pets"],"targets":["2535..."],"target_count":1,"tick":9600}` |
+| `burst` | Tiger charge or cheetah sprint started (`"start"`, caused by a landed hit) or ended (`"end"`, the tired phase begins) | `ability` (`charge` or `sprint`), `phase` | `gameops:event {"ev":"burst","type":"gameops:tiger","id":"...","owner":null,"ability":"charge","phase":"start","tick":9700}` |
+| `ability` | The burst ability is ready again after the tired phase | `ability`, `phase` is `"ready"` | `gameops:event {"ev":"ability","type":"gameops:tiger","id":"...","owner":null,"ability":"charge","phase":"ready","tick":10260}` |
+| `hit` | A wildlife animal hit something, or was hit; at most one line per attacker, victim and role per 10 ticks | `role` (`attacker` or `victim`), `other_type`, `other_id` | `gameops:event {"ev":"hit","type":"gameops:hyena","id":"...","owner":null,"role":"victim","other_type":"minecraft:player","other_id":"...","tick":9800}` |
+
+Other lines: `gameops:wildlife script loaded` at startup, and the test hooks above.
+
+Level: the `LOG_LEVEL` constant at the top of `behavior_pack/scripts/main.js` is `"off"`, `"info"` (default) or
+`"debug"`. Raise it to `"debug"` to log every aura application, then release a new pack version
+(version bump in both manifests and the dependency, `lab-packs` image, tag bump in `jdw-deployments`).
+Logging never runs on every tick: events are logged when they occur, the scans are 5 ticks apart, and the aura and hit lines are rate limited.
+
 ## Test hooks
 
 `/scriptevent` ids for lab testing, not gameplay:

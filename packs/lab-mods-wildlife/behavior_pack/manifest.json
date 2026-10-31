@@ -4,7 +4,7 @@
     "name": "gameops lab wildlife (behaviour)",
     "description": "Tamable big cats, bear and hyena for the crew lab",
     "uuid": "5672140f-4de5-4cb1-b9b1-673f8febef88",
-    "version": [0, 0, 2],
+    "version": [0, 0, 3],
     "min_engine_version": [1, 21, 0]
   },
   "modules": [
@@ -26,7 +26,7 @@
   "dependencies": [
     {
       "uuid": "ec11bec6-1562-4557-8500-4f10d260b6f8",
-      "version": [0, 0, 2]
+      "version": [0, 0, 3]
     },
     {
       "module_name": "@minecraft/server",
