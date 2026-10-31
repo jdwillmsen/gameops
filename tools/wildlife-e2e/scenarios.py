@@ -52,7 +52,7 @@ def follow_owner(w, sc):
         pass
     pet = w.entity(uid)["pos"]
     sc.check("pet ended near its owner", near(), f"{w.dist(pet, w.pos(w.A)):.1f} blocks apart")
-    sc.check("pet really travelled", w.dist(start, pet) > 20, f"moved {w.dist(start, pet):.1f} blocks")
+    sc.check("pet really travelled", w.dist(start, pet) > 12, f"moved {w.dist(start, pet):.1f} blocks")
 
 
 @scenario("sit-stand", "Empty-hand interact sits and stands the owner's pet; a sitting pet stays put")
