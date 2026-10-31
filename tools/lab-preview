@@ -96,11 +96,13 @@ cmd_up() {
   stage "$packs"
   echo "$packs" >"$ROOT/packs-dir"
   SINCE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  # Same logging env as the crew-lab chart, so a run sees what the lab shows.
   docker run -d --name "$NAME" -p "0.0.0.0:$HOST_PORT:19132/udp" \
     -e EULA=TRUE -e "VERSION=$VERSION" -e "LEVEL_NAME=$LEVEL" -e LEVEL_TYPE=FLAT \
     -e ONLINE_MODE=false -e ALLOW_LIST=false -e ALLOW_CHEATS=true -e GAMEMODE=creative \
     -e TRANSPORT=raknet -e SERVER_PORT=19132 -e CONTENT_LOG_FILE_ENABLED=true \
-    -e CONTENT_LOG_CONSOLE_OUTPUT_ENABLED=true \
+    -e CONTENT_LOG_CONSOLE_OUTPUT_ENABLED=true -e CONTENT_LOG_LEVEL=verbose \
+    -e ITEM_TRANSACTION_LOGGING_ENABLED=true \
     -v "$DATA:/data" "$IMAGE" >/dev/null
   wait_started
   # The first boot creates the world and ignores the staged pack lists, so
