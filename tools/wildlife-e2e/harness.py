@@ -1,5 +1,7 @@
 """Preview server, crew bots, evidence bundle and state watcher for the wildlife e2e suite."""
 import collections
+import http.client
+import socket
 import json
 import os
 import re
@@ -16,6 +18,11 @@ from pathlib import Path
 # The whole suite plays in this box of the preview's flat world (surface y -60).
 Y = -60
 TOKEN = "e2e"
+
+
+def port_free(port):
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", port)) != 0
 
 
 def now_ms():
@@ -169,6 +176,8 @@ class Bot:
     """An offline crew bot with the task API and the entity list open."""
 
     def __init__(self, crew_bin, name, status_port, preview, logdir, pidfile):
+        if not port_free(status_port):
+            raise RuntimeError(f"status port {status_port} is already in use; set WILDLIFE_E2E_BOT_PORT")
         self.name, self.port, self.preview = name, status_port, preview
         self.log = open(Path(logdir) / f"{name}.log", "w")
         env = {**os.environ, "MC_HOST": "127.0.0.1", "MC_PORT": str(preview.port), "MC_USERNAME": name,
@@ -237,20 +246,29 @@ class Watcher(threading.Thread):
         self.history = collections.deque(maxlen=900)
         self.stop_flag = threading.Event()
         self._last = {}
+        self.errors = 0
 
     def run(self):
         while not self.stop_flag.is_set():
-            snap = {}
-            for name, bot in self.bots.items():
-                try:
-                    snap[name] = bot.state()
-                except (urllib.error.URLError, OSError, ValueError):
-                    pass
-            if snap:
-                self.snaps = snap
-                self.history.append((time.time(), snap))
-                self._diff(snap)
-            time.sleep(self.period)
+            try:
+                self._poll()
+            except Exception as exc:  # a bad snapshot must not freeze the data every scenario reads
+                self.errors += 1
+                if self.errors <= 5 and not self.stop_flag.is_set():
+                    self.ev.event("harness", "watcher_error", error=repr(exc))
+            self.stop_flag.wait(self.period)
+
+    def _poll(self):
+        snap = {}
+        for name, bot in self.bots.items():
+            try:
+                snap[name] = bot.state()
+            except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException):
+                pass
+        if snap:
+            self.snaps = snap
+            self.history.append((time.time(), snap))
+            self._diff(snap)
 
     def _diff(self, snap):
         for name, s in snap.items():
@@ -258,8 +276,7 @@ class Watcher(threading.Thread):
             if self._last.get((name, "hp")) != hp:
                 self.ev.event("bot", "health", bot=name, health=hp)
                 self._last[(name, "hp")] = hp
-        seen = next(iter(snap.values()))
-        for e in seen.get("entities", []):
+        for e in merge_entities(snap.values()):
             if not (e["type"].startswith("gameops:") or e["type"] in ("minecraft:zombie",)):
                 continue
             key = (e["unique_id"],)
@@ -271,13 +288,19 @@ class Watcher(threading.Thread):
                 self._last[key] = sig
 
     def entities(self):
-        """The latest entity list, from the first bot that answered."""
-        for s in self.snaps.values():
-            return s.get("entities", [])
-        return []
+        """The latest entities either bot knows of, one per unique id."""
+        return merge_entities(self.snaps.values())
 
     def since(self, t):
-        return [(ts, s) for ts, s in self.history if ts >= t]
+        return [(ts, s) for ts, s in list(self.history) if ts >= t]
+
+
+def merge_entities(snaps):
+    merged = {}
+    for s in snaps:
+        for e in s.get("entities", []):
+            merged.setdefault(e["unique_id"], e)
+    return list(merged.values())
 
 
 def wait_until(pred, timeout, desc="condition", poll=0.25):

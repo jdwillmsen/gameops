@@ -19,7 +19,7 @@ from world import World  # noqa: E402
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     ap.add_argument("--only", action="append", default=[], help="scenario id or id prefix; repeatable")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--version", default=os.environ.get("LAB_PREVIEW_VERSION", "1.26.60.6"))
@@ -33,35 +33,51 @@ def main():
 
     repo = Path(__file__).resolve().parents[2]
     commit = subprocess.run(["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip() or "unknown"
+    chosen = [s for s in scenarios.REGISTRY if not args.only or any(s[0].startswith(o) for o in args.only)]
+    if not chosen:
+        print("no scenario matches", args.only, file=sys.stderr)
+        return 2
     root = os.environ.get("WILDLIFE_EVIDENCE_DIR") or os.path.expanduser("~/evidence/wildlife")
     ev = harness.Evidence(root, commit, {"version": args.version, "transport": "raknet"})
-    work = tempfile.mkdtemp(prefix="wildlife-e2e-")
+    own_work = not os.environ.get("WILDLIFE_E2E_WORK")
+    work = os.environ.get("WILDLIFE_E2E_WORK") or tempfile.mkdtemp(prefix="wildlife-e2e-")
     pidfile = Path(work) / "pids"
     harness.install_signal_handlers()
 
     preview = harness.Preview(repo, os.environ.get("WILDLIFE_E2E_NAME", "wildlife-e2e"), args.port, args.version)
     bots, watcher = {}, None
+    done_ids = set()
+
+    def guarded(step):
+        try:
+            step()
+        except Exception as exc:
+            print(f"cleanup: {exc!r}", file=sys.stderr)
 
     def cleanup():
         if watcher:
             watcher.stop_flag.set()
+            guarded(lambda: watcher.join(3))
         for b in bots.values():
-            b.stop()
-        if not args.keep:
-            try:
-                (ev.dir / "server.log").write_text(preview.logs())
-            except Exception:
-                pass
-            preview.down()
-        ev.write_report()
-        ev.close()
-        shutil.rmtree(work, ignore_errors=True)
+            guarded(b.stop)
+        if preview.up_done:
+            guarded(lambda: (ev.dir / "server.log").write_text(preview.logs()))
+            if not args.keep:
+                guarded(preview.down)
+        # A run cut short still reports every scenario it was asked for.
+        for sid, title, _ in chosen:
+            if sid not in done_ids:
+                sc = harness.Scenario(ev, sid, title)
+                if sid == ev.scenario:
+                    sc.check("scenario ran to the end", False, "run interrupted")
+                else:
+                    sc.skip("run interrupted before it started")
+                ev.scenarios.append(sc.record())
+        guarded(ev.write_report)
+        guarded(ev.close)
+        if own_work:
+            shutil.rmtree(work, ignore_errors=True)
     atexit.register(cleanup)
-
-    chosen = [s for s in scenarios.REGISTRY if not args.only or any(s[0].startswith(o) for o in args.only)]
-    if not chosen:
-        print("no scenario matches", args.only, file=sys.stderr)
-        return 2
     print(f"evidence: {ev.dir}", flush=True)
 
     ev.event("harness", "build_crew")
@@ -97,6 +113,7 @@ def main():
             sc.check("scenario ran to the end", False, "".join(traceback.format_exception_only(type(exc), exc)).strip())
             ev.event("harness", "error", trace=traceback.format_exc())
         ev.scenarios.append(sc.record())
+        done_ids.add(sid)
         ev.write_report()
         st = sc.status()
         failed += st == "fail"
