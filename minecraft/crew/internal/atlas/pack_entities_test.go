@@ -120,3 +120,44 @@ func TestVanillaTableStillHasNoPackFields(t *testing.T) {
 		t.Errorf("layer sets = %d", len(sets))
 	}
 }
+
+// Every face of every layer must lie on the sheet; a layer placed twice has its
+// rects scaled out of it and draws nothing.
+func TestWildlifeUVsLieOnTheSheet(t *testing.T) {
+	tbl := buildWildlife(t)
+	for name, m := range tbl.Models {
+		for _, set := range m.layerSets() {
+			for _, l := range set {
+				for _, b := range l.Bones {
+					for _, c := range b.Cubes {
+						for f, r := range c.UV {
+							if r == ([4]float32{}) {
+								continue
+							}
+							for _, v := range []float32{r[0], r[2]} {
+								if v < 0 || v > float32(tbl.Width) {
+									t.Fatalf("%s %s face %d: u %v outside the %dx%d sheet", name, b.Name, f, v, tbl.Width, tbl.Height)
+								}
+							}
+							for _, v := range []float32{r[1], r[3]} {
+								if v < 0 || v > float32(tbl.Height) {
+									t.Fatalf("%s %s face %d: v %v outside the %dx%d sheet", name, b.Name, f, v, tbl.Width, tbl.Height)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDefaultLayerIsTheFirstVariantsTwin(t *testing.T) {
+	m := buildWildlife(t).Models["gameops:tiger"]
+	if len(m.Default) != 1 || len(m.Variants) != 2 {
+		t.Fatalf("default %d, variants %d", len(m.Default), len(m.Variants))
+	}
+	if m.Default[0].Bones[0].Cubes[0].UV != m.Variants[0][0].Bones[0].Cubes[0].UV {
+		t.Error("the default draws from other texels than variant 0")
+	}
+}
