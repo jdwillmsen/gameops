@@ -144,6 +144,14 @@ func (u *EntityUse) Step(ctx context.Context, a Actuator) (Status, error) {
 	}
 	p := a.Pose()
 	u.tick++
+	if u.sent >= u.times {
+		// Checked first: the last feed eats the item and the last hit may
+		// remove the target, and neither makes a finished task a failure.
+		if err := a.Tick(act.Input{Yaw: p.Yaw, Pitch: p.Pitch}); err != nil {
+			return Failed, err
+		}
+		return Done, nil
+	}
 	e, ok := u.find(p.Feet)
 	if !ok {
 		u.missing++
@@ -172,9 +180,6 @@ func (u *EntityUse) Step(ctx context.Context, a Actuator) (Status, error) {
 	yaw, pitch := lookAt(eyeOf(p.Feet), e.Pos.Add(mgl32.Vec3{0, entityBody, 0}))
 	if err := a.Tick(act.Input{Yaw: yaw, Pitch: pitch}); err != nil {
 		return Failed, err
-	}
-	if u.sent >= u.times {
-		return Done, nil
 	}
 	if u.tick < u.nextSend {
 		return Running, nil
