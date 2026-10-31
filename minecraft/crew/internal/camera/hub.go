@@ -110,8 +110,10 @@ type Hub struct {
 	entPNG   []byte
 	entDoc   []byte
 	// packPNG and packDoc are the sheet and table of the pack's own entities.
-	packPNG    []byte
-	packDoc    []byte
+	packPNG []byte
+	packDoc []byte
+	// swung is when each pack entity last swung, to space inferred swings.
+	swung      map[uint64]time.Time
 	itemName   map[int32]string // item network id -> name without namespace
 	skins      map[uuid.UUID]*skinInfo
 	ownSkin    *skinInfo

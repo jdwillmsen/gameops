@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
@@ -43,14 +44,14 @@ func TestVariantAndSittingReachViewersWithoutDisturbingTheDye(t *testing.T) {
 	}
 }
 
-func TestAnAttackSwingIsForwardedOnceAndNotKept(t *testing.T) {
+func TestAnAnnouncedAttackSwingIsForwardedOnceAndNotKept(t *testing.T) {
 	h, _ := newTestHub(t, 3)
 	live := attach(t, h)
 	drain(t, live)
 	h.Apply(&packet.AddActor{EntityRuntimeID: 9, EntityType: "gameops:tiger"}, &sink{})
 	drain(t, live)
 	h.Apply(&packet.ActorEvent{EntityRuntimeID: 9, EventType: packet.ActorEventStartAttacking}, &sink{})
-	h.Apply(&packet.ActorEvent{EntityRuntimeID: 9, EventType: packet.ActorEventHurt}, &sink{})
+	h.Apply(&packet.ActorEvent{EntityRuntimeID: 9, EventType: packet.ActorEventJump}, &sink{})
 	h.Apply(&packet.ActorEvent{EntityRuntimeID: 404, EventType: packet.ActorEventStartAttacking}, &sink{})
 	got := ofType(mustDrain(t, live), frameActorEvent)
 	if len(got) != 1 || string(got[0]) != string([]byte{frameActorEvent, 9, eventAttack}) {
@@ -58,6 +59,43 @@ func TestAnAttackSwingIsForwardedOnceAndNotKept(t *testing.T) {
 	}
 	if late := ofType(mustDrain(t, attach(t, h)), frameActorEvent); len(late) != 0 {
 		t.Errorf("a late viewer was sent the old swing: % x", late)
+	}
+}
+
+func TestAPackAnimalNextToWhatWasHurtSwings(t *testing.T) {
+	h, _ := newTestHub(t, 3)
+	live := attach(t, h)
+	add := func(id uint64, typ string, x float32) {
+		h.Apply(&packet.AddActor{EntityRuntimeID: id, EntityType: typ, Position: mgl32.Vec3{x, 64, 0}}, &sink{})
+	}
+	add(1, "minecraft:zombie", 0)
+	add(2, "gameops:tiger", 2)
+	add(3, "gameops:lion", 3)
+	add(4, "gameops:hyena", 40)
+	add(5, "minecraft:cow", 1)
+	drain(t, live)
+
+	hurt := func(id uint64) {
+		h.Apply(&packet.ActorEvent{EntityRuntimeID: id, EventType: packet.ActorEventHurt}, &sink{})
+	}
+	swings := func() [][]byte { return ofType(mustDrain(t, live), frameActorEvent) }
+
+	hurt(1)
+	if got := swings(); len(got) != 1 || got[0][1] != 2 {
+		t.Fatalf("the nearest pack animal should swing, got % x", got)
+	}
+	// Spaced: a burst of hurts is one swing, and the vanilla cow never swings.
+	hurt(1)
+	hurt(1)
+	if got := swings(); len(got) != 0 {
+		t.Errorf("swings inside the gap: % x", got)
+	}
+	// Out of reach, nobody swings; a pack animal hurt is not its own attacker.
+	hurt(4)
+	hurt(2)
+	got := swings()
+	if len(got) != 1 || got[0][1] != 3 {
+		t.Errorf("hurting the tiger should make only the lion swing, got % x", got)
 	}
 }
 
