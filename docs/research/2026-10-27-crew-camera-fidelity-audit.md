@@ -82,3 +82,33 @@ no per-frame work.
 The fixes add one atlas layer and replace six-face cubes by smaller boxes for a
 handful of block types; plants become two crossed quads instead of a cube. None
 adds per-frame work. The wall load test was not re-run for this change.
+
+## Custom entities (2026-10-31)
+
+The camera draws a pack's own entities as their real models when the unit is
+started with `CAMERA_PACK_DIR` (a resource pack directory; the lab's wildlife
+pack is `packs/lab-mods-wildlife/resource_pack`). Units decline the server's
+resource pack, so before this a `gameops:tiger` was a coloured stand-in box.
+
+![the six wildlife animals in the camera](../specs/assets/2026-10-31-camera-wildlife-models.png)
+
+Method: a throwaway RakNet preview server with the pack, a crew unit with the
+camera on, headless Chrome (SwiftShader). Tests build the real pack as the
+fixture (`atlas/pack_entities_test.go`, `camera/testdata/wildlife.test.mjs`).
+
+| Aspect | Result | How it is driven |
+|---|---|---|
+| Geometry (format 1.12.0 `.geo.json`), six species | pass | same cube/UV pipeline as vanilla mobs, compiled into a second sheet served at `/v1/camera/pack.{png,json}`; no download, so it works where the vanilla atlas cannot be fetched |
+| Texture variants (tiger orange/white, lion male/female, hyena regular/alpha) | pass | render controller `Array.skins[query.variant]`; the entity's Variant metadata rides in the high nibble of the entity-data colour byte |
+| Female lion has no mane | pass (data and tests; mane bones emptied for variant 1) | render controller `part_visibility` |
+| Walk | pass | `query.modified_distance_moved` and `modified_move_speed` come from the distance the drawn entity moved; legs swing, tail wags |
+| Idle, head look | pass | `query.life_time`, `target_x/y_rotation` from head yaw and pitch |
+| Sit | pass **only when the flag is sent** | `query.is_sitting` reads the sitting metadata flag. A console `event entity ... gameops:on_sit` (the only hook before real interaction exists) does **not** set that flag, so the camera correctly shows a standing animal. `?sit=1` forces the pose to inspect it; the recorder labels such clips |
+| Attack | inferred, lunge not yet confirmed on video | BDS sent no swing for a tamed tiger's melee (no ActorEvent 4, no Animate packet reached the unit). The hub makes the nearest pack animal within 3.5 blocks swing when something is hurt, spaced 350 ms. An announced swing is honoured |
+
+What is not drawn: shaders, particles, the `idle` animation's exact timing as
+the game blends it (animations here are summed, not blended or weighted),
+keyframed animation bones (only plain `[x, y, z]` expressions are read), and
+position X is not mirrored as the game does (no pack animation uses it). The
+walk speed scale (a full stride at about 5 blocks a second) is chosen, not read
+from the game.
