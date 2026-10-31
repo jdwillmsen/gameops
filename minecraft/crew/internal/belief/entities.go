@@ -44,6 +44,17 @@ type Entity struct {
 	// at zero.
 	Health      float32
 	HealthKnown bool
+	// UniqueID is the id other actors' Owner and Target name this one by.
+	UniqueID int64
+	// Tamed and Sitting are the pet flags, valid with FlagsKnown.
+	Tamed   bool
+	Sitting bool
+	// Owner is the unique id of the entity that owns this one, and Target the
+	// one it is going for; both are 0 when the metadata names none.
+	Owner  int64
+	Target int64
+	// CustomName is the entity's name tag, empty for none.
+	CustomName string
 }
 
 // withHealth returns e with the health read from attrs, or e unchanged when
@@ -57,10 +68,27 @@ func (e Entity) withHealth(attrs []protocol.AttributeValue) Entity {
 	return e
 }
 
+// noneIsZero maps the server's -1, "no such actor", to 0.
+func noneIsZero(id int64) int64 {
+	if id == -1 {
+		return 0
+	}
+	return id
+}
+
 // withFlags returns e with the flag-derived fields read from md, or e
 // unchanged when md carries no flag word: a SetActorData that only touches
 // other keys must not read as "no longer lit".
 func (e Entity) withFlags(md protocol.EntityMetadata) Entity {
+	if v, ok := md[protocol.EntityDataKeyOwner].(int64); ok {
+		e.Owner = noneIsZero(v)
+	}
+	if v, ok := md[protocol.EntityDataKeyTarget].(int64); ok {
+		e.Target = noneIsZero(v)
+	}
+	if v, ok := md[protocol.EntityDataKeyName].(string); ok {
+		e.CustomName = v
+	}
 	v, ok := md[protocol.EntityDataKeyFlags].(int64)
 	if !ok {
 		return e
@@ -70,6 +98,8 @@ func (e Entity) withFlags(md protocol.EntityMetadata) Entity {
 	e.Ignited = set(protocol.EntityDataFlagIgnited)
 	e.Charged = set(protocol.EntityDataFlagPowered) || set(protocol.EntityDataFlagCharged)
 	e.Angry = set(protocol.EntityDataFlagAngry)
+	e.Tamed = set(protocol.EntityDataFlagTamed)
+	e.Sitting = set(protocol.EntityDataFlagSitting)
 	return e
 }
 
@@ -134,13 +164,13 @@ func (e *Entities) Apply(pk packet.Packet) {
 			return
 		}
 		e.unique[p.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}.withFlags(p.EntityMetadata).withHealth(p.Attributes)
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, UniqueID: p.EntityUniqueID, Type: p.EntityType, Pos: p.Position, HeadYaw: p.HeadYaw}.withFlags(p.EntityMetadata).withHealth(p.Attributes)
 	case *packet.AddPlayer:
 		if p.EntityRuntimeID == e.self {
 			return
 		}
 		e.unique[p.AbilityData.EntityUniqueID] = p.EntityRuntimeID
-		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, Type: "player", Pos: p.Position, Player: true, Name: p.Username}
+		e.ents[p.EntityRuntimeID] = Entity{ID: p.EntityRuntimeID, UniqueID: p.AbilityData.EntityUniqueID, Type: "player", Pos: p.Position, Player: true, Name: p.Username}
 	case *packet.UpdateAttributes:
 		// The unit's own health is the tracker's; an entity never announced
 		// is not invented from an attribute update.
