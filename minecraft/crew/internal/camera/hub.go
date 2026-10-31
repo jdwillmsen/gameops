@@ -501,6 +501,7 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		h.mu.Lock()
 		if rid, ok := h.uniqueID[p.EntityUniqueID]; ok {
 			delete(h.ents, rid)
+			delete(h.swung, rid)
 			delete(h.uniqueID, p.EntityUniqueID)
 			rm := encodeRemove([]uint64{rid})
 			h.broadcastLocked(func(v *Viewer) bool {

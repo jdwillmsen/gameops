@@ -111,7 +111,8 @@ export function compile(src) {
     }
     if (t.id === undefined) fail();
     if (op('(')) {
-      const f = FUNCS[t.id];
+      // Own keys only: "__proto__" and "constructor" are not functions of ours.
+      const f = Object.hasOwn(FUNCS, t.id) ? FUNCS[t.id] : null;
       if (!f) fail();
       const args = [];
       if (!op(')')) {
