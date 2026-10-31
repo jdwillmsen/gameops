@@ -95,7 +95,7 @@ def main():
         b.wait_spawned()
     watcher = harness.Watcher(bots, ev)
     watcher.start()
-    source = PackSource(preview, repo / "packs" / "lab-mods-wildlife")
+    source = PackSource(preview, harness.pack_dir(repo))
     world = World(preview, bots, watcher, ev, source)
     world.setup_server()
     ev.event("server", "ready", events_supported=source.has_events)
