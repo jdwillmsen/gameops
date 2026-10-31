@@ -33,6 +33,8 @@ type Actuator interface {
 	Ticks() uint64
 	SelectHotbar(slot int, item belief.Item) error
 	Attack(target uint64, slot int, held belief.Item) error
+	// InteractEntity right-clicks an entity with the held stack.
+	InteractEntity(target uint64, slot int, held belief.Item) error
 	UseItem(slot int, held belief.Item) error
 	// UseRocket lights a firework rocket, which pushes a gliding unit along
 	// its look.

@@ -818,3 +818,21 @@ func TestAttackQuotesTheHeldStacksData(t *testing.T) {
 		t.Errorf("held = %+v, want the enchanted stack", tx.HeldItem)
 	}
 }
+
+func TestInteractEntityRightClicksWithTheHeldStack(t *testing.T) {
+	a, s := newAct(flat(), Pose{Feet: mgl32.Vec3{4, 0, 4}})
+	a.ItemNames([]protocol.ItemEntry{{Name: "minecraft:beef", RuntimeID: 301}})
+	if err := a.InteractEntity(55, 1, beliefItem(1, "beef", 3, 9)); err != nil {
+		t.Fatal(err)
+	}
+	tx := s.got[0].(*packet.InventoryTransaction).TransactionData.(*protocol.UseItemOnEntityTransactionData)
+	if tx.ActionType != protocol.UseItemOnEntityActionInteract || tx.TargetEntityRuntimeID != 55 || tx.HotBarSlot != 1 || tx.HeldItem.Stack.NetworkID != 301 {
+		t.Errorf("transaction = %+v", tx)
+	}
+	if _, ok := s.got[1].(*packet.Animate); !ok {
+		t.Errorf("second packet = %T, want the swing", s.got[1])
+	}
+	if err := a.InteractEntity(55, 9, beliefItem(9, "beef", 1, 1)); err == nil {
+		t.Error("a slot off the hotbar was accepted")
+	}
+}
