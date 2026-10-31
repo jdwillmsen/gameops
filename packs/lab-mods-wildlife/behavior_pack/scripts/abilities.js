@@ -102,3 +102,31 @@ export function formatEffects(name, amplifiers) {
   const show = (id) => amplifiers[id] ?? "none";
   return `gameops:effects ${name} strength=${show("strength")} resistance=${show("resistance")}`;
 }
+
+export const EVENT_PREFIX = "gameops:event ";
+export const MAX_LISTED_TARGETS = 8;
+const LEVELS = { off: 0, info: 1, debug: 2 };
+
+// An unknown configured level behaves as info, so a typo cannot silence the log.
+export function levelAllows(configured, eventLevel) {
+  return (LEVELS[configured] ?? LEVELS.info) >= LEVELS[eventLevel];
+}
+
+// One line, one JSON object; the leading keys are the contract (ev, type, id, owner) and the rest may grow.
+// A target list is capped so a big pack cannot make a line unbounded; target_count keeps the true size.
+export function formatEvent(ev, fields, tick) {
+  const { type, id, owner, targets, ...rest } = fields;
+  const out = { ev, type, id, owner: owner ?? null, ...rest, tick };
+  if (targets) {
+    out.targets = targets.slice(0, MAX_LISTED_TARGETS);
+    out.target_count = targets.length;
+  }
+  return EVENT_PREFIX + JSON.stringify(out);
+}
+
+// Per-key rate limit. Mutates the map for cost; the caller bounds its size.
+export function eventDue(state, key, tick, intervalTicks) {
+  if (tick < (state.get(key) ?? 0)) return { due: false, state };
+  state.set(key, tick + intervalTicks);
+  return { due: true, state };
+}

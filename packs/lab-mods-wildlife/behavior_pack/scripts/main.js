@@ -2,7 +2,35 @@ import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
   packStrengthAmplifier, packSize, formatCensus, formatEffects, CENSUS_SPECIES,
+  formatEvent, levelAllows, eventDue,
 } from "./abilities.js";
+
+// "off" | "info" | "debug". info logs one line per taming, sit, stand, burst, ability and hit, and an
+// aura at most every AURA_LOG_TICKS per animal; debug logs every aura application. Edit and release to change it.
+const LOG_LEVEL = "info";
+const AURA_LOG_TICKS = 600;
+const HIT_LOG_TICKS = 10;
+const MAX_LOG_KEYS = 2000;
+
+let auraLogState = new Map();
+let hitLogState = new Map();
+
+function logEvent(level, ev, fields) {
+  if (!levelAllows(LOG_LEVEL, level)) return;
+  try {
+    console.warn(formatEvent(ev, fields, system.currentTick));
+  } catch {
+    // Logging must never stop the behaviour it describes.
+  }
+}
+
+function ownerOf(entity) {
+  try {
+    return entity.getDynamicProperty("gameops:owner") ?? null;
+  } catch {
+    return null;
+  }
+}
 
 const SPRINT = {
   "gameops:cheetah": { activeTicks: 160, tiredTicks: 160 },
@@ -49,7 +77,24 @@ let hitters = new Set();
 world.afterEvents.entityHitEntity.subscribe((event) => {
   const attacker = event.damagingEntity;
   if (attacker.isValid && SPRINT[attacker.typeId]) hitters.add(attacker.id);
+  logHit(attacker, event.hitEntity, "attacker");
+  logHit(event.hitEntity, attacker, "victim");
 });
+
+function logHit(animal, other, role) {
+  try {
+    if (!animal.isValid || !animal.typeId.startsWith("gameops:") || !animal.hasComponent("minecraft:health")) return;
+    if (!levelAllows(LOG_LEVEL, "info")) return;
+    if (hitLogState.size > MAX_LOG_KEYS) hitLogState = new Map();
+    if (!eventDue(hitLogState, `${animal.id}:${role}:${other.id}`, system.currentTick, HIT_LOG_TICKS).due) return;
+    logEvent("info", "hit", {
+      type: animal.typeId, id: animal.id, owner: ownerOf(animal), role,
+      other_type: other.typeId, other_id: other.id,
+    });
+  } catch {
+    // An entity that unloaded between the hit and this callback has nothing to log.
+  }
+}
 let auraState = new Map();
 
 function setPhase(entity, phase) {
@@ -71,12 +116,23 @@ system.runInterval(() => {
         const prev = sprintState.get(entity.id);
         const next = sprintPhase(prev ?? { phase: "ready", until: 0 }, tick, cfg, triggers.has(entity.id));
         sprintState.set(entity.id, { ...next, lastSeen: tick });
-        if (!prev || next.phase !== prev.phase) setPhase(entity, next.phase);
+        if (!prev || next.phase !== prev.phase) {
+          setPhase(entity, next.phase);
+          logPhase(entity, prev?.phase, next.phase);
+        }
       }
     }
   }
   sprintState = pruneStale(sprintState, tick, STATE_GRACE_TICKS);
 }, STEP);
+
+function logPhase(entity, from, to) {
+  const base = { type: entity.typeId, id: entity.id, owner: ownerOf(entity) };
+  const ability = entity.typeId === "gameops:tiger" ? "charge" : "sprint";
+  if (to === "active") logEvent("info", "burst", { ...base, ability, phase: "start" });
+  else if (to === "tired") logEvent("info", "burst", { ...base, ability, phase: "end" });
+  else if (from) logEvent("info", "ability", { ...base, ability, phase: "ready" });
+}
 
 function isTamed(entity) {
   return entity.hasComponent("minecraft:is_tamed");
@@ -102,10 +158,21 @@ world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
   try {
     const ownerId = event.entity.getComponent("minecraft:tameable")?.tamedToPlayerId;
     if (ownerId) event.entity.setDynamicProperty(OWNER_PROPERTY, ownerId);
+    logEvent("info", "tamed", { type: event.entity.typeId, id: event.entity.id, owner: ownerId ?? null });
   } catch {
     // An entity that unloaded between the event and this callback has nothing to record.
   }
 }, { eventTypes: ["gameops:on_tamed"] });
+
+for (const [eventId, ev] of [["gameops:on_sit", "sit"], ["gameops:on_stand", "stand"]]) {
+  world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
+    try {
+      logEvent("info", ev, { type: event.entity.typeId, id: event.entity.id, owner: ownerOf(event.entity) });
+    } catch {
+      // An entity that unloaded between the event and this callback has nothing to log.
+    }
+  }, { eventTypes: [eventId] });
+}
 
 function nearbyWildlife(source, range, family = "gameops_wildlife") {
   return source.dimension
@@ -117,6 +184,18 @@ function nearbyData(source, range) {
   const players = source.dimension.getPlayers({ location: source.location, maxDistance: range })
     .map((p) => ({ id: p.id, pos: p.location, type: "player", ref: p }));
   return [...players, ...nearbyWildlife(source, range)];
+}
+
+function logAura(entity, data, spec, amplifier, recipients) {
+  if (!levelAllows(LOG_LEVEL, "info")) return;
+  if (!levelAllows(LOG_LEVEL, "debug")) {
+    if (auraLogState.size > MAX_LOG_KEYS) auraLogState = new Map();
+    if (!eventDue(auraLogState, entity.id, system.currentTick, AURA_LOG_TICKS).due) return;
+  }
+  logEvent("info", "aura", {
+    type: entity.typeId, id: entity.id, owner: data.owner ?? null, effect: spec.effect, amplifier,
+    duration: spec.duration, kinds: spec.targets, targets: recipients.map((r) => r.id),
+  });
 }
 
 function applyAura(entity, spec) {
@@ -132,7 +211,9 @@ function applyAura(entity, spec) {
   if (amplifier == null) return;
   const candidates = spec.range > 0 ? nearbyData(entity, spec.range) : [];
   const options = { amplifier, showParticles: false };
-  for (const r of auraRecipients(data, candidates, spec)) {
+  const recipients = auraRecipients(data, candidates, spec);
+  logAura(entity, data, spec, amplifier, recipients);
+  for (const r of recipients) {
     try {
       r.ref.addEffect(spec.effect, spec.duration, options);
     } catch {

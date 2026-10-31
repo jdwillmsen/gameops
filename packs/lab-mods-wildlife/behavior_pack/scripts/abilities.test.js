@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale,
   auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize, formatCensus, formatEffects,
+  EVENT_PREFIX, formatEvent, levelAllows, eventDue, MAX_LISTED_TARGETS,
 } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
@@ -184,4 +185,44 @@ test("formatEffects names the player and shows none for an absent effect", () =>
   assert.equal(formatEffects("bot", { strength: 0 }), "gameops:effects bot strength=0 resistance=none");
   assert.equal(formatEffects("bot", {}), "gameops:effects bot strength=none resistance=none");
   assert.equal(formatEffects("bot", { strength: 1, resistance: 0 }), "gameops:effects bot strength=1 resistance=0");
+});
+
+test("formatEvent writes the prefix and one JSON object with the contract keys first", () => {
+  const line = formatEvent("tamed", { type: "gameops:lion", id: "123", owner: "p1" }, 40);
+  assert.ok(line.startsWith(EVENT_PREFIX));
+  assert.equal(EVENT_PREFIX, "gameops:event ");
+  assert.equal(line.includes("\n"), false);
+  assert.deepEqual(JSON.parse(line.slice(EVENT_PREFIX.length)), { ev: "tamed", type: "gameops:lion", id: "123", owner: "p1", tick: 40 });
+  assert.equal(line.slice(EVENT_PREFIX.length).indexOf('{"ev":"tamed","type"'), 0);
+});
+
+test("formatEvent writes owner null when the pet has no stored owner and keeps extra fields", () => {
+  const o = JSON.parse(formatEvent("aura", { type: "gameops:hyena", id: "9", effect: "strength", targets: ["a"] }, 1).slice(EVENT_PREFIX.length));
+  assert.equal(o.owner, null);
+  assert.equal(o.effect, "strength");
+  assert.deepEqual(o.targets, ["a"]);
+});
+
+test("formatEvent lists at most MAX_LISTED_TARGETS targets and reports the true count", () => {
+  const ids = Array.from({ length: MAX_LISTED_TARGETS + 5 }, (_, i) => `e${i}`);
+  const o = JSON.parse(formatEvent("aura", { type: "gameops:lion", id: "1", targets: ids }, 1).slice(EVENT_PREFIX.length));
+  assert.equal(o.targets.length, MAX_LISTED_TARGETS);
+  assert.equal(o.target_count, ids.length);
+});
+
+test("levelAllows gates events by the configured level", () => {
+  assert.equal(levelAllows("off", "info"), false);
+  assert.equal(levelAllows("info", "info"), true);
+  assert.equal(levelAllows("info", "debug"), false);
+  assert.equal(levelAllows("debug", "info"), true);
+  assert.equal(levelAllows("debug", "debug"), true);
+  assert.equal(levelAllows("nonsense", "info"), true);
+});
+
+test("eventDue rate-limits per key and starts a fresh window afterwards", () => {
+  let r = eventDue(new Map(), "a", 100, 600);
+  assert.equal(r.due, true);
+  assert.equal(eventDue(r.state, "a", 699, 600).due, false);
+  assert.equal(eventDue(r.state, "b", 101, 600).due, true);
+  assert.equal(eventDue(r.state, "a", 700, 600).due, true);
 });
