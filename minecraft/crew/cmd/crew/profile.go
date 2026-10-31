@@ -143,8 +143,11 @@ func tacticsView(cfg config.Config, src profileReader) *tacticsState {
 // statusOptions are the optional parts of /v1/state. The tactics part is
 // added only for a non-nil view: a nil *tacticsState inside the option's
 // interface would not read as absent.
-func statusOptions(lf *life.Life, view *tacticsState) []statusapi.Option {
+func statusOptions(lf *life.Life, view *tacticsState, harness bool) []statusapi.Option {
 	opts := []statusapi.Option{statusapi.WithFight(lf), statusapi.WithSightings(lf)}
+	if harness {
+		opts = append(opts, statusapi.WithEntities(lf.EachEntity))
+	}
 	if view != nil {
 		opts = append(opts, statusapi.WithTactics(view))
 	}

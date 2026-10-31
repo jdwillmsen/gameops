@@ -286,3 +286,23 @@ func TestStateOmitsSeenForAUnitThatKeepsNone(t *testing.T) {
 		}
 	}
 }
+
+func TestStateListsEntitiesOnlyWhenAsked(t *testing.T) {
+	each := func(f func(belief.Entity)) {
+		f(belief.Entity{ID: 9, Type: "gameops:lion", Tamed: true, Sitting: true, Owner: 4})
+		f(belief.Entity{ID: 3, Type: "minecraft:sheep"})
+	}
+	var plain, withList struct {
+		Entities []EntityView `json:"entities"`
+	}
+	if err := json.Unmarshal(get(t, Handler(fixed{}, "dev", Unit{}, nil), "/v1/state").Body.Bytes(), &plain); err != nil || plain.Entities != nil {
+		t.Fatalf("entities leaked without the option: %v %v", plain.Entities, err)
+	}
+	h := Handler(fixed{}, "dev", Unit{}, nil, WithEntities(each))
+	if err := json.Unmarshal(get(t, h, "/v1/state").Body.Bytes(), &withList); err != nil {
+		t.Fatal(err)
+	}
+	if len(withList.Entities) != 2 || withList.Entities[0].ID != 3 || !withList.Entities[1].Tamed || withList.Entities[1].Owner != 4 {
+		t.Errorf("entities = %+v", withList.Entities)
+	}
+}

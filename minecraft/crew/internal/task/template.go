@@ -32,6 +32,13 @@ const (
 	observeTemplate  = "observe_blocks"
 	placeTemplate    = "place_block"
 	craftTemplate    = "craft"
+	// The harness templates act on other entities, which a lab unit must never
+	// be asked to do, so they exist only after EnableHarness.
+	interactTemplate = "interact_entity"
+	attackTemplate   = "attack_entity"
+	equipTemplate    = "equip_item"
+	maxEntityTimes   = 40
+	defaultEvery     = 12
 	// maxObserveCells caps a box at what one report can carry.
 	maxObserveCells = 4096
 	maxHaulItems    = 8
@@ -50,6 +57,12 @@ const (
 	// gotoWithin is how close to the cell counts as arrived.
 	gotoWithin = 1.5
 )
+
+var harnessOn bool
+
+// EnableHarness lets the entity templates parse; it is the unit's CREW_HARNESS
+// setting, on only for a throwaway preview server.
+func EnableHarness(on bool) { harnessOn = on }
 
 // validItemName is the shape of an item place_block may be asked for, the
 // server's item-table names: lower case, digits and underscores.
@@ -95,6 +108,21 @@ type Template struct {
 
 	// Plan is repair_build's; its area is Area, and it shares DryRun.
 	Plan string `json:"plan,omitempty"`
+
+	// Target, Times and Every are the entity templates' request: Item is what
+	// is held (empty for a bare hand), Times how often to act and Every the
+	// ticks between acts.
+	Target *EntityTarget `json:"target,omitempty"`
+	Times  int           `json:"times,omitempty"`
+	Every  int           `json:"every,omitempty"`
+}
+
+// EntityTarget names the entity an entity template acts on: a runtime id, or
+// the nearest of a type and, when given, a name.
+type EntityTarget struct {
+	ID   uint64 `json:"id,omitempty"`
+	Type string `json:"type,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // facings maps a heading to its step in x and z: north is toward negative z.
@@ -186,6 +214,14 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseBuild(body)
 	case repairTemplate:
 		return parseRepair(body)
+	case interactTemplate, attackTemplate:
+		if harnessOn {
+			return parseEntityUse(body)
+		}
+	case equipTemplate:
+		if harnessOn {
+			return parseEquip(body)
+		}
 	}
 	if err := decodeStrict(body, &struct {
 		Template string `json:"template"`
@@ -196,6 +232,58 @@ func ParseTemplate(body []byte) (Template, error) {
 		return Template{}, err
 	}
 	return Template{}, errors.New("unknown template")
+}
+
+var entityType = regexp.MustCompile(`^[a-z0-9_]{1,32}(:[a-z0-9_]{1,32})?$`)
+
+func parseEntityUse(body []byte) (Template, error) {
+	var raw struct {
+		Template string        `json:"template"`
+		Target   *EntityTarget `json:"target"`
+		Item     string        `json:"item"`
+		Times    int           `json:"times"`
+		Every    int           `json:"every"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	t := raw.Target
+	if t == nil || (t.ID == 0 && t.Type == "") {
+		return Template{}, errors.New("target needs an id or a type")
+	}
+	if t.Type != "" && !entityType.MatchString(t.Type) && t.Type != "player" {
+		return Template{}, errors.New("target type is not an entity type")
+	}
+	if raw.Item != "" && !itemName.MatchString(raw.Item) {
+		return Template{}, errors.New("item must be 1 to 32 of a-z, 0-9 or _")
+	}
+	if raw.Times == 0 {
+		raw.Times = 1
+	}
+	if raw.Times < 1 || raw.Times > maxEntityTimes {
+		return Template{}, fmt.Errorf("times must be 1 to %d", maxEntityTimes)
+	}
+	if raw.Every == 0 {
+		raw.Every = defaultEvery
+	}
+	if raw.Every < 1 || raw.Every > 200 {
+		return Template{}, errors.New("every must be 1 to 200 ticks")
+	}
+	return Template{Template: raw.Template, Target: t, Item: raw.Item, Times: raw.Times, Every: raw.Every, Qty: raw.Times}, nil
+}
+
+func parseEquip(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Item     string `json:"item"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Item != "" && !itemName.MatchString(raw.Item) {
+		return Template{}, errors.New("item must be 1 to 32 of a-z, 0-9 or _")
+	}
+	return Template{Template: raw.Template, Item: raw.Item}, nil
 }
 
 func parseGather(body []byte) (Template, error) {
@@ -542,6 +630,17 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	if t.Template == repairTemplate {
 		return expandRepair(t, world, self, opts...)
+	}
+	if (t.Template == interactTemplate || t.Template == attackTemplate) && t.Target != nil {
+		kind := skill.Interact
+		if t.Template == attackTemplate {
+			kind = skill.Hit
+		}
+		ref := skill.EntityRef{ID: t.Target.ID, Type: t.Target.Type, Name: t.Target.Name}
+		return []skill.Skill{skill.NewEntityUse(world, self, ref, kind, t.Item, t.Times, t.Every, opts...)}, nil
+	}
+	if t.Template == equipTemplate {
+		return []skill.Skill{skill.NewEquip(self, t.Item)}, nil
 	}
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil

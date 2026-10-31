@@ -6,6 +6,7 @@ package statusapi
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -41,6 +42,30 @@ type options struct {
 	fight     FightSource
 	tactics   TacticsSource
 	sightings SightingSource
+	entities  func(func(belief.Entity))
+}
+
+// EntityView is one entity as a harness reads it back. Positions make it
+// unfit for a real lab, so WithEntities is wired only for a preview server.
+type EntityView struct {
+	ID          uint64     `json:"id"`
+	UniqueID    int64      `json:"unique_id"`
+	Type        string     `json:"type"`
+	Name        string     `json:"name,omitempty"`
+	CustomName  string     `json:"custom_name,omitempty"`
+	Pos         [3]float32 `json:"pos"`
+	Tamed       bool       `json:"tamed"`
+	Sitting     bool       `json:"sitting"`
+	Angry       bool       `json:"angry"`
+	Owner       int64      `json:"owner,omitempty"`
+	Target      int64      `json:"target,omitempty"`
+	Health      float32    `json:"health"`
+	HealthKnown bool       `json:"health_known"`
+}
+
+// WithEntities lists every entity the unit knows of as "entities" in /v1/state.
+func WithEntities(each func(func(belief.Entity))) Option {
+	return func(o *options) { o.entities = each }
 }
 
 // WithFight reports a warrior's fight counts under the tasks in /v1/state.
@@ -98,6 +123,8 @@ type stateBody struct {
 	Tactics *Tactics `json:"tactics,omitempty"`
 	// Seen is absent for a unit that keeps no sightings.
 	Seen *life.Sightings `json:"seen,omitempty"`
+	// Entities is absent unless the unit is a harness unit.
+	Entities []EntityView `json:"entities,omitempty"`
 }
 
 type tasksView struct {
@@ -162,6 +189,14 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Op
 			if s, ok := o.sightings.Sightings(); ok {
 				body.Seen = &s
 			}
+		}
+		if o.entities != nil {
+			body.Entities = []EntityView{}
+			o.entities(func(e belief.Entity) {
+				body.Entities = append(body.Entities, EntityView{ID: e.ID, UniqueID: e.UniqueID, Type: e.Type, Name: e.Name, CustomName: e.CustomName,
+					Pos: e.Pos, Tamed: e.Tamed, Sitting: e.Sitting, Angry: e.Angry, Owner: e.Owner, Target: e.Target, Health: e.Health, HealthKnown: e.HealthKnown})
+			})
+			sort.Slice(body.Entities, func(i, j int) bool { return body.Entities[i].ID < body.Entities[j].ID })
 		}
 		_ = json.NewEncoder(w).Encode(body)
 	})
