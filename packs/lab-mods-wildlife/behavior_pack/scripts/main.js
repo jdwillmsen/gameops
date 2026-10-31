@@ -127,6 +127,14 @@ system.runInterval(() => {
 }, STEP);
 
 function logPhase(entity, from, to) {
+  try {
+    emitPhase(entity, from, to);
+  } catch {
+    // The scan that changes the phase must survive a failed log line.
+  }
+}
+
+function emitPhase(entity, from, to) {
   const base = { type: entity.typeId, id: entity.id, owner: ownerOf(entity) };
   const ability = entity.typeId === "gameops:tiger" ? "charge" : "sprint";
   if (to === "active") logEvent("info", "burst", { ...base, ability, phase: "start" });
@@ -187,6 +195,14 @@ function nearbyData(source, range) {
 }
 
 function logAura(entity, data, spec, amplifier, recipients) {
+  try {
+    emitAura(entity, data, spec, amplifier, recipients);
+  } catch {
+    // An aura must still be applied when its log line fails.
+  }
+}
+
+function emitAura(entity, data, spec, amplifier, recipients) {
   if (!levelAllows(LOG_LEVEL, "info")) return;
   if (!levelAllows(LOG_LEVEL, "debug")) {
     if (auraLogState.size > MAX_LOG_KEYS) auraLogState = new Map();
