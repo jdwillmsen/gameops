@@ -34,7 +34,7 @@ for (const spec of shots) {
   }
   if (mesher) await page.route('**/v1/camera/mesher.js', r => r.fulfill({ contentType: 'text/javascript', body: readFileSync(mesher) }));
   page.on('console', m => { if (process.env.SHOTS_DEBUG) console.error('console:', m.text()); }); page.on('pageerror', e => console.error('pageerror:', e.message));
-  await page.goto(`http://127.0.0.1:${arg('port')}/camera?mode=${mode}&r=${radius}&hud=0`);
+  await page.goto(`http://127.0.0.1:${arg('port')}/camera?mode=${mode}&r=${radius}&hud=0${arg("q", "")}`);
   await page.waitForFunction(() => window.__stats && window.__stats.settledMs !== null, null, { timeout: 120000 }).catch(() => {});
   await page.waitForTimeout(2500);
   if (px !== '' || Number(zoom)) {

@@ -63,6 +63,9 @@ type Config struct {
 	// CameraAtlasDir holds the cached texture atlas; it belongs on the data
 	// volume so a restart does not download the resource pack again.
 	CameraAtlasDir string
+	// CameraPackDir is a resource pack's directory whose own entities the
+	// camera draws as their models instead of stand-in boxes; empty draws none.
+	CameraPackDir string
 
 	// TasksToken guards the task endpoints; empty leaves them unregistered.
 	TasksToken   string
@@ -255,6 +258,7 @@ func Load() (Config, error) {
 		CameraEnabled:    cameraEnabled,
 		CameraMaxViewers: cameraMaxViewers,
 		CameraAtlasDir:   stringDefault("CAMERA_ATLAS_DIR", "/data/atlas"),
+		CameraPackDir:    strings.TrimSpace(os.Getenv("CAMERA_PACK_DIR")),
 
 		TasksToken:   strings.TrimSpace(os.Getenv("TASKS_TOKEN")),
 		TaskTimeoutS: taskTimeout,
