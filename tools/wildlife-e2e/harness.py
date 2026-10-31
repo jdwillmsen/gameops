@@ -20,6 +20,11 @@ Y = -60
 TOKEN = "e2e"
 
 
+def pack_dir(repo):
+    """The pack under test: the checkout's, or WILDLIFE_PACK_DIR to try a candidate."""
+    return Path(os.environ.get("WILDLIFE_PACK_DIR") or Path(repo) / "packs" / "lab-mods-wildlife")
+
+
 def port_free(port):
     with socket.socket() as s:
         return s.connect_ex(("127.0.0.1", port)) != 0
@@ -118,7 +123,7 @@ class Preview:
     def up(self):
         self.down()
         self.stage = tempfile.mkdtemp(prefix="wildlife-e2e-stage-")
-        pack = self.repo / "packs" / "lab-mods-wildlife"
+        pack = pack_dir(self.repo)
         os.makedirs(f"{self.stage}/wildlife")
         for d in ("behavior_pack", "resource_pack"):
             shutil.copytree(pack / d, f"{self.stage}/wildlife/{d}")

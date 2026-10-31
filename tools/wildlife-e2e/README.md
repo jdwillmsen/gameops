@@ -44,3 +44,24 @@ a Jira Task under JDW-320 with the `detail` and the matching timeline lines.
 
 Pets are observed through entity metadata the bots receive (tamed, sitting, owner,
 target), so "the pet went for B" is the pet's target id equal to B's unique id.
+
+## Scenarios
+
+| Id | Checks |
+|---|---|
+| `tame-<species>` (6) | the animal's food, fed by real interaction, tames it to the feeder; retries up to 40 feeds for the 0.33 chance and reports the count |
+| `follow-owner`, `sit-stand`, `sit-stranger` | a standing pet follows; empty-hand interact sits and stands; a sitting pet stays; a stranger cannot sit it |
+| `owner-defence` | a pet targets and kills a zombie that hurts its owner |
+| `eco-*` | wild lion hunts an unnamed sheep; wild tiger takes a pig but spares a named cow; lion and hyena fight; a tamed lion leaves livestock alone; pets fight wild rivals but not another player's pet |
+| `aura-lion-roar`, `aura-bear-guard` | the owner gets Strength / Resistance; a stranger and a sitting pet do not |
+| `aura-hyena-pack`, `aura-leopard-night` | pack of one / two / four; night only. Self auras leave no mark a player can read, so these need the pack's `gameops:event` lines and skip without them |
+| `burst-tiger`, `burst-cheetah` | burst starts on a landed hit, never on a timer, then tires and is ready again (needs `gameops:event`) |
+| `safety-*` (6) | B hits A, A hits B, A hits its own pet, wild animals among players, a provoked wild animal, a sitting pet beside a rival: no animal ever targets a player, and no player is hurt by one |
+
+`WILDLIFE_PACK_DIR=<dir>` stages another pack checkout (for example a candidate release) instead of the one in this repo.
+
+## Limits
+
+- Needs no real client, so what a client draws (models, animations, sounds) is out of scope; the camera and clip streams cover that.
+- Tamed pets start standing; the suite asserts that rather than assuming a sit.
+- Fixed seed: the preview is a flat world, so terrain does not depend on one; coordinates, rules (no spawning, fixed day, no regeneration) and the cleanup before every scenario make runs repeatable. Genuine randomness is only the taming chance, and mob AI timing.

@@ -1,7 +1,7 @@
 """Arena helpers: reset, summon, feed, tame. Fixed coordinates, conditions not sleeps."""
 import time
 
-from harness import Y, wait_until
+from harness import Y, merge_entities, wait_until
 
 A_POS = (10, 10)
 B_POS = (16, 10)
@@ -42,8 +42,12 @@ class World:
         pv.cmd("time", "set", 6000)
         self.tp(self.A, A_POS)
         self.tp(self.B, B_POS)
-        wait_until(lambda: not [e for e in self.watch.entities() if e["type"] != "player"
-                                and not e["type"].startswith("minecraft:item")], 10, "arena emptied")
+        def emptied():
+            left = [e for e in self.watch.entities() if e["type"] != "player" and e["type"] != "minecraft:item"]
+            if left:
+                pv.cmd("kill", "@e[type=!player]")
+            return not left
+        wait_until(emptied, 20, "arena emptied", poll=1.5)
         wait_until(lambda: self.hp(self.A) >= 20 and self.hp(self.B) >= 20, 10, "bots healed")
 
     def tp(self, bot, xz):
@@ -124,3 +128,74 @@ class World:
             self.ev.event("harness", "tamed", species=species, attempts=attempt, owner=me)
             return uid, attempt
         return uid, MAX_TAME_ATTEMPTS
+
+    # --- more acting and judging ---------------------------------------------
+    def tame_standing(self, owner, species, near=None):
+        uid, n = self.tame(owner, species, near)
+        self.stand(owner, uid)
+        return uid, n
+
+    def sit(self, owner, uid):
+        e = self.entity(uid)
+        if e and not e["sitting"]:
+            owner.task({"template": "interact_entity", "target": {"id": e["id"]}, "item": ""})
+            wait_until(lambda: self.entity(uid)["sitting"], 6, "pet to sit")
+        self.settle(uid)
+
+    def settle(self, uid, secs=1.0):
+        """Waits until the animal has stopped sliding, so its resting spot can be measured."""
+        last = [None]
+        def still():
+            e = self.entity(uid)
+            now = e["pos"] if e else None
+            ok = last[0] is not None and now is not None and self.dist(last[0], now) < 0.05
+            last[0] = now
+            return ok
+        wait_until(still, 10, "pet to come to rest", poll=secs)
+
+    def walk(self, bot, x, z):
+        t = bot.task({"template": "goto", "to": {"x": x, "y": Y, "z": z}}, timeout=90)
+        if t["state"] != "done":
+            raise RuntimeError(f"{bot.name} could not walk to {x},{z}: {t.get('reason')}")
+
+    def hit(self, bot, target_name, times):
+        """bot punches the named player until `times` swings were sent."""
+        t = bot.task({"template": "attack_entity", "target": {"type": "player", "name": target_name},
+                      "item": "", "times": times, "every": 12}, timeout=60)
+        if t["state"] != "done":
+            raise RuntimeError(f"{bot.name} could not hit {target_name}: {t.get('reason')}")
+
+    def hit_entity(self, bot, eid, times):
+        t = bot.task({"template": "attack_entity", "target": {"id": eid}, "item": "", "times": times, "every": 12}, timeout=60)
+        if t["state"] != "done":
+            raise RuntimeError(f"{bot.name} could not hit entity {eid}: {t.get('reason')}")
+
+    def away(self, bot, xz=(60, 60)):
+        """Parks a bot out of everyone's way."""
+        self.tp(bot, xz)
+
+    def observe(self, seconds):
+        """Waits and returns the time the window opened, for the history queries."""
+        t0 = time.time()
+        time.sleep(seconds)
+        return t0
+
+    def targeting(self, t0, victims, kinds=None):
+        """(type, uid, target) for every animal snapshot since t0 whose target is in victims."""
+        hits = set()
+        for _ts, snap in self.watch.since(t0):
+            for e in merge_entities(snap.values()):
+                if e.get("target") in victims and e["type"].startswith("gameops:") and (kinds is None or e["type"] in kinds):
+                    hits.add((e["type"], e["unique_id"], e["target"]))
+        return sorted(hits)
+
+    def min_health(self, t0, bot):
+        vals = [s[bot.name]["state"]["health"] for _t, s in self.watch.since(t0) if bot.name in s]
+        return min(vals) if vals else None
+
+    def attacks_on_players(self, evs, only_types=None):
+        """gameops animals that hit a player, from the pack's event lines; None when it logs none."""
+        if evs is None:
+            return None
+        return [e for e in evs if e["ev"] == "hit" and e.get("role") == "attacker" and e.get("other_type") == "minecraft:player"
+                and (only_types is None or e["type"] in only_types)]
