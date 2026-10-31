@@ -62,8 +62,9 @@ def main():
             guarded(b.stop)
         if preview.up_done:
             guarded(lambda: (ev.dir / "server.log").write_text(preview.logs()))
-            if not args.keep:
-                guarded(preview.down)
+        # A start that failed halfway leaves a stage even under --keep.
+        if preview.stage and (not args.keep or not preview.up_done):
+            guarded(preview.down)
         # A run cut short still reports every scenario it was asked for.
         for sid, title, _ in chosen:
             if sid not in done_ids:

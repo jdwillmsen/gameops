@@ -297,9 +297,13 @@ def safety_wild_provoked(w, sc):
         if e:
             w.hit_entity(w.A, e["id"], 6)
     time.sleep(5)
-    sc.check("the blows landed", any((w.entity(v) or {"health": 0})["health"] < 999 and (w.entity(v) or {"health": 0})["health"] > 0
-                                     and w.entity(v)["health"] < {"brown_bear": 80, "tiger": 60, "hyena": 30}[w.entity(v)["type"].split(":")[1]]
-                                     for v in victims), "")
+    max_hp = {"gameops:brown_bear": 80, "gameops:tiger": 60, "gameops:hyena": 30}
+    hurt = []
+    for v in victims:
+        e = w.entity(v)
+        if e and 0 < e["health"] < max_hp[e["type"]]:
+            hurt.append(e["type"])
+    sc.check("the blows landed", bool(hurt), f"hurt: {hurt}")
     sc.check("A took no damage", w.min_health(t0, w.A) == 20, f"lowest {w.min_health(t0, w.A)}")
     _safe(w, sc, t0, [w.A, w.B], w.src.events())
 
