@@ -4,6 +4,6 @@
   "type": "module",
   "description": "Blockbench-driven clips of the wildlife pack models",
   "dependencies": {
-    "playwright-core": "1.57.0"
+    "playwright-core": "1.64.1"
   }
 }
