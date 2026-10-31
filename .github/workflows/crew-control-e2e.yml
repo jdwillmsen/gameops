@@ -30,7 +30,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24
+          node-version: 26
       - name: install the browser
         working-directory: minecraft/crew-control/e2e
         run: |

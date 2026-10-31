@@ -71,7 +71,7 @@ jobs:
       # preinstalled Node.
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 24
+          node-version: 26
 
       # A lockfile rather than npx pins: the local filter plugin imports the
       # analyzer and notes generator, so they must resolve from a real tree.
