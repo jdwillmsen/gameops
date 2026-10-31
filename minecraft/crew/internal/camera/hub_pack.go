@@ -3,6 +3,8 @@ package camera
 import (
 	"encoding/binary"
 	"encoding/json"
+	"strings"
+	"time"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
@@ -22,15 +24,60 @@ func encodeActorEvent(id uint64, event byte) []byte {
 	return append(binary.AppendUvarint([]byte{frameActorEvent}, id), event)
 }
 
+// swingRange and swingGap bound the inferred swing: how close an attacker
+// stands to what it hurt, and how soon it may swing again.
+const (
+	swingRange = 3.5
+	swingGap   = 350 * time.Millisecond
+)
+
+// actorEvent forwards the swing a server announces. BDS does not announce a
+// mob's melee swing at all (no ActorEvent, no Animate packet reached the unit
+// while a tamed tiger killed a zombie), so a hurt entity also makes the
+// nearest pack entity within reach swing: a pack animal next to something that
+// just took damage is almost always what struck it. The pose is inferred, not
+// received.
 func (h *Hub) actorEvent(p *packet.ActorEvent) {
-	if p.EventType != packet.ActorEventStartAttacking {
-		return
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if _, ok := h.ents[p.EntityRuntimeID]; ok {
-		h.pushOrderedLocked(encodeActorEvent(p.EntityRuntimeID, eventAttack))
+	switch p.EventType {
+	case packet.ActorEventStartAttacking:
+		if _, ok := h.ents[p.EntityRuntimeID]; ok {
+			h.pushOrderedLocked(encodeActorEvent(p.EntityRuntimeID, eventAttack))
+		}
+	case packet.ActorEventHurt:
+		h.inferSwingLocked(p.EntityRuntimeID)
 	}
+}
+
+func (h *Hub) inferSwingLocked(victim uint64) {
+	v, ok := h.ents[victim]
+	if !ok {
+		return
+	}
+	var best *entity
+	bestD := float32(swingRange * swingRange)
+	for _, e := range h.ents {
+		if e.ID == victim || strings.HasPrefix(e.Type, "minecraft:") || e.Type == "player" {
+			continue
+		}
+		dx, dz := e.X-v.X, e.Z-v.Z
+		if d := dx*dx + dz*dz; d <= bestD {
+			best, bestD = e, d
+		}
+	}
+	if best == nil {
+		return
+	}
+	now := time.Now()
+	if now.Sub(h.swung[best.ID]) < swingGap {
+		return
+	}
+	if h.swung == nil {
+		h.swung = map[uint64]time.Time{}
+	}
+	h.swung[best.ID] = now
+	h.pushOrderedLocked(encodeActorEvent(best.ID, eventAttack))
 }
 
 // SetPackEntities makes the models of a pack's own entities available and
