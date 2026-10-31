@@ -86,7 +86,8 @@ def sit_stranger(w, sc):
     w.tp(w.B, (w.entity(uid)["pos"][0] + 4, w.entity(uid)["pos"][2]))
     t = w.B.task({"template": "interact_entity", "target": {"id": w.entity(uid)["id"]}, "item": "", "times": 3, "every": 15})
     time.sleep(1.5)
-    sc.check("stranger's interact was sent", t["state"] == "done", t.get("reason", ""))
+    reach = w.dist(w.pos(w.B), w.entity(uid)["pos"])
+    sc.check("stranger's interact was sent from within reach", t["state"] == "done" and reach < 3.5, f"{t['state']}, {reach:.1f} blocks away")
     sc.check("pet still stands for its owner", w.entity(uid)["sitting"] == before and not before,
              f"sitting before={before} after={w.entity(uid)['sitting']}")
 
@@ -99,9 +100,9 @@ def owner_defence(w, sc):
     w.away(w.B)
     uid, _ = w.tame_standing(w.A, "lion")
     w.tp(w.A, A_POS)
-    zombie = w.summon("minecraft:zombie", A_POS[0] + 5, A_POS[1])
+    w.pv.cmd("time", "set", 14000)  # by day the zombie would burn and the pet would not be needed
     t0 = time.time()
-    engaged = lambda: (w.entity(zombie) or {}).get("target") == 0 and False
+    zombie = w.summon("minecraft:zombie", A_POS[0] + 5, A_POS[1])
     try:
         wait_until(lambda: (w.entity(uid) or {}).get("target") == zombie, 20, "pet to target the zombie")
         ok = True
@@ -115,6 +116,7 @@ def owner_defence(w, sc):
     except TimeoutError:
         dead = False
     sc.check("the zombie did not survive the pet", dead, "")
+    sc.check("the zombie did hurt the owner first", (w.min_health(t0, w.A) or 20) < 20, f"A's lowest health {w.min_health(t0, w.A)}")
     sc.check("the owner was only hurt by the zombie, not the pet", not w.targeting(t0, {w.uid(w.A)}), "")
 
 
@@ -188,8 +190,8 @@ def tamed_lion_livestock(w, sc):
 @scenario("eco-pets-attack-wild-rivals-only", "Pets fight wild rivals, never another player's pet")
 def pets_wild_rivals_only(w, sc):
     w.reset()
-    # Each animal is tamed out of the other's sight and left sitting, because a standing
-    # pet fights any wild rival it can see, and a rival being tamed mid-fight is not the question.
+    # Each animal is tamed out of the other's sight, because a standing pet fights any wild
+    # rival it can see, and a rival being tamed mid-fight is not the question.
     w.tp(w.B, (56, 56))
     hyena, _ = w.tame(w.B, "hyena", near=(60, 60))
     lion, _ = w.tame_standing(w.A, "lion")
@@ -197,6 +199,8 @@ def pets_wild_rivals_only(w, sc):
     w.stand(w.B, hyena)
     w.tp(w.A, A_POS)
     t0 = w.observe(25)
+    sc.check("the two pets were within sight of each other", w.dist(w.entity(lion)["pos"], w.entity(hyena)["pos"]) < 14,
+             f"{w.dist(w.entity(lion)['pos'], w.entity(hyena)['pos']):.1f} blocks apart")
     sc.check("A's lion and B's hyena ignore each other", not w.targeting(t0, {lion, hyena}),
              f"lion hp {(w.entity(lion) or {}).get('health')}, hyena hp {(w.entity(hyena) or {}).get('health')}")
     sc.check("neither pet was hurt", all(w.entity(u) and w.entity(u)["health"] >= h for u, h in ((lion, 50), (hyena, 30))), "")
@@ -336,19 +340,25 @@ def _poll(fn, timeout, poll=1.0):
     return None
 
 
+def _eff(w, player, effect):
+    """The effect's amplifier, None for none, and 'unreadable' when the hook answered nothing."""
+    got = w.src.effects(player)
+    return "unreadable" if got is None else got.get(effect)
+
+
 def _effect_scenario(species, effect, expect_amp, _title):
     def run(w, sc):
         w.reset()
         uid, _ = w.tame_standing(w.A, species)
         w.tp(w.A, A_POS)
-        got = _poll(lambda: (w.src.effects("botA") or {}).get(effect) == expect_amp, 45)
+        got = _poll(lambda: _eff(w, "botA", effect) == expect_amp, 45)
         sc.check(f"the owner gets {effect.capitalize()}", got, f"{effect} amplifier {expect_amp} expected")
-        sc.check("the stranger does not", (w.src.effects("botB") or {}).get(effect) is None, "")
+        sc.check("the stranger does not", _eff(w, "botB", effect) is None, "")
         w.sit(w.A, uid)
         w.pv.cmd("effect", "botA", "clear")
         time.sleep(1)
         time.sleep(12)
-        sc.check("a sitting pet gives nothing", (w.src.effects("botA") or {}).get(effect) is None, "")
+        sc.check("a sitting pet gives nothing", _eff(w, "botA", effect) is None, "")
         evs = w.src.events()
         if evs is not None:
             auras = [e for e in evs if e["ev"] == "aura" and e["id"] == str(uid)]
@@ -421,17 +431,21 @@ def _burst_scenario(species, ability):
         w.tp(w.A, A_POS)
 
         def phases(since):
-            return [(e["ev"], e.get("phase")) for e in (w.src.events(since) or []) if e["id"] == str(uid) and e["ev"] in ("burst", "ability")]
+            return [(e["ev"], e.get("phase")) for e in (w.src.events(since) or []) if e["ev"] in ("burst", "ability") and e.get("id") == str(uid)]
 
         mark = w.src.reset_window()
         time.sleep(10)
         sc.check("no burst on a timer alone", not phases(mark), phases(mark))
+        w.pv.cmd("time", "set", 14000)
         w.summon("minecraft:zombie", A_POS[0] + 5, A_POS[1])
         started = _poll(lambda: ("burst", "start") in phases(mark), 30)
         sc.check(f"{ability} starts when the pet lands a hit", started, phases(mark))
         ended = _poll(lambda: ("burst", "end") in phases(mark), 20)
         sc.check(f"{ability} ends into the tired phase", ended, phases(mark))
-        ready = _poll(lambda: ("ability", "ready") in phases(mark), 40)
+        def ready_after_end():
+            p = phases(mark)
+            return ("burst", "end") in p and ("ability", "ready") in p[p.index(("burst", "end")):]
+        ready = _poll(ready_after_end, 40)
         sc.check(f"{ability} is ready again afterwards", ready, phases(mark))
     return run
 
