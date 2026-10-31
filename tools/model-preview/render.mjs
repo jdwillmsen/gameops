@@ -23,10 +23,11 @@ function parseArgs(argv) {
   const o = { animal: [], fast: false, out: null, pack: path.resolve(here, "../../packs/lab-mods-wildlife"), chrome: process.env.CHROME ?? "/opt/google/chrome/chrome" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--animal") o.animal.push(...argv[++i].split(","));
+    const value = () => argv[++i] ?? die(`${a} needs a value`);
+    if (a === "--animal") o.animal.push(...value().split(","));
     else if (a === "--fast") o.fast = true;
-    else if (a === "--out") o.out = argv[++i];
-    else if (a === "--pack") o.pack = path.resolve(argv[++i]);
+    else if (a === "--out") o.out = value();
+    else if (a === "--pack") o.pack = path.resolve(value());
     else if (a === "--help" || a === "-h") {
       console.log("usage: render.sh [--animal tiger,lion] [--fast] [--out DIR] [--pack DIR]");
       process.exit(0);
@@ -81,6 +82,7 @@ function loadAnimals(pack, filter) {
     const rc = Object.values(json(path.join(rp, "render_controllers", `${name}.render_controllers.json`)).render_controllers)[0];
     const skins = (rc.arrays?.textures?.["Array.skins"] ?? []).map((t) => t.replace(/^Texture\./, ""));
     const variants = Object.entries(d.textures).map(([key, tex]) => {
+      if (!skins.length && Object.keys(d.textures).length > 1) die(`${name}: several textures but no skin array in the render controller`);
       const variant = skins.length ? skins.indexOf(key) : 0;
       if (variant < 0) die(`${name}: texture ${key} is not in the render controller's skin array`);
       return { key, file: path.join(rp, `${tex}.png`), hidden: hiddenBones(rc, variant, name) };
@@ -204,13 +206,14 @@ async function main() {
   const record = !fs.existsSync(har);
 
   const browser = await chromium.launch({ executablePath: opt.chrome, headless: true, args: ["--no-sandbox"] });
-  const ctx = await browser.newContext({ viewport: VIEW });
-  await ctx.routeFromHAR(har, { url: /blockbench\.net/, update: record, updateContent: "embed", notFound: "abort" });
-
+  let ctx;
+  let ok = false;
   const manifest = [];
   const turnFrames = opt.fast ? 8 : 72;
   const clipNames = opt.fast ? ["walk"] : Object.keys(CLIPS);
   try {
+    ctx = await browser.newContext({ viewport: VIEW });
+    await ctx.routeFromHAR(har, { url: /blockbench\.net/, update: record, updateContent: "embed", notFound: "abort" });
     for (const animal of animals) {
       const b = bounds(animal.geo, animal.geoId);
       const stills = [];
@@ -288,10 +291,13 @@ async function main() {
       ffmpeg([...inputs.flatMap((f) => ["-i", f]), "-filter_complex", filter, "-frames:v", "1", path.join(out, `${animal.name}.contact-sheet.png`)]);
       manifest.push({ animal: animal.name, clip: "contact-sheet", file: `${animal.name}.contact-sheet.png`, rows, cols });
     }
+    ok = true;
   } finally {
-    await ctx.close();
+    await ctx?.close();
     await browser.close();
     fs.rmSync(work, { recursive: true, force: true });
+    // A recording from a failed first run may be partial or the wrong version.
+    if (record && !ok) fs.rmSync(har, { force: true });
   }
   fs.writeFileSync(path.join(out, "manifest.json"), JSON.stringify({ run_id: id, blockbench: BLOCKBENCH_VERSION, fps: FPS, files: manifest }, null, 2));
   console.log(`done: ${manifest.length} files in ${out}`);
