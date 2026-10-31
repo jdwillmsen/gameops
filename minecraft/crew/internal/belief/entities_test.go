@@ -220,3 +220,28 @@ func TestEntitiesForgetHealthWhenAMobIsRemovedAndReAdded(t *testing.T) {
 		t.Errorf("a re-added mob kept the old health %v", en.Health)
 	}
 }
+
+func TestEntitiesReadPetFlagsOwnerAndTarget(t *testing.T) {
+	e := NewEntities()
+	e.Spawn(1)
+	flags := int64(1<<protocol.EntityDataFlagTamed | 1<<protocol.EntityDataFlagSitting)
+	e.Apply(&packet.AddActor{EntityUniqueID: 9, EntityRuntimeID: 9, EntityType: "gameops:lion", EntityMetadata: protocol.EntityMetadata{
+		protocol.EntityDataKeyFlags:  flags,
+		protocol.EntityDataKeyOwner:  int64(77),
+		protocol.EntityDataKeyTarget: int64(88),
+		protocol.EntityDataKeyName:   "Leo",
+	}})
+	got, _ := e.Get(9)
+	if !got.Tamed || !got.Sitting || got.Owner != 77 || got.Target != 88 || got.CustomName != "Leo" || got.UniqueID != 9 {
+		t.Fatalf("got %+v", got)
+	}
+	e.Apply(&packet.SetActorData{EntityRuntimeID: 9, EntityMetadata: protocol.EntityMetadata{protocol.EntityDataKeyFlags: int64(1 << protocol.EntityDataFlagTamed)}})
+	got, _ = e.Get(9)
+	if !got.Tamed || got.Sitting {
+		t.Errorf("after stand: %+v", got)
+	}
+	e.Apply(&packet.AddPlayer{EntityRuntimeID: 3, Username: "A", AbilityData: protocol.AbilityData{EntityUniqueID: 33}})
+	if p, _ := e.Get(3); p.UniqueID != 33 {
+		t.Errorf("player unique id = %d", p.UniqueID)
+	}
+}
