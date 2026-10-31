@@ -117,7 +117,7 @@ class World:
         for attempt in range(1, MAX_TAME_ATTEMPTS + 1):
             e = self.entity(uid)
             if e is None:
-                return uid, attempt - 1
+                raise RuntimeError(f"the {species} disappeared before it was tamed")
             t = owner.task({"template": "interact_entity", "target": {"id": e["id"]}, "item": food, "times": 1})
             if t["state"] != "done":
                 raise RuntimeError(f"feed task {t['state']}: {t.get('reason')}")
@@ -127,7 +127,7 @@ class World:
                 continue
             self.ev.event("harness", "tamed", species=species, attempts=attempt, owner=me)
             return uid, attempt
-        return uid, MAX_TAME_ATTEMPTS
+        raise RuntimeError(f"{species} still wild after {MAX_TAME_ATTEMPTS} feeds")
 
     # --- more acting and judging ---------------------------------------------
     def tame_standing(self, owner, species, near=None):
@@ -183,7 +183,10 @@ class World:
     def targeting(self, t0, victims, kinds=None):
         """(type, uid, target) for every animal snapshot since t0 whose target is in victims."""
         hits = set()
-        for _ts, snap in self.watch.since(t0):
+        samples = self.watch.since(t0)
+        if len(samples) < 3:
+            raise RuntimeError(f"the watcher saw only {len(samples)} snapshots in the window; nothing can be concluded")
+        for _ts, snap in samples:
             for e in merge_entities(snap.values()):
                 if e.get("target") in victims and e["type"].startswith("gameops:") and (kinds is None or e["type"] in kinds):
                     hits.add((e["type"], e["unique_id"], e["target"]))
