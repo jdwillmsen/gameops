@@ -1,5 +1,5 @@
 # Built from the repo root so the pack sources under packs/ are in context.
-FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f AS stage
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS stage
 COPY packs/ /src/
 # Iterates the folders, so a new theme needs no edit here. lab-mods-stage0 is
 # still delivered by the chart's ConfigMap.
@@ -15,7 +15,7 @@ RUN set -eu; \
     find /out \( -name '*.test.js' -o -name policy.txt -o -iname 'README*' \) -type f -delete; \
     find /out -name assets-src -type d -prune -exec rm -rf {} +
 
-FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
+FROM alpine:3.24@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 RUN apk add --no-cache jq
 COPY --from=stage /out/ /packs/
 COPY minecraft/lab-packs/install.sh /install.sh
