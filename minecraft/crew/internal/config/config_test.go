@@ -562,3 +562,15 @@ func TestLoadAcceptsASignedInUnitOnNetherNet(t *testing.T) {
 		t.Errorf("Address() = %q, NetherNet() = %v", cfg.Address(), cfg.NetherNet())
 	}
 }
+
+func TestCameraPackDirIsOptional(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.CameraPackDir != "" {
+		t.Fatalf("dir = %q, %v; want none", cfg.CameraPackDir, err)
+	}
+	t.Setenv("CAMERA_PACK_DIR", " /packs/wildlife/resource_pack ")
+	if cfg, _ = Load(); cfg.CameraPackDir != "/packs/wildlife/resource_pack" {
+		t.Errorf("dir = %q", cfg.CameraPackDir)
+	}
+}

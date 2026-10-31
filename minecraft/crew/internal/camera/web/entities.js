@@ -1,6 +1,7 @@
 // Entity drawing for the camera page: the pack's mob models once their table
 // has loaded, stand-in boxes before that and for types the table lacks.
 import * as THREE from 'three';
+import { compileAnimations, pose } from './molang.js';
 import { holdPose, iconName, recolorTrim, trimKey, trimPaletteName } from './equip.js';
 
 const RAD = Math.PI / 180;
@@ -202,10 +203,17 @@ export function createEntities(scene) {
   const looks = new Map(); // entity id -> {baby, sheared, color, item}
   const names = new Map();
   let table = null, sheet = null, modelTex = null;
+  // The pack's own entities (JDW wildlife and the like) have their own sheet,
+  // so they draw even when the vanilla one could not be fetched.
+  const packSrc = { tex: null, sheet: null, geos: new Map(), mats: new Map(), models: null, key: null };
+  const vanillaSrc = { get tex() { return modelTex; }, get sheet() { return sheet; }, geos: null, mats: null };
+  let packLoading = null, packAgain = false;
+  const animCache = new WeakMap(); // pack model -> compiled animations
   let items = null; // {doc, tex}
   let modelsKey = null, modelsLoading = null, modelsAgain = false;
   let itemsLoading = null, itemsFailed = false;
   const boneGeos = new Map(); // table bone -> geometry
+  vanillaSrc.geos = boneGeos;
   const skinGeos = new Map(); // table bone -> [wide, slim] geometry on a skin's grid
   const armourGeos = new Map(); // table bone -> Map("slot|texture", geometry)
   const skins = new Map(); // entity id -> {slim, tex, key}
@@ -220,19 +228,21 @@ export function createEntities(scene) {
   let shieldGeos = null;
   const skinOffsets = new WeakMap(); // model -> where its player texture sits on the sheet
   const materials = new Map();
+  vanillaSrc.mats = materials;
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const noseMat = new THREE.MeshLambertMaterial({ color: 0x20140c });
 
-  function material(color, glass) {
+  function material(color, glass, src = vanillaSrc) {
     const key = color + (glass ? 'g' : '');
-    let m = materials.get(key);
+    const mats = src.mats;
+    let m = mats.get(key);
     if (!m) {
       m = glass
-        ? new THREE.MeshLambertMaterial({ map: modelTex, alphaTest: .02, transparent: true, depthWrite: false, color })
+        ? new THREE.MeshLambertMaterial({ map: src.tex, alphaTest: .02, transparent: true, depthWrite: false, color })
         // Both sides, as the game draws cutout mobs: a chicken's legs are
         // painted only on the inside of each leg box's back face.
-        : new THREE.MeshLambertMaterial({ map: modelTex, alphaTest: .5, color, side: THREE.DoubleSide });
-      materials.set(key, m);
+        : new THREE.MeshLambertMaterial({ map: src.tex, alphaTest: .5, color, side: THREE.DoubleSide });
+      mats.set(key, m);
     }
     return m;
   }
@@ -393,9 +403,9 @@ export function createEntities(scene) {
 
   // A model's layers as a bone tree. Table coordinates are the pack's: the
   // group's mirrored z turns the model's north-facing front toward +z.
-  function buildModel(model, look, type, id) {
+  function buildModel(model, look, type, id, src = vanillaSrc) {
     const baby = look.baby;
-    let layers = model.d, size = model.s || 1;
+    let layers = model.v?.[look.variant] ?? model.d, size = model.s || 1;
     if (baby) {
       if (model.b) { layers = model.b; size = 1; } else size *= .5;
     }
@@ -423,9 +433,9 @@ export function createEntities(scene) {
           const sg = skinGeometry(b, off, sk.slim);
           if (sg) bind.add(new THREE.Mesh(sg, skinMat));
         } else {
-          let geo = boneGeos.get(b);
-          if (geo === undefined) { geo = boneGeometry(b, sheet); boneGeos.set(b, geo); }
-          if (geo) bind.add(new THREE.Mesh(geo, material(tint, layer.glass)));
+          let geo = src.geos.get(b);
+          if (geo === undefined) { geo = boneGeometry(b, src.sheet); src.geos.set(b, geo); }
+          if (geo) bind.add(new THREE.Mesh(geo, material(tint, layer.glass, src)));
         }
         if (wearing && layerIndex === 0) {
           wearing.forEach((item, slot) => {
@@ -463,7 +473,7 @@ export function createEntities(scene) {
         // Yaw then pitch, as the stand-ins turn, so a head never rolls.
         if (name === 'head') g.rotation.reorder('YXZ');
         bones.push({
-          name, g, base: g.rotation.clone(), head: name === 'head',
+          name, g, base: g.rotation.clone(), baseDeg: b.r ?? [0, 0, 0], basePos: g.position.clone(), head: name === 'head',
           swing: LEG_SWING[name], arm: BIPED_LEGS.has(name) && name.includes('arm'),
           spiderLeg: SPIDER_TYPE.test(type) && SPIDER_LEG.test(name) ? +name[3] : -1,
         });
@@ -471,7 +481,12 @@ export function createEntities(scene) {
     });
     const group = new THREE.Group();
     group.add(root);
-    return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned };
+    let anim = null;
+    if (model.an) {
+      if (!animCache.has(model)) animCache.set(model, compileAnimations(model.an));
+      anim = animCache.get(model);
+    }
+    return { group, head: null, bones, height: model.h * (baby ? (model.b ? 1 : .5) : 1), owned, anim };
   }
 
   // The icon of a held item as a flat plane in model units, its picture taken
@@ -552,7 +567,7 @@ export function createEntities(scene) {
     return { group, head: null, bones: [], height: .5, item: mesh, owned: [geo, mat] };
   }
 
-  function lookOf(id) { return looks.get(id) ?? { baby: false, sheared: false, color: 0, item: '' }; }
+  function lookOf(id) { return looks.get(id) ?? { baby: false, sheared: false, sitting: false, variant: 0, color: 0, item: '' }; }
 
   function typeKey(type) {
     return type === 'player' ? 'minecraft:player' : type;
@@ -561,8 +576,10 @@ export function createEntities(scene) {
   function build(inst) {
     const look = lookOf(inst.id), key = typeKey(inst.type);
     const model = table?.models[key];
+    const own = !model && packSrc.models?.[key];
     let built;
     if (model && modelTex) built = buildModel(model, look, key, inst.id);
+    else if (own && packSrc.tex) built = buildModel(own, look, key, inst.id, packSrc);
     else if (key === 'minecraft:item' && items && look.item) built = buildItem(look.item);
     else built = buildStandIn(inst.type);
     if (inst.body) { inst.root.remove(inst.body); disposeBody(inst); }
@@ -579,7 +596,7 @@ export function createEntities(scene) {
   function stamp(inst) {
     const l = lookOf(inst.id);
     const sk = skins.get(inst.id);
-    return [typeKey(inst.type), !!table, !!items, l.baby, l.sheared, l.color, l.item, sk?.key, sk?.slim, worn.get(inst.id)?.join(','), modsKey(inst.id), handsKey(inst.id)].join('|');
+    return [typeKey(inst.type), !!table, !!packSrc.models, !!items, l.baby, l.sheared, l.color, l.variant, l.item, sk?.key, sk?.slim, worn.get(inst.id)?.join(','), modsKey(inst.id), handsKey(inst.id)].join('|');
   }
 
   function disposeBody(inst) {
@@ -616,6 +633,7 @@ export function createEntities(scene) {
   function create(id, type) {
     const inst = { id, type, root: new THREE.Group(), body: null, built: null, label: null, labelled: undefined,
       cur: null, from: null, to: null, t0: 0, dur: 50, lastAt: 0, phase: 0, amp: 0, seed: Math.random() * 100,
+      born: performance.now(), dist: 0, mspeed: 0, attackAt: -1e9,
       raised: ARMS_FORWARD.test(type), spider: SPIDER_TYPE.test(type) };
     scene.add(inst.root);
     meshes.set(id, inst);
@@ -643,6 +661,39 @@ export function createEntities(scene) {
     inst.lastAt = now; inst.t0 = now;
   }
 
+  // A pack entity is posed by its own animations. The queries are fed from
+  // what the camera knows: the distance walked, a speed from 0 to 1 (a full
+  // stride is about 5 blocks a second), the head's turn against the body, and
+  // the sitting flag and attack swing the server sent.
+  const ATTACK_MS = 400;
+  // ?sit=1 shows every pack animal sitting whatever the server said, to look at
+  // the pose where the game would not send the flag (a console event does not).
+  const forceSit = new URLSearchParams(location.search).get('sit') === '1';
+  function animatePack(inst, built, now, dt, dist) {
+    const c = inst.cur;
+    inst.dist += dist;
+    const speed = dt > 0 ? dist / dt : 0;
+    inst.mspeed += (Math.min(1, speed / 5) - inst.mspeed) * Math.min(1, dt * 10);
+    const swing = (now - inst.attackAt) / ATTACK_MS;
+    const ctx = {
+      query: {
+        modified_distance_moved: inst.dist, modified_move_speed: inst.mspeed, life_time: (now - inst.born) / 1000,
+        target_x_rotation: c.pitch, target_y_rotation: wrap(c.head - c.yaw),
+        is_sitting: forceSit || lookOf(inst.id).sitting, variant: lookOf(inst.id).variant,
+      },
+      variable: { attack_time: swing >= 0 && swing < 1 ? swing : 0 },
+    };
+    const posed = pose(built.anim, ctx);
+    for (const b of built.bones) {
+      const p = posed.get(b.name);
+      const r = p ? [b.baseDeg[0] + p.rot[0], b.baseDeg[1] + p.rot[1], b.baseDeg[2] + p.rot[2]] : b.baseDeg;
+      b.g.rotation.copy(packEuler(r));
+      if (b.head) b.g.rotation.reorder('YXZ');
+      b.g.position.copy(b.basePos);
+      if (p) b.g.position.add({ x: p.pos[0], y: p.pos[1], z: p.pos[2] });
+    }
+  }
+
   function animate(inst, now, dt) {
     const c = inst.cur;
     const a = Math.min(1, (now - inst.t0) / inst.dur);
@@ -665,6 +716,7 @@ export function createEntities(scene) {
       return;
     }
     const dist = Math.hypot(c.x - prevX, c.z - prevZ);
+    if (built.anim) { animatePack(inst, built, now, dt, dist); return; }
     inst.phase += dist / inst.stride * Math.PI * 2;
     const speed = dt > 0 ? dist / dt : 0;
     inst.amp += (Math.min(1, speed / 1.6) - inst.amp) * Math.min(1, dt * 10);
@@ -707,6 +759,7 @@ export function createEntities(scene) {
     // already held does nothing, and a load asked for while another runs is
     // run once more after it rather than alongside it.
     loadModels() {
+      this.loadPack();
       if (modelsLoading) { modelsAgain = true; return modelsLoading; }
       modelsLoading = (async () => {
         try {
@@ -736,6 +789,32 @@ export function createEntities(scene) {
       return modelsLoading;
     },
 
+    // The pack's own entities. A server with none answers 404, which leaves
+    // everything as it was.
+    loadPack() {
+      if (packLoading) { packAgain = true; return packLoading; }
+      packLoading = (async () => {
+        try {
+          const loaded = await fetchSheet('v1/camera/pack.json', 'v1/camera/pack.png');
+          if (loaded.key === packSrc.key) { loaded.tex.dispose(); return; }
+          const old = { tex: packSrc.tex, mats: [...packSrc.mats.values()], geos: [...packSrc.geos.values()] };
+          packSrc.key = loaded.key; packSrc.tex = loaded.tex; packSrc.models = loaded.doc.models;
+          packSrc.sheet = { w: loaded.doc.width, h: loaded.doc.height };
+          packSrc.geos.clear(); packSrc.mats.clear();
+          for (const inst of meshes.values()) build(inst);
+          old.tex?.dispose();
+          for (const g of old.geos) g?.dispose();
+          for (const m of old.mats) m.dispose();
+        } catch {
+          // No pack entities on this server, or the request failed; boxes stay.
+        } finally {
+          packLoading = null;
+          if (packAgain) { packAgain = false; this.loadPack(); }
+        }
+      })();
+      return packLoading;
+    },
+
     loadItems() {
       if (items || itemsFailed) return Promise.resolve();
       if (itemsLoading) return itemsLoading;
@@ -758,10 +837,16 @@ export function createEntities(scene) {
     update,
 
     setLook(id, flags, color, item) {
-      looks.set(id, { baby: (flags & 1) !== 0, sheared: (flags & 2) !== 0, color, item });
+      looks.set(id, { baby: (flags & 1) !== 0, sheared: (flags & 2) !== 0, sitting: (flags & 4) !== 0, variant: color >> 4, color: color & 15, item });
       const inst = meshes.get(id);
       if (inst && inst.stamp !== stamp(inst)) build(inst);
       if (item && !items) this.loadItems();
+    },
+
+    // The entity swings at something; animations that read attack_time play.
+    attack(id, now = performance.now()) {
+      const inst = meshes.get(id);
+      if (inst) inst.attackAt = now;
     },
 
     // A player's skin, a PNG on the standard layout. The texture is made

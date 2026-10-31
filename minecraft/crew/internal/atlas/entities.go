@@ -76,6 +76,16 @@ type EntityModel struct {
 	Default []Layer `json:"d"`
 	Baby    []Layer `json:"b,omitempty"`
 	Sheared []Layer `json:"sh,omitempty"`
+	// Variants holds one layer set per value of the entity's variant, where
+	// the pack picks the texture (and hides parts) by it; Default is the first.
+	Variants [][]Layer `json:"v,omitempty"`
+	// Anim is the pack's animations, which the page evaluates per frame.
+	Anim *AnimSet `json:"an,omitempty"`
+}
+
+// layerSets lists every set of layers the model can draw.
+func (m EntityModel) layerSets() [][]Layer {
+	return append([][]Layer{m.Default, m.Baby, m.Sheared}, m.Variants...)
 }
 
 // Layer is one geometry in its texture. Drawing several in order is how a
@@ -121,6 +131,11 @@ type entityDef struct {
 	textures  orderedStrings
 	geometry  orderedStrings
 	adultSize float32
+
+	// The rest is read only for a pack's own entities, which are animated.
+	animations  orderedStrings
+	animate     []animRun
+	controllers []string
 }
 
 // orderedStrings keeps a JSON object's string values in file order, because
@@ -244,6 +259,11 @@ func newerVersion(a, b []int) bool {
 }
 
 func parseEntityDef(data []byte) (entityDef, bool) {
+	return parseEntityDefIn(data, func(id string) bool { return strings.HasPrefix(id, "minecraft:") })
+}
+
+// parseEntityDefIn reads a definition whose identifier allow accepts.
+func parseEntityDefIn(data []byte, allow func(id string) bool) (entityDef, bool) {
 	if len(data) > maxEntityDefBytes {
 		return entityDef{}, false
 	}
@@ -258,9 +278,12 @@ func parseEntityDef(data []byte) (entityDef, bool) {
 				Engine     json.RawMessage `json:"min_engine_version"`
 				Textures   json.RawMessage `json:"textures"`
 				Geometry   json.RawMessage `json:"geometry"`
+				Animations json.RawMessage `json:"animations"`
 				Scripts    struct {
-					Scale string `json:"scale"`
+					Scale   string            `json:"scale"`
+					Animate []json.RawMessage `json:"animate"`
 				} `json:"scripts"`
+				Controllers []json.RawMessage `json:"render_controllers"`
 			} `json:"description"`
 		} `json:"minecraft:client_entity"`
 	}
@@ -268,10 +291,11 @@ func parseEntityDef(data []byte) (entityDef, bool) {
 		return entityDef{}, false
 	}
 	d := doc.Client.Description
-	if !strings.HasPrefix(d.Identifier, "minecraft:") || len(d.Identifier) > 64 {
+	if !allow(d.Identifier) || len(d.Identifier) > 64 {
 		return entityDef{}, false
 	}
-	def := entityDef{id: d.Identifier, engine: engineVersion(d.Engine), textures: parseOrdered(d.Textures), geometry: parseOrdered(d.Geometry), adultSize: scaleOf(d.Scripts.Scale)}
+	def := entityDef{id: d.Identifier, engine: engineVersion(d.Engine), textures: parseOrdered(d.Textures), geometry: parseOrdered(d.Geometry), adultSize: scaleOf(d.Scripts.Scale),
+		animations: parseOrdered(d.Animations), animate: parseAnimRuns(d.Scripts.Animate), controllers: parseNamed(d.Controllers)}
 	return def, len(def.textures.keys) > 0 && len(def.geometry.keys) > 0
 }
 
@@ -334,6 +358,10 @@ func (d entityDef) chosenTextures() []string {
 // identifier defined more than once, the one with the newest engine version:
 // the pack still carries the legacy files beside the current ones.
 func readEntityDefs(packDir string) (map[string]entityDef, error) {
+	return readEntityDefsWith(packDir, parseEntityDef)
+}
+
+func readEntityDefsWith(packDir string, parse func([]byte) (entityDef, bool)) (map[string]entityDef, error) {
 	entries, err := os.ReadDir(filepath.Join(packDir, "entity"))
 	if err != nil {
 		return nil, fmt.Errorf("atlas: %w", err)
@@ -347,7 +375,7 @@ func readEntityDefs(packDir string) (map[string]entityDef, error) {
 		if err != nil {
 			continue
 		}
-		def, ok := parseEntityDef(data)
+		def, ok := parse(data)
 		if !ok {
 			continue
 		}
@@ -747,15 +775,20 @@ func (eb *entityBuilder) model(def entityDef) (EntityModel, bool) {
 			}
 		}
 	}
-	for _, l := range out.Default {
+	out.setHeight(def.adultSize)
+	return out, true
+}
+
+// setHeight measures the default layers' top, for placing a name label.
+func (m *EntityModel) setHeight(adult float32) {
+	for _, l := range m.Default {
 		for _, b := range l.Bones {
 			for _, c := range b.Cubes {
-				out.Height = max(out.Height, (c.Origin[1]+c.Size[1]+c.Inflate)/16)
+				m.Height = max(m.Height, (c.Origin[1]+c.Size[1]+c.Inflate)/16)
 			}
 		}
 	}
-	out.Height = min(max(out.Height*max(def.adultSize, 0.1), 0.1), 8)
-	return out, true
+	m.Height = min(max(m.Height*max(adult, 0.1), 0.1), 8)
 }
 
 type placement struct{ x, y, w, h int }
@@ -824,16 +857,26 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 		models[ShieldModel] = EntityModel{Height: 1.4, Default: []Layer{l}}
 	}
 
+	return eb.sheet(models, true)
+}
+
+// sheet packs the textures the models use into one picture and places every
+// layer on it. The vanilla pack's worn armour and trims share the sheet; a
+// pack's own entities have none.
+func (eb *entityBuilder) sheet(models map[string]EntityModel, withWorn bool) ([]byte, EntityTable, error) {
 	used := map[string]*image.NRGBA{}
 	for _, m := range models {
-		for _, layers := range [][]Layer{m.Default, m.Baby, m.Sheared} {
+		for _, layers := range m.layerSets() {
 			for _, l := range layers {
 				used[l.tex] = eb.imgs[l.tex]
 			}
 		}
 	}
-	armorPaths := eb.armorTextures(used)
-	trimPaths := eb.trimTextures(used)
+	var armorPaths, trimPaths map[string]string
+	if withWorn {
+		armorPaths = eb.armorTextures(used)
+		trimPaths = eb.trimTextures(used)
+	}
 	width, height, at, err := packTextures(used)
 	if err != nil {
 		return nil, EntityTable{}, err
@@ -844,7 +887,7 @@ func buildEntities(packDir string) ([]byte, EntityTable, error) {
 		draw.Draw(sheet, image.Rect(pl.x, pl.y, pl.x+pl.w, pl.y+pl.h), img, img.Bounds().Min, draw.Src)
 	}
 	for _, m := range models {
-		for _, layers := range [][]Layer{m.Default, m.Baby, m.Sheared} {
+		for _, layers := range m.layerSets() {
 			for li := range layers {
 				placeLayer(&layers[li], at[layers[li].tex])
 			}

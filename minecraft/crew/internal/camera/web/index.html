@@ -601,8 +601,20 @@ addEventListener('message', ev => {
 });
 
 // Orbit: drag turns around the unit, the wheel moves in and out.
-let azimuth = 0, elevation = 30, orbitDist = 8, dragging = false;
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+let azimuth = Number(query.get('az')) || 0, elevation = clamp(Number(query.get('el')) || 30, 5, 85), orbitDist = clamp(Number(query.get('dist')) || 8, 3, 24), dragging = false;
+// ?follow=<entity id | type | type without namespace> centres the orbit on the
+// first such entity in view, and ?spin=<degrees a second> turns it around that
+// entity, so a recording can show an animal from every side.
+const followKey = query.get('follow');
+const spin = Number(query.get('spin')) || 0;
+function followed() {
+  if (!followKey) return null;
+  for (const inst of ents.meshes.values()) {
+    if (inst.cur && (String(inst.id) === followKey || inst.type === followKey || inst.type.endsWith(':' + followKey))) return inst.cur;
+  }
+  return null;
+}
 renderer.domElement.addEventListener('pointerdown', e => { dragging = true; renderer.domElement.setPointerCapture(e.pointerId); });
 // A cancelled pointer (touch scroll takeover, lost capture) never sends
 // pointerup, which would leave the drag stuck on.
@@ -766,6 +778,11 @@ function onMessage(ev) {
         ents.setLook(id, flags, color, text(len));
       }
       break;
+    case 23: {
+      const id = uvarint();
+      if (u8[p] === 1) ents.attack(id);
+      break;
+    }
     case 12:
       // Only the table format this page understands; a newer one is left alone.
       if (u8[1] === 1) ents.loadModels();
@@ -840,7 +857,10 @@ function placeCamera(m) {
     camera.position.set(me.x - fx * 4, me.y + 1.5, me.z - fz * 4);
   } else if (m === 'orbit') {
     const az = azimuth * Math.PI / 180, el = elevation * Math.PI / 180;
-    camera.position.set(me.x + orbitDist * Math.cos(el) * Math.sin(az), me.y + orbitDist * Math.sin(el), me.z + orbitDist * Math.cos(el) * Math.cos(az));
+    const f = followed(), cx = f ? f.x : me.x, cy = f ? f.y + .6 : me.y, cz = f ? f.z : me.z;
+    camera.position.set(cx + orbitDist * Math.cos(el) * Math.sin(az), cy + orbitDist * Math.sin(el), cz + orbitDist * Math.cos(el) * Math.cos(az));
+    camera.lookAt(cx, cy, cz);
+    return;
   } else {
     camera.position.set(me.x, me.y + 40, me.z);
     // Looking straight down leaves roll free; facing as screen-up keeps the map oriented to the unit.
@@ -943,9 +963,11 @@ addEventListener('keydown', e => {
   fogUniforms.uLight.value = lighting ? 1 : 0;
 });
 
-let lastAt = 0;
+let lastAt = 0, lastFrameAt = 0;
 function frame() {
   const workStart = performance.now();
+  if (spin) azimuth += spin * Math.min((workStart - (lastFrameAt || workStart)) / 1000, .1);
+  lastFrameAt = workStart;
   // Adopt finished meshes within a time budget so the view stays interactive.
   const until = performance.now() + 8;
   while (ready.length && performance.now() < until) adopt(ready.shift());

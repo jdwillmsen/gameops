@@ -20,6 +20,7 @@ package camera
 //	time         [15][ticks i32][flags u8]                world time; flags bit 0: the clock is stopped
 //	biome table  [16][n u16]{id u16, grass rgb, foliage rgb, water rgb, water alpha u8}...   tints per biome id
 //	biomes       [17][cx i32][cz i32][n u16][palette n x u16][256 indices if n > 1]   a column's biome ids, indexed x*16+z
+//	actor event  [23][id uvarint][event u8]               event 1: the entity swings at something
 //	weather      [20][rain u8][thunder u8]               rain and thunder levels, 0 (none) to 255 (full)
 //
 // The time frame carries the world time in ticks (24000 to a day, 0 at
@@ -31,8 +32,9 @@ package camera
 // column as plains.
 //
 // Entity data carries what changes how an entity looks and is not part of
-// its pose: flags bit 0 is baby and bit 1 sheared, colour is the dye index
-// (0 to 15) of a sheep's wool, and item is the name of a dropped item without
+// its pose: flags bit 0 is baby, bit 1 sheared and bit 2 sitting, colour's low
+// nibble is the dye index (0 to 15) of a sheep's wool and its high nibble the
+// entity's variant (0 to 15, which picks a pack animal's texture), and item is the name of a dropped item without
 // its namespace. It is sent when an entity appears and whenever one of these
 // changes; an entity never mentioned has all of them zero. Pages that predate
 // a frame type skip it. The models frame carries no data either: the page
@@ -114,6 +116,7 @@ const (
 	// Entity data flag bits.
 	entBaby    byte = 1
 	entSheared byte = 2
+	entSitting byte = 4
 
 	matNonCube byte = 1
 
@@ -140,6 +143,7 @@ func modelsFrame() []byte { return []byte{frameModels, modelsFormat} }
 // entityLook is the appearance data of one entity.
 type entityLook struct {
 	Flags byte
+	// Color's low nibble is a sheep's dye and its high nibble the variant.
 	Color byte
 	Item  string
 }

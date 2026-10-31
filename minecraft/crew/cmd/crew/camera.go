@@ -45,6 +45,7 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, dec *camera.NetworkDe
 		Self:       tracker,
 		MaxViewers: cfg.CameraMaxViewers,
 	})
+	loadPackEntities(hub, cfg.CameraPackDir, log)
 	atlases := &atlasLoader{dir: cfg.CameraAtlasDir, hub: hub, log: log}
 	atlases.build = ensureAtlas(atlas.Fetcher{OnDownload: logAtlasDownload(log)}, func(err error) {
 		atlases.fellBack.Store(true)
@@ -58,6 +59,30 @@ func newCamera(cfg config.Config, tracker *belief.Tracker, dec *camera.NetworkDe
 		dec.BeginSession(version)
 		go atlases.load(context.WithoutCancel(ctx), version)
 	}
+}
+
+// loadPackEntities compiles the entities of the resource pack at dir. It is a
+// local read, so it runs at start; a failure only leaves those entities as
+// boxes.
+func loadPackEntities(hub *camera.Hub, dir string, log *logging.Logger) {
+	if dir == "" {
+		return
+	}
+	sheet, table, skipped, err := atlas.BuildPackEntities(dir)
+	for id, why := range skipped {
+		log.Warn("camera_pack_entity_skipped", logging.Fields{"entity": id, "error": why.Error()})
+	}
+	if err == nil {
+		err = hub.SetPackEntities(sheet, table)
+	}
+	if err != nil {
+		log.Warn("camera_pack_entities_unavailable", logging.Fields{
+			"dir": dir, "error": err.Error(),
+			"hint": "the pack's own entities are drawn as boxes",
+		})
+		return
+	}
+	log.Info("camera_pack_entities_ready", logging.Fields{"dir": dir, "entities": len(table.Models)})
 }
 
 // atlasTimeout bounds the background build: the download is a few thousand

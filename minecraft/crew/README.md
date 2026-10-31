@@ -31,6 +31,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
+| `CAMERA_PACK_DIR` | unset | A resource pack's directory (the one holding `entity/`, `models/`, `render_controllers/`, `animations/` and `textures/`) whose own entities, such as `gameops:tiger`, the camera draws as their real models, textures by variant and animations included, instead of stand-in boxes. Read once at start; nothing is downloaded |
 | `CAMERA_ATLAS_DIR` | `/data/atlas` | Where the built texture atlas is cached; put it on the data volume. Units can share one directory: the first builds, the rest wait for it. The resource pack it is built from is fetched into `/tmp` and removed after the build |
 
 ## NetherNet servers

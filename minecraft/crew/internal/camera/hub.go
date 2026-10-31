@@ -96,19 +96,22 @@ type Hub struct {
 	mats       *materialTable
 	matsSent   int // how many of mats every attached viewer has been sent; under mu
 
-	mu         sync.Mutex
-	runtime    uint64
-	subs       map[[3]int32][]byte // wire frames, replayed to a new viewer
-	ents       map[uint64]*entity
-	uniqueID   map[int64]uint64
-	viewers    map[*Viewer]struct{}
-	atlasObj   *atlas.Atlas
-	atlasPNG   []byte
-	atlasDoc   []byte
-	itemsPNG   []byte
-	itemsDoc   []byte
-	entPNG     []byte
-	entDoc     []byte
+	mu       sync.Mutex
+	runtime  uint64
+	subs     map[[3]int32][]byte // wire frames, replayed to a new viewer
+	ents     map[uint64]*entity
+	uniqueID map[int64]uint64
+	viewers  map[*Viewer]struct{}
+	atlasObj *atlas.Atlas
+	atlasPNG []byte
+	atlasDoc []byte
+	itemsPNG []byte
+	itemsDoc []byte
+	entPNG   []byte
+	entDoc   []byte
+	// packPNG and packDoc are the sheet and table of the pack's own entities.
+	packPNG    []byte
+	packDoc    []byte
 	itemName   map[int32]string // item network id -> name without namespace
 	skins      map[uuid.UUID]*skinInfo
 	ownSkin    *skinInfo
@@ -272,7 +275,7 @@ func (h *Hub) Attach() (*Viewer, error) {
 	if h.atlasDoc != nil {
 		v.head = append(v.head, atlasFrame())
 	}
-	if h.entDoc != nil {
+	if h.entDoc != nil || h.packDoc != nil {
 		v.head = append(v.head, modelsFrame())
 	}
 	looks := map[uint64]entityLook{}
@@ -463,6 +466,8 @@ func (h *Hub) Apply(pk packet.Packet, _ PacketWriter) {
 		}
 	case *packet.SetActorData:
 		h.setLook(p.EntityRuntimeID, p.EntityMetadata)
+	case *packet.ActorEvent:
+		h.actorEvent(p)
 	case *packet.MovePlayer:
 		h.movePlayer(p)
 	case *packet.MoveActorAbsolute:
@@ -601,9 +606,15 @@ func lookOf(m protocol.EntityMetadata, prev entityLook) entityLook {
 		if metaFlag(m, protocol.EntityDataFlagSheared) {
 			l.Flags |= entSheared
 		}
+		if metaFlag(m, protocol.EntityDataFlagSitting) {
+			l.Flags |= entSitting
+		}
 	}
 	if c, ok := metaInt(m, protocol.EntityDataKeyColorIndex); ok {
-		l.Color = byte(c) & 15
+		l.Color = l.Color&^15 | byte(c)&15
+	}
+	if v, ok := metaInt(m, protocol.EntityDataKeyVariant); ok {
+		l.Color = l.Color&15 | byte(v&15)<<4
 	}
 	return l
 }
