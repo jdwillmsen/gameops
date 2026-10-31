@@ -65,7 +65,7 @@ jobs:
       - if: matrix.dir == 'minecraft/crew'
         uses: actions/setup-python@v7.1.0
         with:
-          python-version: '3.12'
+          python-version: '3.15'
       - if: matrix.dir == 'minecraft/crew'
         run: python3 -m pip install numpy
       - name: lint
