@@ -110,8 +110,60 @@ func (p *Postgres) Append(ctx context.Context, ev []Event) error {
 	if ext {
 		cols = append(cols, "reason_code", "duration_ms", "attempt", "session_id", "crew_version", "cause_ref", "outcome")
 	}
-	_, err := p.pool.CopyFrom(ctx, pgx.Identifier{"minecraft", "crew_event"}, cols, pgx.CopyFromRows(rows))
-	return wrap(err)
+	ident := pgx.Identifier{"minecraft", "crew_event"}
+	if !ext || !needsCauseLink(ev) {
+		_, err := p.pool.CopyFrom(ctx, ident, cols, pgx.CopyFromRows(rows))
+		return wrap(err)
+	}
+	// Ids are assigned by the table, so a failure cannot name its cause
+	// before the batch is in. Insert and link in one transaction: a reader
+	// never sees a failure without the link it is about to get.
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return wrap(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var floor int64
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(id), 0) FROM `+eventTable).Scan(&floor); err != nil {
+		return wrap(err)
+	}
+	if _, err := tx.CopyFrom(ctx, ident, cols, pgx.CopyFromRows(rows)); err != nil {
+		return wrap(err)
+	}
+	// Only rows past floor are touched, so a row another writer inserted
+	// meanwhile is at worst linked by the same rule it would have been by
+	// its own writer.
+	if _, err := tx.Exec(ctx, linkCausesSQL, floor, causeKindList(), CauseWindow); err != nil {
+		return wrap(err)
+	}
+	return wrap(tx.Commit(ctx))
+}
+
+// linkCausesSQL points each new failed task at the latest cause-kind event of
+// its unit inside the window before it; LinkCause is the same rule for the
+// memory store.
+const linkCausesSQL = `UPDATE ` + eventTable + ` f SET cause_ref = (
+	SELECT c.id FROM ` + eventTable + ` c
+	WHERE c.unit = f.unit AND c.kind = ANY($2) AND c.id <> f.id
+	  AND c.at <= f.at AND f.at - c.at <= $3
+	ORDER BY c.at DESC, c.id DESC LIMIT 1)
+WHERE f.id > $1 AND f.kind = 'task_failed' AND f.cause_ref IS NULL`
+
+func needsCauseLink(ev []Event) bool {
+	for _, e := range ev {
+		if e.Kind == "task_failed" && e.CauseRef == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func causeKindList() []string {
+	kinds := make([]string, 0, len(causeKinds))
+	for k := range causeKinds {
+		kinds = append(kinds, k)
+	}
+	return kinds
 }
 
 // nullable stores an unset string as NULL, so "no reason" is one value in the
