@@ -15,8 +15,9 @@ const (
 	Tick = 10 * time.Second
 
 	// lookback must cover the baseline and recent windows plus the history R3
-	// needs for its per-template durations.
-	lookback = 45 * time.Minute
+	// needs for its per-template durations, and R6's window with a margin so
+	// a unit's connection state at the window's start is visible.
+	lookback = 75 * time.Minute
 
 	pageSize = 200
 	maxPages = 50
@@ -30,6 +31,8 @@ type Runner struct {
 	Now     func() time.Time
 	// Changed is called after an evaluation that changed the insight list.
 	Changed func()
+	// Worlds, when set, maps each rostered unit to its world.
+	Worlds func() map[string]string
 }
 
 func NewRunner(s events.Store, t *Tracker) *Runner {
@@ -59,7 +62,11 @@ func (r *Runner) Once(ctx context.Context) {
 		return
 	}
 	open, history := Derive(evs)
-	fs := Evaluate(r.Cfg, Input{Now: now, Events: evs, Open: open}, history)
+	in := Input{Now: now, Events: evs, Open: open}
+	if r.Worlds != nil {
+		in.Worlds = r.Worlds()
+	}
+	fs := Evaluate(r.Cfg, in, history)
 	if r.Tracker.Apply(now, fs) {
 		r.Changed()
 	}

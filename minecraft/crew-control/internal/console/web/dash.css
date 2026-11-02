@@ -41,6 +41,11 @@
 .db-events li { padding: 3px 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
 .db-ago { color: var(--cc-muted); }
 .db-empty { color: var(--cc-muted); margin: 6px 0; }
+.db-worlds-body { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.db-worlds .db-chart { flex: none; }
+.db-delta { color: var(--cc-muted); font-size: 11px; }
+.db-median th, .db-median td { border-top: 1px solid var(--line); }
+.db-state { padding: 4px 0; }
 .db-empty[hidden] { display: none; }
 .db-note { color: var(--cc-muted); margin: 0; min-height: 1.2em; }
 
