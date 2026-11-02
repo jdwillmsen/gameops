@@ -116,6 +116,14 @@
           ]
         }
       }
+    },
+    "animation.gameops.cat.baby": {
+      "loop": true,
+      "bones": {
+        "head": {
+          "scale": 1.4
+        }
+      }
     }
   }
 }

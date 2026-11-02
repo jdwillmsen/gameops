@@ -179,13 +179,13 @@ def excludes_player(tests, strict):
 # every vanilla component that picks a target or deals damage (mob_effect, area_attack, ranged_attack,
 # nearest_prioritized_attackable_target ...), so anything not named here is rejected until a human adds it.
 WILDLIFE_COMPONENTS = frozenset((
-    "minecraft:attack", "minecraft:behavior.avoid_mob_type", "minecraft:behavior.float",
+    "minecraft:ageable", "minecraft:attack", "minecraft:behavior.avoid_mob_type", "minecraft:behavior.float",
     "minecraft:behavior.follow_owner", "minecraft:behavior.leap_at_target", "minecraft:behavior.look_at_player",
     "minecraft:behavior.melee_attack", "minecraft:behavior.nearest_attackable_target",
     "minecraft:behavior.owner_hurt_target", "minecraft:behavior.owner_hurt_by_target",
     "minecraft:behavior.random_look_around", "minecraft:behavior.random_stroll",
     "minecraft:behavior.stay_while_sitting", "minecraft:collision_box", "minecraft:follow_range",
-    "minecraft:experience_reward", "minecraft:health", "minecraft:is_tamed", "minecraft:jump.static",
+    "minecraft:experience_reward", "minecraft:health", "minecraft:is_baby", "minecraft:is_tamed", "minecraft:jump.static",
     "minecraft:loot", "minecraft:movement",
     "minecraft:movement.basic", "minecraft:nameable", "minecraft:navigation.walk", "minecraft:persistent",
     "minecraft:physics", "minecraft:pushable", "minecraft:sittable", "minecraft:tameable",

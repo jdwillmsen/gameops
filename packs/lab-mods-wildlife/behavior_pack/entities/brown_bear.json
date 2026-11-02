@@ -116,6 +116,30 @@
         "minecraft:behavior.stay_while_sitting": {
           "priority": 1
         }
+      },
+      "gameops:baby": {
+        "minecraft:is_baby": {},
+        "minecraft:collision_box": {
+          "width": 0.9,
+          "height": 0.97
+        },
+        "minecraft:health": {
+          "value": 27,
+          "max": 27
+        },
+        "minecraft:attack": {
+          "damage": 1
+        },
+        "minecraft:ageable": {
+          "duration": 1800,
+          "feed_items": [
+            "salmon"
+          ],
+          "grow_up": {
+            "event": "gameops:grow_up",
+            "target": "self"
+          }
+        }
       }
     },
     "components": {
@@ -126,8 +150,8 @@
         ]
       },
       "minecraft:collision_box": {
-        "width": 1.4,
-        "height": 1.5
+        "width": 1.8,
+        "height": 1.95
       },
       "minecraft:health": {
         "value": 80,
@@ -226,6 +250,27 @@
         "remove": {
           "component_groups": [
             "gameops:sitting"
+          ]
+        }
+      },
+      "gameops:as_baby": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "minecraft:entity_born": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "gameops:grow_up": {
+        "remove": {
+          "component_groups": [
+            "gameops:baby"
           ]
         }
       }

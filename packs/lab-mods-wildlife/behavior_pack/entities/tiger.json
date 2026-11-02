@@ -182,6 +182,30 @@
           "priority": 1
         }
       },
+      "gameops:baby": {
+        "minecraft:is_baby": {},
+        "minecraft:collision_box": {
+          "width": 0.5,
+          "height": 0.6
+        },
+        "minecraft:health": {
+          "value": 20,
+          "max": 20
+        },
+        "minecraft:attack": {
+          "damage": 1
+        },
+        "minecraft:ageable": {
+          "duration": 900,
+          "feed_items": [
+            "beef"
+          ],
+          "grow_up": {
+            "event": "gameops:grow_up",
+            "target": "self"
+          }
+        }
+      },
       "gameops:ability_ready": {
         "minecraft:movement": {
           "value": 0.28
@@ -336,6 +360,27 @@
         "remove": {
           "component_groups": [
             "gameops:sitting"
+          ]
+        }
+      },
+      "gameops:as_baby": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "minecraft:entity_born": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "gameops:grow_up": {
+        "remove": {
+          "component_groups": [
+            "gameops:baby"
           ]
         }
       },

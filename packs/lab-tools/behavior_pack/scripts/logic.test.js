@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   STAND_Y, STATIONS, PEN_SPECIES, ARENA_MOBS, SPAWNABLE, stationAt, clampCount, spawnPoint, spawnEventFor,
-  resetAreas, inBox, TELEPORTS, inLab, penCenter, LAB_BOUNDS, SPECIES, PADS, padAt, signs, SIGN_LINE_MAX,
+  resetAreas, inBox, TELEPORTS, hasCubForm, inLab, penCenter, LAB_BOUNDS, SPECIES, PADS, padAt, signs, SIGN_LINE_MAX,
 } from "./logic.js";
 
 test("stationAt finds a lectern only at its own spot and level", () => {
@@ -111,4 +111,9 @@ test("species facts exist for every pen and name its taming food", () => {
     assert.ok(SPECIES[p.id], p.id);
     assert.ok(SPECIES[p.id].food.endsWith(p.food.replace("_", " ")), p.id);
   }
+});
+
+test("only the wildlife animals have a cub form", () => {
+  for (const p of PEN_SPECIES) assert.ok(hasCubForm(p.id), p.id);
+  for (const m of ARENA_MOBS) assert.ok(!hasCubForm(m.id), m.id);
 });

@@ -36,6 +36,11 @@ export const ARENA_MOBS = [
   { id: "ground_dragon", x: 74, event: "gameops:hp_300" },
 ];
 
+// Only the wildlife animals have a cub form; the stage 0 mobs do not.
+export function hasCubForm(id) {
+  return PEN_SPECIES.some((p) => p.id === id);
+}
+
 export const DRAGON_TIERS = [150, 300, 500, 1000];
 
 export const SPAWNABLE = [
