@@ -104,3 +104,17 @@ export function resetAreas() {
   });
   return areas;
 }
+
+// The menus act only inside the world the pack was built for: a book in hand elsewhere (another
+// world that registers the pack by mistake, or the far side of a flat map) does nothing.
+export const LAB_BOUNDS = { x1: -70, x2: 90, z1: -80, z2: 35, y1: -64, y2: -20 };
+
+export function inLab(loc, bounds = LAB_BOUNDS) {
+  return loc.x >= bounds.x1 && loc.x <= bounds.x2 && loc.z >= bounds.z1 && loc.z <= bounds.z2
+    && loc.y >= bounds.y1 && loc.y <= bounds.y2;
+}
+
+export function penCenter(id) {
+  const p = PEN_SPECIES.find((x) => x.id === id);
+  return p ? { x: p.cx + 0.5, y: STAND_Y, z: p.cz + 0.5 } : null;
+}

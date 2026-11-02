@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   STAND_Y, STATIONS, PEN_SPECIES, ARENA_MOBS, SPAWNABLE, stationAt, clampCount, spawnPoint, spawnEventFor,
-  resetAreas, inBox, TELEPORTS,
+  resetAreas, inBox, TELEPORTS, inLab, penCenter, LAB_BOUNDS,
 } from "./logic.js";
 
 test("stationAt finds a lectern only at its own spot and level", () => {
@@ -59,4 +59,26 @@ test("pens are distinct and the pen counts match the lab builder", () => {
   assert.deepEqual(ARENA_MOBS.map((m) => m.id), ["training_dummy_brute", "werewolf", "ground_dragon"]);
   assert.equal(SPAWNABLE.length, 9);
   assert.ok(TELEPORTS.length >= 5);
+});
+
+test("inLab accepts the plaza and the far corners and rejects other places", () => {
+  assert.ok(inLab({ x: 0, y: -60, z: 0 }));
+  assert.ok(inLab({ x: 82, y: -60, z: 25 }));
+  assert.ok(!inLab({ x: 5000, y: -60, z: 0 }));
+  assert.ok(!inLab({ x: 0, y: 70, z: 0 }));
+  assert.ok(!inLab({ x: 0, y: -60, z: -200 }));
+});
+
+test("every area and station lies inside the lab bounds", () => {
+  for (const s of STATIONS) assert.ok(inLab({ x: s.x, y: STAND_Y, z: s.z }), `${s.kind} ${s.x},${s.z}`);
+  for (const t of TELEPORTS) assert.ok(inLab({ x: t.x, y: STAND_Y, z: t.z }), t.name);
+  for (const a of resetAreas()) {
+    assert.ok(inLab({ x: a.box.x1, y: STAND_Y, z: a.box.z1 }) && inLab({ x: a.box.x2, y: STAND_Y, z: a.box.z2 }), a.id);
+  }
+  assert.ok(LAB_BOUNDS.x2 > LAB_BOUNDS.x1);
+});
+
+test("penCenter returns the pen's middle or null", () => {
+  assert.deepEqual(penCenter("tiger"), { x: -23.5, y: STAND_Y, z: -41.5 });
+  assert.equal(penCenter("werewolf"), null);
 });

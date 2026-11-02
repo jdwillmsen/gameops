@@ -2,6 +2,7 @@ import { world, system } from "@minecraft/server";
 import { ActionFormData, ModalFormData, FormCancelationReason } from "@minecraft/server-ui";
 import {
   STAND_Y, stationAt, clampCount, spawnPoint, spawnEventFor, resetAreas, SPAWNABLE, DRAGON_TIERS, TELEPORTS,
+  inLab, penCenter,
 } from "./logic.js";
 import { GUIDE_PAGES, PEN_NOTES, STATION_NOTES } from "./guide.js";
 
@@ -39,8 +40,8 @@ async function guideMenu(player) {
   form.button("Back");
   const res = await show(form, player);
   if (res.canceled || res.selection >= GUIDE_PAGES.length) return;
-  await openGuidePage(player, GUIDE_PAGES[res.selection]);
-  await guideMenu(player);
+  const back = await openGuidePage(player, GUIDE_PAGES[res.selection]);
+  if (back) await guideMenu(player);
 }
 
 function spawnOne(player, id, tier, index) {
@@ -76,7 +77,9 @@ async function spawnMenu(player, preset) {
 
 function resetArea(player, area) {
   const dim = player.dimension;
+  if (dim.id !== "minecraft:overworld") return { removed: 0, spawned: 0, failed: area.spawns.length };
   let removed = 0;
+  let spawned = 0;
   for (const type of area.types) {
     for (const e of dim.getEntities({ type })) {
       const { x, z } = e.location;
@@ -87,16 +90,15 @@ function resetArea(player, area) {
     }
   }
   for (const s of area.spawns) {
-    const e = dim.spawnEntity(s.type, { x: s.x, y: STAND_Y, z: s.z });
-    if (s.event) {
-      try {
-        e.triggerEvent(s.event);
-      } catch {
-        // The default health stays; the area still has its mob.
-      }
+    try {
+      const e = dim.spawnEntity(s.type, { x: s.x, y: STAND_Y, z: s.z });
+      spawned++;
+      if (s.event) e.triggerEvent(s.event);
+    } catch {
+      // A chunk that is not loaded refuses the spawn; the rest of the area still resets.
     }
   }
-  return removed;
+  return { removed, spawned, failed: area.spawns.length - spawned };
 }
 
 async function resetMenu(player, only) {
@@ -111,9 +113,11 @@ async function resetMenu(player, only) {
     if (res.canceled || res.selection > areas.length) return;
     chosen = res.selection === areas.length ? areas : [areas[res.selection]];
   }
-  let removed = 0;
-  for (const a of chosen) removed += resetArea(player, a);
-  say(player, `reset ${chosen.map((a) => a.name).join(", ")} (${removed} removed)`);
+  for (const a of chosen) {
+    const r = resetArea(player, a);
+    const problem = r.failed ? `, ${r.failed} could not spawn (go closer so the area is loaded)` : "";
+    say(player, `${a.name}: ${r.removed} removed, ${r.spawned} placed${problem}`);
+  }
 }
 
 async function teleportMenu(player) {
@@ -175,7 +179,12 @@ async function stationMenu(player, station) {
   switch (label) {
     case "Main menu": return mainMenu(player);
     case "Wildlife guide": return openGuidePage(player, GUIDE_PAGES.find((p) => p.id === "wildlife"));
-    case "Spawn one here": return spawnOne(player, spawnId, 300, 0);
+    case "Spawn one here": {
+      const c = penCenter(spawnId);
+      player.dimension.spawnEntity(`gameops:${spawnId}`, c);
+      say(player, `added a ${spawnId.replace(/_/g, " ")} to its pen`);
+      return undefined;
+    }
     case "Reset this pen": return resetMenu(player, `pen_${station.species}`);
     case "Arena tag": return toggleWarriorTag(player);
     case "Reset the arena": return resetMenu(player, "arena");
@@ -186,13 +195,18 @@ async function stationMenu(player, station) {
 }
 
 // beforeEvents handlers run without permission to open forms or change the world, so hand off a tick later.
+// Using a book on a lectern fires both events; the lectern wins.
+const lastLectern = new Map();
+
 world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
   if (ev.block.typeId !== "minecraft:lectern") return;
+  if (!inLab(ev.block.location)) return;
   const { x, y, z } = ev.block.location;
   const station = stationAt(x, y, z);
   if (!station) return;
   ev.cancel = true;
   const player = ev.player;
+  lastLectern.set(player.id, system.currentTick);
   system.run(() => {
     stationMenu(player, station).catch((e) => console.warn(`gameops:tools menu failed ${e}`));
   });
@@ -200,6 +214,8 @@ world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
 
 world.afterEvents.itemUse.subscribe((ev) => {
   if (ev.itemStack.typeId !== "minecraft:book") return;
+  if (!inLab(ev.source.location)) return;
+  if (system.currentTick - (lastLectern.get(ev.source.id) ?? -100) <= 4) return;
   mainMenu(ev.source).catch((e) => console.warn(`gameops:tools menu failed ${e}`));
 });
 
