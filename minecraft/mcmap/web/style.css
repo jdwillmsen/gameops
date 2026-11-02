@@ -1323,7 +1323,9 @@ kbd, .keys code {
 .sheet.player .tally li { display: flex; justify-content: space-between; gap: 0.8rem; min-width: 0; }
 .sheet.player .tally .name { min-width: 0; overflow-wrap: anywhere; }
 .sheet.player .tally.long { max-height: 16rem; overflow-y: auto; }
-.sheet.player .tally .rest { justify-content: flex-start; }
+.sheet.player .tally .tally-rest { justify-content: flex-start; }
+.tally-toggle::after { content: ' \25BE'; }
+.tally-toggle[aria-expanded="true"]::after { content: ' \25B4'; }
 .sheet.player .live-note { color: var(--accent); }
 
 /* Labels on the map, at the size the viewer has chosen. */
