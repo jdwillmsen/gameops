@@ -1,9 +1,6 @@
 package telemetry
 
-import (
-	"fmt"
-	"time"
-)
+import "time"
 
 const (
 	// threatHigh is how many hostile mobs close by make a unit "under
@@ -26,7 +23,8 @@ type Threat struct {
 // observeThreat reports threat_high once as the hostile count reaches
 // threatHigh, and re-arms when it falls to threatClear. An unreported count
 // changes nothing, so a unit that is not sure where it is neither raises nor
-// clears the state.
+// clears the state. The event text is fixed because the feed is public; the
+// counts ride in Attrs, which is never serialised into it.
 func (t *track) observeThreat(th *Threat, now time.Time) []Event {
 	if th == nil {
 		return nil
@@ -36,7 +34,7 @@ func (t *track) observeThreat(th *Threat, now time.Time) []Event {
 		t.underAttack = true
 		return []Event{{
 			At: now, Kind: "threat_high", Level: "warn",
-			Text:  fmt.Sprintf("%d hostile mobs nearby", th.Hostiles),
+			Text:  "several hostile mobs nearby",
 			Attrs: map[string]any{"hostiles": th.Hostiles, "players": th.Players},
 		}}
 	case t.underAttack && th.Hostiles <= threatClear:

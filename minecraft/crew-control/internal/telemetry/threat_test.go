@@ -27,7 +27,7 @@ func TestThreatHighFiresOnReachingThreeAndRearmsBelowTwo(t *testing.T) {
 		}
 	}
 	got := step(threatObs(3))
-	if len(got) != 1 || got[0].Kind != "threat_high" || got[0].Level != "warn" || got[0].Text != "3 hostile mobs nearby" ||
+	if len(got) != 1 || got[0].Kind != "threat_high" || got[0].Level != "warn" || got[0].Text != "several hostile mobs nearby" ||
 		got[0].Attrs["hostiles"] != 3 || got[0].Attrs["players"] != 2 {
 		t.Fatalf("threat_high = %+v", got)
 	}
@@ -118,6 +118,9 @@ func TestPollerRaisesThreatHighAndOnlyTheBitIsPublic(t *testing.T) {
 		raw, _ := json.Marshal(e)
 		if strings.Contains(string(raw), "players") {
 			t.Errorf("the public feed carries the player count: %s", raw)
+		}
+		if e.Kind == "threat_high" && strings.ContainsAny(e.Text, "0123456789") {
+			t.Errorf("the public feed text carries a count: %q", e.Text)
 		}
 	}
 

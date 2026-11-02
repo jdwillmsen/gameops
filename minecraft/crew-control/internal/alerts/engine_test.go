@@ -432,6 +432,9 @@ func TestToolBreakingFiresAtTheThresholdAndClearsOnRepairOrUnknown(t *testing.T)
 	if a == nil || a.State != StateFiring || a.Severity != SevWarn || a.Rule != RuleToolWorn {
 		t.Fatalf("did not fire at the threshold: %+v", a)
 	}
+	if strings.ContainsAny(a.Text, "0123456789") {
+		t.Fatalf("the public alert text carries the exact durability: %q", a.Text)
+	}
 	poll(2, true, pctOf(100))
 	if find(e, "tool_breaking.a").State != StateResolved {
 		t.Fatal("a repair did not resolve")
