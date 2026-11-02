@@ -1,6 +1,6 @@
 import { initOps } from '/static/ops.js';
 import { initSquads } from '/static/squad.js';
-import { initAlerts } from '/static/alerts.js';
+import { initAlerts } from '/static/alerts-ui.js';
 import { initOverview } from '/static/overview-ui.js';
 import { initDashboard } from '/static/dash-ui.js';
 import { initHeat } from '/static/heat-ui.js';
