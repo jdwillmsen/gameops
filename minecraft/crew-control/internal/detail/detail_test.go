@@ -640,3 +640,21 @@ func TestTheUnitsOwnWearReadingReplacesTheSavedDamage(t *testing.T) {
 		t.Errorf("an item with no reading was given %d", got[3].MaxDamage)
 	}
 }
+
+func TestDetailCarriesTheUnitsOwnEnvironmentOnlyWhileItIsLive(t *testing.T) {
+	saves := &fakeSource{record: fixtureRecord(), at: time.Now(), found: true, scanned: true}
+	online := func(string) (telemetry.Live, bool) {
+		return telemetry.Live{ID: "crew-01", Online: true, At: time.Now(),
+			Env: telemetry.LiveEnv{DayPhase: "night", Biome: "swampland", Raining: true}}, true
+	}
+	_, v, _ := detailBody(t, serve(t, rosterWith(t, "-12"), online, saves, gate{signedIn: true}))
+	env, _ := v["env"].(map[string]any)
+	if env["day_phase"] != "night" || env["biome"] != "swampland" || env["raining"] != true {
+		t.Errorf("env = %v", v["env"])
+	}
+
+	_, v, _ = detailBody(t, serve(t, rosterWith(t, "-12"), liveState(false, time.Now()), saves, gate{signedIn: true}))
+	if _, there := v["env"]; there {
+		t.Errorf("an offline unit reported an environment: %v", v["env"])
+	}
+}

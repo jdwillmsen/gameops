@@ -127,6 +127,8 @@ type observation struct {
 	// threat is nil from a unit that predates the field or does not yet know
 	// where it is, which is not the same as nothing nearby.
 	threat *Threat
+	// dayPhase is the closed phase at this poll, empty when unknown.
+	dayPhase string
 }
 
 // observe advances t to o and returns what changed. It is pure so the rules
@@ -177,6 +179,9 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	switch {
 	case !t.dead && o.dead:
 		add("died", "crit", "died")
+		if o.dayPhase != "" {
+			out[len(out)-1].Attrs = map[string]any{"day_phase": o.dayPhase}
+		}
 	case t.dead && !o.dead:
 		add("respawned", "info", "respawned")
 	}

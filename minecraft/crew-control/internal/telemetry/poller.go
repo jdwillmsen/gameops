@@ -36,13 +36,18 @@ type Status struct {
 	// UnderAttack is set while several hostile mobs are close, with the
 	// event's hysteresis so a mob at the edge of range does not flicker it.
 	// Counts stay on the unit's own state; only this bit is public.
-	UnderAttack bool         `json:"under_attack,omitempty"`
-	Online      bool         `json:"online"`
-	Health      *float32     `json:"health"`
-	Hunger      *float32     `json:"hunger"`
-	Dead        bool         `json:"dead"`
-	Task        *TaskSummary `json:"task"`
-	Seen        time.Time    `json:"seen"`
+	UnderAttack bool `json:"under_attack,omitempty"`
+	// DayPhase is dawn, day, dusk or night from the unit's world clock, empty
+	// until it has one; Raining is its last rain event. The biome is not
+	// here: where a unit stands is for signed-in operators only.
+	DayPhase string       `json:"day_phase,omitempty"`
+	Raining  bool         `json:"raining,omitempty"`
+	Online   bool         `json:"online"`
+	Health   *float32     `json:"health"`
+	Hunger   *float32     `json:"hunger"`
+	Dead     bool         `json:"dead"`
+	Task     *TaskSummary `json:"task"`
+	Seen     time.Time    `json:"seen"`
 }
 
 type TaskSummary struct {
@@ -81,6 +86,13 @@ type LiveEffect struct {
 	Duration  int    `json:"duration"`
 }
 
+// LiveEnv is the unit's reading of the world around it.
+type LiveEnv struct {
+	DayPhase string `json:"day_phase,omitempty"`
+	Biome    string `json:"biome,omitempty"`
+	Raining  bool   `json:"raining"`
+}
+
 // Live is what a unit's own /v1/state said at the last poll. It answers the
 // operator-only detail view; unlike Status it is never broadcast, because
 // it carries what the unit holds.
@@ -92,7 +104,9 @@ type Live struct {
 	Health, Hunger *float32
 	Inventory      []LiveItem
 	Armour         []LiveArmour
-	Effects        []LiveEffect
+	// Env carries the biome, which makes it operator-only like the rest.
+	Env     LiveEnv
+	Effects []LiveEffect
 	// PlayerID is the id the unit reports for its player, which is the one
 	// its record in the world save is filed under; empty until it has one.
 	PlayerID string
@@ -127,6 +141,7 @@ type stateResponse struct {
 		Inventory []LiveItem   `json:"inventory"`
 		Armour    []LiveArmour `json:"armour"`
 		Effects   []LiveEffect `json:"effects"`
+		Env       LiveEnv      `json:"env"`
 		UniqueID  string       `json:"unique_id"`
 	} `json:"state"`
 	Threat *struct {
@@ -256,6 +271,8 @@ func (p *Poller) tick(ctx context.Context) {
 			}
 			next.Dead = res.st.State.Dead
 			next.Effects = closedEffects(res.st.State.Effects)
+			env := closedEnv(res.st.State.Env)
+			next.DayPhase, next.Raining = env.DayPhase, env.Raining
 			next.Health = nil
 			if res.st.State.HealthKnown {
 				h := res.st.State.Health
@@ -273,13 +290,14 @@ func (p *Poller) tick(ctx context.Context) {
 			p.lives[i] = Live{
 				ID: p.units[i].ID, Online: true, Dead: s.Dead, At: now,
 				Health: next.Health, Hunger: next.Hunger,
-				Inventory: s.Inventory, Armour: s.Armour, Effects: s.Effects, PlayerID: s.UniqueID,
+				Inventory: s.Inventory, Armour: s.Armour, Effects: s.Effects, Env: env, PlayerID: s.UniqueID,
 			}
 		} else {
 			p.failures[i]++
 			if p.failures[i] >= offlineAfter {
 				// Stale health or task on an offline unit would read as live.
 				next.Online, next.Health, next.Hunger, next.Task, next.Dead, next.Effects = false, nil, nil, nil, false, nil
+				next.DayPhase, next.Raining, next.UnderAttack = "", false, false
 				p.positions[i] = Position{ID: p.units[i].ID}
 				p.lives[i] = Live{ID: p.units[i].ID}
 			}
@@ -314,7 +332,7 @@ func (p *Poller) tick(ctx context.Context) {
 // Seen moves every tick, so it is left out of the comparison or every poll
 // would count as a change.
 func sameShown(a, b Status) bool {
-	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role || a.UnderAttack != b.UnderAttack || !slices.Equal(a.Effects, b.Effects) {
+	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role || a.UnderAttack != b.UnderAttack || a.DayPhase != b.DayPhase || a.Raining != b.Raining || !slices.Equal(a.Effects, b.Effects) {
 		return false
 	}
 	if (a.Hunger == nil) != (b.Hunger == nil) || (a.Hunger != nil && *a.Hunger != *b.Hunger) {
@@ -411,6 +429,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	}
 	o.recent = res.st.Tasks.Recent
 	o.effects = res.st.State.Effects
+	o.dayPhase = closedEnv(res.st.State.Env).DayPhase
 	if t := res.st.Threat; t != nil {
 		o.threat = &Threat{Hostiles: min(max(t.Hostiles, 0), maxThreatCount), Players: min(max(t.Players, 0), maxThreatCount)}
 	}
