@@ -174,6 +174,12 @@ when no control has focus.
 Where units stood is operator-only: the view and the route answer 401 without
 a session, and signed out the page requests no positions.
 
+The map background is tinted by the phase of day (dawn, day, dusk or night), and
+the clock names it. Replay stores no clock, so the phase is read from the events
+of the window that recorded one: the tint follows the nearest such event within
+two minutes of the scrubber and is absent where none is near, rather than
+guessed. Rain and biome are not shown.
+
 Every two seconds the service reads each online, living unit in the overworld
 and stores a row in `minecraft.crew_position` (migration `V14`) only if the
 unit moved at least a quarter of a block or 30 seconds passed since its last
@@ -699,7 +705,7 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`, `fight_ended`. A `fight_ended` event closes a run of fight activity read from the growth of a warrior's totals: it is raised when they have held still for 10 s, or at once when a death is counted, and its payload has `swings`, `hits`, `damage` and an `outcome`. The unit sends counts and no verdict, so the outcome is inferred: `loss` if the unit died, else `win` if it landed any hit (it survived having hit something, not necessarily a kill), else `disengaged`; `other` when the fight was cut off by a restart, a lost field or the unit going offline. The mob that killed the unit is not reported. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`, `fight_ended`. A `fight_ended` event closes a run of fight activity read from the growth of a warrior's totals: it is raised when they have held still for 10 s, or at once when a death is counted, and its payload has `swings`, `hits`, `damage` and an `outcome`. The unit sends counts and no verdict, so the outcome is inferred: `loss` if the unit died, else `win` if it landed any hit (it survived having hit something, not necessarily a kill), else `disengaged`; `other` when the fight was cut off by a restart, a lost field or the unit going offline. The mob that killed the unit is not reported. Every event carries the unit's `day_phase` (dawn, day, dusk or night) as the poll that raised it saw it, in the public feed and in the stored payload, and none when the unit had no clock; the biome is never on an event. A `threat_high`
 event is raised once as the unit's reported hostile count (within 16 blocks,
 capped at 9 by the unit) reaches 3, and again only after it has fallen to 1 or
 fewer; its payload and text carry the counts and nothing else. Only the bit
@@ -850,7 +856,9 @@ connect.
 
 Starter panels: fleet health (gauge), task throughput, success rate, units
 with alerts, units by state over time, outcomes per unit, idle time, hunger,
-task durations, unit status, and recent alerts. Every chart has a table view.
+task durations, deaths by time of day, unit status, and recent alerts. Every chart has a table view.
+
+The **deaths by time of day** panel counts the `died` events of the window by the phase they carry, in time order. A death from a unit with no clock (an older unit, or before the server sent the time) is counted as unknown, so the bars add up to the deaths; the panel says so when the window has none. It draws from the public feed alone, so it shows no biome.
 
 **Edit layout** turns on per-panel buttons (move earlier or later, narrower or
 wider on the 12-column grid, shorter or taller, remove) and drag-and-drop;
