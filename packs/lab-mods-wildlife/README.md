@@ -105,7 +105,7 @@ Taming plays a burst of hearts and a chime. Drops come from `loot_tables/entitie
 Every animal has a cub form: component group `gameops:baby` (half-size hitbox, a third of the health, a token
 bite, `minecraft:ageable` growing up on the species' `grow_seconds`, faster when fed its taming food), entered by
 the events `gameops:as_baby` (console or script) and `minecraft:entity_born` (breeding, planned) and left by
-`gameops:grow_up`. The client draws a cub at half scale with a larger head (animation `baby`). The brown bear is
+`gameops:grow_up`. The client draws a cub at half scale (the client entity `scale` script). The crew camera's animation reader only knows rotation and position, so a bone-scale animation for a bigger head would break it; add that reader support first. The brown bear is
 drawn at 1.3 times the shared scale as an adult, with a matching hitbox.
 
 ## Known gaps
