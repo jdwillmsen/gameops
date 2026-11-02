@@ -31,8 +31,16 @@ var equipJS []byte
 //go:embed web/molang.js
 var molangJS []byte
 
+//go:embed web/quality.js
+var qualityJS []byte
+
 // A browser that stops reading must not pin a goroutine and a socket forever.
 const writeTimeout = 5 * time.Second
+
+// The page's quality levels each start at their own radius. Only this column
+// of the page's table is needed here: it sizes the first replay, before the
+// page can send its own radius. An explicit r still wins.
+var qualityRadius = map[string]int{"low": 2, "med": 3, "high": 4}
 
 // Mount adds the camera routes to the status API handler. It is the only way
 // the camera becomes reachable: nothing registers itself.
@@ -74,6 +82,12 @@ func Mount(base http.Handler, h *Hub) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		_, _ = w.Write(molangJS)
+	})
+	mux.HandleFunc("GET /v1/camera/quality.js", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(qualityJS)
 	})
 	mux.HandleFunc("GET /v1/camera/pack.png", func(w http.ResponseWriter, _ *http.Request) {
 		serveSheet(w, h.packData, "image/png", func(png, _ []byte) []byte { return png })
@@ -133,8 +147,11 @@ func (h *Hub) serveWS(w http.ResponseWriter, r *http.Request) {
 	defer v.Close()
 	// Parsed at 8 bits so the value is bounded where it enters, not only by
 	// SetRadius's clamp further in.
-	if r, err := strconv.ParseUint(r.URL.Query().Get("r"), 10, 8); err == nil {
+	query := r.URL.Query()
+	if r, err := strconv.ParseUint(query.Get("r"), 10, 8); err == nil {
 		v.SetRadius(int(r))
+	} else if radius, ok := qualityRadius[query.Get("q")]; ok {
+		v.SetRadius(radius)
 	}
 
 	// Accept refuses a cross-origin page by default; the viewer is served from
