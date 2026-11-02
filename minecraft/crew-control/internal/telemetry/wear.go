@@ -75,10 +75,14 @@ func wearOf(held int, heldKnown bool, inv []LiveItem, armour []LiveArmour) ([len
 // Wear is remembered per item, not per slot: a swap to another tool, or to an
 // empty hand, says nothing about the tool put away, so swapping back to it
 // is not news. Only repairing that same item re-arms it. The first reading
-// of a session sets a baseline, so a unit that starts with a worn tool is not
-// announced. Items sharing a name share a memory, which at worst hides a
+// of a session, including one after a reconnect, sets a baseline, so a unit
+// that starts or restarts with a worn tool is not announced. Items sharing a name share a memory, which at worst hides a
 // second worn copy of a tool already announced.
 func (t *track) observeWear(wear [len(wearSlots)]*int, items [len(wearSlots)]string, now time.Time) []Event {
+	if !t.wearSeeded {
+		t.baselineWear(wear, items)
+		return nil
+	}
 	var out []Event
 	for i, pct := range wear {
 		if pct == nil {
@@ -99,6 +103,17 @@ func (t *track) observeWear(wear [len(wearSlots)]*int, items [len(wearSlots)]str
 		t.rememberWear(i, items[i], b)
 	}
 	return out
+}
+
+// baselineWear starts a session's memory from what the unit holds and wears
+// now, announcing nothing, so a restart does not re-announce worn gear.
+func (t *track) baselineWear(wear [len(wearSlots)]*int, items [len(wearSlots)]string) {
+	t.wear, t.wearSeeded = [len(wearSlots)]map[string]int{}, true
+	for i, w := range wear {
+		if w != nil {
+			t.rememberWear(i, items[i], bucketOf(w))
+		}
+	}
 }
 
 // rememberWear records an item's bucket, forgetting items that are fine so

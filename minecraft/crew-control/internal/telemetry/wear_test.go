@@ -135,7 +135,7 @@ func TestAWornToolAtStartIsABaselineNotAnEvent(t *testing.T) {
 	}
 }
 
-func TestOfflineForgetsTheWearReading(t *testing.T) {
+func TestOfflineForgetsTheHeldReadingButARestartDoesNotReannounceWornGear(t *testing.T) {
 	var tr track
 	now := time.Unix(1000, 0)
 	worn := wearOnly(heldWear, pct(5))
@@ -147,9 +147,23 @@ func TestOfflineForgetsTheWearReading(t *testing.T) {
 	if tr.held != nil {
 		t.Fatalf("an offline unit keeps its held reading: %d", *tr.held)
 	}
-	// Back online with the same worn tool: a new session, so it is news.
-	if got := tr.observe(observation{online: true, wear: worn}, now.Add(2*time.Second)); len(got) != 2 || got[0].Kind != "online" || got[1].Kind != "tool_worn" {
+	// Back online with the same worn tool is a restart, not news: the
+	// reconnect sets a fresh baseline, as effects and fights do.
+	if got := tr.observe(observation{online: true, wear: worn}, now.Add(2*time.Second)); len(got) != 1 || got[0].Kind != "online" {
 		t.Fatalf("after reconnect: %v", kinds(got))
+	}
+	if got := tr.observe(observation{online: true, wear: worn}, now.Add(3*time.Second)); len(got) != 0 {
+		t.Fatalf("steady state after reconnect: %v", kinds(got))
+	}
+	// Wearing further after the baseline is announced as usual.
+	if got := tr.observe(observation{online: true, wear: wearOnly(heldWear, pct(4))}, now.Add(4*time.Second)); len(got) != 0 {
+		t.Fatalf("same bucket: %v", kinds(got))
+	}
+	tr.observe(observation{online: false}, now.Add(5*time.Second))
+	fine := wearOnly(heldWear, pct(60))
+	tr.observe(observation{online: true, wear: fine}, now.Add(6*time.Second))
+	if got := tr.observe(observation{online: true, wear: wearOnly(heldWear, pct(20))}, now.Add(7*time.Second)); len(got) != 1 || got[0].Kind != "tool_worn" {
+		t.Fatalf("wearing after a reconnect: %v", kinds(got))
 	}
 }
 

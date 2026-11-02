@@ -83,6 +83,9 @@ type track struct {
 	// wear is, per watched slot, the bucket of each worn item seen there,
 	// see bucketOf; fine items are absent.
 	wear [len(wearSlots)]map[string]int
+	// wearSeeded is false until the first reading of a session, which only
+	// sets the baseline in wear.
+	wearSeeded bool
 	// effects are the unit's status effects at the last poll, by id.
 	effects       map[int]heldEffect
 	effectsSeeded bool
@@ -160,11 +163,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		}
 	}()
 	if !t.seeded {
-		for i, w := range o.wear {
-			if w != nil {
-				t.rememberWear(i, o.wearItem[i], bucketOf(w))
-			}
-		}
+		t.baselineWear(o.wear, o.wearItem)
 		t.observeEffects(o.effects, now)
 		t.underAttack = o.threat != nil && o.threat.Hostiles >= threatHigh
 		t.fightPrev = o.fight
@@ -180,7 +179,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		} else {
 			add("offline", "crit", "went offline")
 			t.taskID, t.template, t.stuck, t.lowHP, t.lowFood = "", "", false, false, false
-			t.wear = [len(wearSlots)]map[string]int{}
+			t.wear, t.wearSeeded = [len(wearSlots)]map[string]int{}, false
 			t.effects, t.effectsSeeded = nil, false
 			t.underAttack = false
 			out = append(out, t.observeFight(nil, now)...)
