@@ -124,7 +124,11 @@ var roles = map[string]bool{"vanguard": true, "striker": true, "ranger": true, "
 
 // Only the fields the summary needs; crew's own types are internal to crew.
 type stateResponse struct {
-	Unit struct {
+	// Version is the crew build, SessionID the unit's current connection to
+	// the game server; an older unit sends no session.
+	Version   string `json:"version"`
+	SessionID string `json:"session_id"`
+	Unit      struct {
 		Role string `json:"role"`
 	} `json:"unit"`
 	State struct {
@@ -440,6 +444,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	}
 	o.wear, o.wearItem = wearOf(res.st.State.HeldSlot, res.st.State.HeldKnown, res.st.State.Inventory, res.st.State.Armour)
 	for _, e := range p.tracks[i].observe(o, now) {
-		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i]})
+		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i],
+			Session: res.st.SessionID, Version: res.st.Version})
 	}
 }
