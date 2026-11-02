@@ -3,6 +3,7 @@
 import { buildRequest, confirmText, outcome, MAX_UNITS } from './bulk.js';
 import { GATHER_ITEMS } from './state.js';
 import { h } from './kit/dom.js';
+import { openDialog } from './kit/dialog.js';
 
 // host: { api(method, path, body), name(id), expired(), done(outcome) }
 // Returns the overlay element so the caller's Esc handling can remove it.
@@ -65,13 +66,18 @@ export function openBulk(host, action, ids, close) {
     host.done(outcome(res.data && res.data.results, nameOf));
   });
 
-  const card = h('div', { className: 'palette bk', role: 'dialog', 'aria-modal': 'true', 'aria-label': action === 'recall' ? 'Recall units' : 'Assign a task' },
-    h('h2', { textContent: action === 'recall' ? 'Recall units' : 'Assign a task' }),
-    h('p', { className: 'bk-who', textContent: `${ids.length} selected (at most ${MAX_UNITS}): ${names.join(', ')}` }), form);
-  const overlay = h('div', { id: 'overlay' }, card);
-  overlay.addEventListener('mousedown', ev => { if (ev.target === overlay) close(); });
-  document.body.append(overlay);
   refresh();
-  (form.querySelector('input, select') || cancel).focus();
-  return overlay;
+  const dialog = openDialog({
+    label: action === 'recall' ? 'Recall units' : 'Assign a task',
+    class: 'bk',
+    content: [
+      h('h2', { textContent: action === 'recall' ? 'Recall units' : 'Assign a task' }),
+      h('p', { className: 'bk-who', textContent: `${ids.length} selected (at most ${MAX_UNITS}): ${names.join(', ')}` }),
+      form,
+    ],
+    focus: form.querySelector('input, select') || cancel,
+    onClose: close,
+  });
+  dialog.el.close = dialog.close;
+  return dialog.el;
 }
