@@ -23,6 +23,7 @@ const (
 	RuleSilent   = "unit_silent"
 	RuleToolWorn = "tool_breaking"
 	RuleHarmful  = "harmful_effect"
+	RuleAttack   = "under_attack"
 )
 
 const (
@@ -155,6 +156,8 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 
 		harmful := harmfulOf(s)
 		set(RuleHarmful, s, s.Online && len(harmful) > 0, SevWarn, "harmful effect: "+strings.Join(harmful, ", "))
+
+		set(RuleAttack, s, s.Online && s.UnderAttack, SevWarn, "several hostile mobs nearby")
 
 		seen := s.Seen
 		if seen.IsZero() {
@@ -295,7 +298,7 @@ func (e *Engine) Mute(id string, d time.Duration, now time.Time) bool {
 	return true
 }
 
-var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true, RuleToolWorn: true, RuleHarmful: true}
+var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true, RuleToolWorn: true, RuleHarmful: true, RuleAttack: true}
 
 // SnoozeRule mutes every alert of one rule until now+d, now and as they
 // fire; d <= 0 lifts it. It reports false for a rule that does not exist, so

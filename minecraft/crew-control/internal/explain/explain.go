@@ -19,6 +19,7 @@ const (
 	ClassGeometryTrap = "geometry_trap"
 	ClassLowHunger    = "low_hunger"
 	ClassLowHealth    = "low_health"
+	ClassCombat       = "combat"
 )
 
 // Reason codes the rules look for on a failed task.
@@ -35,6 +36,9 @@ const (
 	// vitalsWindow: how far back low food or health still counts as
 	// preceding a stall.
 	vitalsWindow = 2 * time.Minute
+	// combatWindow: how far back a threat_high still counts as preceding a
+	// failure. A fight outlasts a vitals reading, so it is looked for longer.
+	combatWindow = 3 * time.Minute
 	// kitWindow: how far back a failed kit pickup can still explain a
 	// missing tool.
 	kitWindow = 30 * time.Minute
@@ -156,6 +160,9 @@ func classify(f unitlog.Event, before []unitlog.Event, byID map[int64]unitlog.Ev
 				"repeated failed paths from an unchanged position: a geometry trap, cause unknown"}, true
 		}
 	}
+	if v, ok := combat(f, before); ok {
+		return v, true
+	}
 	return vitals(f, before)
 }
 
@@ -220,6 +227,16 @@ func sessionLost(f unitlog.Event, before []unitlog.Event, byID map[int64]unitlog
 	}
 	return verdict{ClassSessionLost, "session_lost.session_error", []int64{c.ID, f.ID},
 		"the game session ended right after a session error"}, true
+}
+
+// combat is tried before vitals: a unit hurt in a fight has low health
+// because of the fight, and the fight is the cause worth reporting.
+func combat(f unitlog.Event, before []unitlog.Event) (verdict, bool) {
+	c, ok := lastBefore(f, before, combatWindow, unitlog.KindThreatHigh)
+	if !ok {
+		return verdict{}, false
+	}
+	return verdict{ClassCombat, "combat.threat_high", []int64{c.ID, f.ID}, "several hostile mobs were close just before the task failed"}, true
 }
 
 func vitals(f unitlog.Event, before []unitlog.Event) (verdict, bool) {
