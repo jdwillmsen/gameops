@@ -69,3 +69,14 @@ test('the confirm label defaults to Confirm', async () => {
   btn(overlay(), 'Cancel').click();
   await answer;
 });
+
+test('no key reaches the global handler while the question is open', async () => {
+  const { answer } = ask();
+  let leaked = 0;
+  doc.body.addEventListener('keydown', () => { leaked++; });
+  const o = overlay();
+  for (const key of ['?', '/', 'w', 'j', '1', 'k']) o.dispatch('keydown', { key, ctrlKey: key === 'k' });
+  assert.equal(leaked, 0);
+  btn(o, 'Cancel').click();
+  await answer;
+});

@@ -17,5 +17,10 @@ export function confirmDialog(opts) {
       focus: cancel,
       onClose: () => resolve(answer),
     });
+    // window.confirm froze every shortcut while it was open; the global key
+    // handler would otherwise open help, the palette (a second confirm) or
+    // change the view behind this question. Enter and Space still press the
+    // focused button, since only propagation stops, not the default action.
+    dialog.el.addEventListener('keydown', ev => ev.stopPropagation());
   });
 }

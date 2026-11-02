@@ -25,3 +25,11 @@ test('view stylesheets use the colour tokens instead of repeating their values',
   const literal = /#(?:111|1b1b1b|ddd|333|6fd08c|f0b040|ff5d5d|5fd0ff|2a2f2c)\b(?![0-9a-f])/i;
   assert.deepEqual(sheets.filter(f => literal.test(read(f))), []);
 });
+
+// confirmDialog returns a Promise, which is always truthy: a call site that
+// forgets the await would act on every answer, Cancel included.
+test('every confirmDialog call site awaits the answer', () => {
+  const calls = [...files('.', '.js')].flatMap(f => read(f).split('\n').filter(l => /confirmDialog\(/.test(l) && !/import /.test(l)).map(l => [f, l]));
+  assert.ok(calls.length >= 2);
+  assert.deepEqual(calls.filter(([, l]) => !/await confirmDialog\(/.test(l)), []);
+});
