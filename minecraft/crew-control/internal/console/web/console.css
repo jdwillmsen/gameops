@@ -77,7 +77,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 #side { width: 380px; flex: none; display: flex; flex-direction: column; background: #151815; border-right: 1px solid var(--line); min-height: 0; }
 #side .scroll { flex: 1; overflow-y: auto; min-height: 120px; }
 #roster { width: 100%; border-collapse: collapse; font-size: 12px; }
-#roster th { white-space: nowrap; position: sticky; top: 0; background: #1b1f1c; text-align: left; padding: 4px 6px; cursor: pointer; user-select: none; font-weight: 600; opacity: .8; }
+#roster th { white-space: nowrap; position: sticky; top: 0; background: #1b1f1c; text-align: left; padding: 0; user-select: none; font-weight: 600; opacity: .8; }
+#roster th button { display: block; width: 100%; padding: 4px 6px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 #roster td { padding: 3px 6px; border-top: 1px solid #1f241f; white-space: nowrap; }
 #roster tr { cursor: pointer; }
 #roster tbody tr:hover { background: #1f261f; }
