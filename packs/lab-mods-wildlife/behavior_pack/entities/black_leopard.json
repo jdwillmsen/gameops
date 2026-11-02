@@ -388,9 +388,25 @@
         }
       },
       "minecraft:entity_born": {
+        "sequence": [
+          {
+            "add": {
+              "component_groups": [
+                "gameops:baby",
+                "gameops:wild"
+              ]
+            }
+          }
+        ]
+      },
+      "gameops:on_orphan": {
         "add": {
           "component_groups": [
-            "gameops:baby",
+            "gameops:tamed"
+          ]
+        },
+        "remove": {
+          "component_groups": [
             "gameops:wild"
           ]
         }
