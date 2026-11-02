@@ -12,6 +12,7 @@ import { initExplorer } from '/static/explorer-ui.js';
 import { initLedgerGraph } from '/static/graph/ledger-ui.js';
 import { initTimeline } from '/static/timeline-ui.js';
 import { initDirector } from '/static/director-ui.js';
+import { openStream } from '/static/kit/stream.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -301,69 +302,60 @@ function onUnits(list) {
   squads.onUnits();
 }
 
-const BACKOFF_MIN = 2000, BACKOFF_MAX = 30000;
-let backoff = BACKOFF_MIN;
 let source = null;
-let retryTimer = null;
 
 function connect() {
-  const es = source = new EventSource('/v1/units/stream');
-  es.addEventListener('units', ev => {
-    backoff = BACKOFF_MIN;
-    $('link').textContent = '';
-    onUnits(JSON.parse(ev.data));
+  source = openStream('/v1/units/stream', {
+    units(ev) {
+      $('link').textContent = '';
+      onUnits(JSON.parse(ev.data));
+    },
+    events(ev) {
+      const list = JSON.parse(ev.data) || [];
+      director.onEvents(list, false);
+      ops.onEvents(list, false);
+      overview.onEvents(list, false);
+      explorer.onEvents(list, false);
+      dash.onEvents(list);
+    },
+    log(ev) {
+      const e = JSON.parse(ev.data);
+      director.onEvents([e], true);
+      ops.onEvents([e], true);
+      overview.onEvents([e], true);
+      explorer.onEvents([e], true);
+      dash.onEvents([e]);
+    },
+    positions(ev) {
+      const list = JSON.parse(ev.data) || [];
+      ops.onPositions(list);
+      overview.onPositions(list);
+    },
+    work(ev) {
+      const w = JSON.parse(ev.data);
+      work.set(w.unit, w.items || []);
+      if (w.unit === state.unit) renderWork();
+    },
+    jobs(ev) {
+      jobs = JSON.parse(ev.data).jobs || [];
+      renderJobs();
+      jobGraph.onJobs();
+      timeline.onJobs();
+    },
+  }, {
+    min: 2000,
+    max: 30000,
+    onError() {
+      $('link').textContent = 'status offline';
+      if (operator) checkSession();
+    },
   });
-  es.addEventListener('events', ev => {
-    const list = JSON.parse(ev.data) || [];
-    director.onEvents(list, false);
-    ops.onEvents(list, false);
-    overview.onEvents(list, false);
-    explorer.onEvents(list, false);
-    dash.onEvents(list);
-  });
-  es.addEventListener('log', ev => {
-    const e = JSON.parse(ev.data);
-    director.onEvents([e], true);
-    ops.onEvents([e], true);
-    overview.onEvents([e], true);
-    explorer.onEvents([e], true);
-    dash.onEvents([e]);
-  });
-  es.addEventListener('positions', ev => {
-    const list = JSON.parse(ev.data) || [];
-    ops.onPositions(list);
-    overview.onPositions(list);
-  });
-  es.addEventListener('work', ev => {
-    const w = JSON.parse(ev.data);
-    work.set(w.unit, w.items || []);
-    if (w.unit === state.unit) renderWork();
-  });
-  es.addEventListener('jobs', ev => {
-    jobs = JSON.parse(ev.data).jobs || [];
-    renderJobs();
-    jobGraph.onJobs();
-    timeline.onJobs();
-  });
-  es.onerror = () => {
-    if (source !== es) return;
-    $('link').textContent = 'status offline';
-    if (operator) checkSession();
-    // The browser retries a dropped stream itself, but gives up for good after
-    // a non-200 answer (client cap, gateway restart), so those are rebuilt.
-    if (es.readyState !== EventSource.CLOSED) return;
-    es.close();
-    retryTimer = setTimeout(connect, backoff);
-    backoff = Math.min(backoff * 2, BACKOFF_MAX);
-  };
 }
 
 // A stream is signed in or not for its whole life, so a change of session
 // needs a new one.
 function reconnect() {
-  clearTimeout(retryTimer);
   if (source) source.close();
-  backoff = BACKOFF_MIN;
   connect();
 }
 
