@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createFeedView, perFrame } from './feedview.js';
+import { createFeedView, perFrame, timeText } from './feedview.js';
 
 const box = () => ({ calls: 0, kids: [], replaceChildren(...k) { this.calls++; this.kids = k; } });
 
@@ -41,4 +41,16 @@ test('perFrame coalesces a burst into one call', () => {
   f();
   queued();
   assert.equal(runs, 2);
+});
+
+test('timeText formats the RFC 3339 stamps events arrive with', () => {
+  const at = '2026-11-02T10:11:12Z';
+  const want = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(at));
+  assert.equal(timeText(at), want);
+  assert.equal(timeText(Date.parse(at)), want);
+  assert.equal(timeText(new Date(at)), want);
+});
+
+test('timeText renders blank, not a throw, for a missing or invalid stamp', () => {
+  for (const bad of [undefined, null, '', 'not a time']) assert.equal(timeText(bad), '');
 });

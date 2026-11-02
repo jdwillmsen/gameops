@@ -4,7 +4,13 @@
 // shown, and an unchanged list touches no DOM at all.
 
 const clock = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-export const timeText = at => clock.format(at);
+// Events carry RFC 3339 strings, but DateTimeFormat.format only takes a Date or
+// a number and throws on a string; an unparseable stamp must not take the
+// whole feed down, so it renders blank.
+export const timeText = at => {
+  const t = at instanceof Date ? at.getTime() : typeof at === 'number' ? at : Date.parse(at);
+  return Number.isFinite(t) ? clock.format(t) : '';
+};
 
 export function createFeedView(box, make) {
   const cache = new Map();
