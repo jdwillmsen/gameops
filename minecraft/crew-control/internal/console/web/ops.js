@@ -12,6 +12,7 @@ import { openBulk } from '/static/bulk-ui.js';
 import { createGovernor, lowerBudget } from '/static/governor.js';
 import { openDialog } from '/static/kit/dialog.js';
 import { createToasts } from '/static/kit/toast.js';
+import { sortCell, markSort } from '/static/kit/table.js';
 
 const $ = id => document.getElementById(id);
 
@@ -99,23 +100,16 @@ export function initOps(host) {
     const rows = sortUnits(list(), prefs.sort, prefs.desc);
     const cols = [['unit', '#'], ['name', 'Unit'], ['health', 'HP'], ['hunger', 'Food'], ['task', 'Task'], ['alerts', '!']];
     const op = host.operator();
+    const resort = key => {
+      prefs.desc = prefs.sort === key ? !prefs.desc : false;
+      prefs.sort = key;
+      save();
+      renderRoster();
+    };
     const head = el('tr', {}, ...(op ? [el('th')] : []), ...cols.map(([key, label]) => {
-      const th = el('th', { textContent: label + (prefs.sort === key ? (prefs.desc ? ' v' : ' ^') : ''), tabIndex: 0 });
+      const th = sortCell({ key, label, onSort: resort, arrows: ['^', 'v'] });
       th.dataset.sort = key;
-      th.setAttribute('aria-sort', prefs.sort === key ? (prefs.desc ? 'descending' : 'ascending') : 'none');
-      const resort = () => {
-        prefs.desc = prefs.sort === key ? !prefs.desc : false;
-        prefs.sort = key;
-        save();
-        renderRoster();
-      };
-      th.addEventListener('click', resort);
-      th.addEventListener('keydown', ev => {
-        if (ev.key !== 'Enter' && ev.key !== ' ') return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        resort();
-      });
+      markSort(th, prefs.sort === key, prefs.desc ? 'desc' : 'asc');
       return th;
     }));
     const idx = new Map(host.order().map((id, i) => [id, i + 1]));
@@ -156,7 +150,8 @@ export function initOps(host) {
       return tr;
     });
     const had = box.contains(document.activeElement) ? document.activeElement : null;
-    const keep = had && (had.dataset.sort ? `th[data-sort="${had.dataset.sort}"]` : had.dataset.unit ? `tr[data-unit="${had.dataset.unit}"]` : '');
+    const hadHead = had && had.closest('th[data-sort]');
+    const keep = had && (hadHead ? `th[data-sort="${hadHead.dataset.sort}"] button` : had.dataset.unit ? `tr[data-unit="${had.dataset.unit}"]` : '');
     box.replaceChildren(el('thead', {}, head), el('tbody', {}, ...body));
     // Rebuilding drops keyboard focus; put it back on the equivalent header or row.
     if (keep) box.querySelector(keep)?.focus();

@@ -12,3 +12,4 @@
 .kit-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
 .kit-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 10px; color: inherit; }
 .kit-tab.selected { border-bottom-color: var(--focus); }
+.kit-arrow { margin-left: .25em; opacity: .8; }

@@ -4,6 +4,7 @@
 // 2 s update writes the few cells that changed and never rebuilds the list.
 import { Sparkline, StatTile } from './charts/spark.js';
 import { isTyping } from './state.js';
+import { sortCell, markSort, orderChildren } from './kit/table.js';
 import { statusRole } from './squad.js';
 import { createInsightStrip } from './insights-ui.js';
 import {
@@ -181,14 +182,13 @@ export function initOverview(host) {
   const head = el('div', { className: 'ov-head', role: 'row' });
   const heads = new Map();
   for (const [key, label] of COLS) {
-    const cell = el('div', { className: `ov-h ov-h-${key || 'trend'}`, role: 'columnheader' });
     if (key && key !== 'pos') {
-      const b = el('button', { type: 'button' }, el('span', { textContent: label }), el('span', { className: 'ov-arrow' }));
-      b.addEventListener('click', () => setSort(key, false));
-      cell.append(b);
+      const cell = sortCell({
+        tag: 'div', role: 'columnheader', className: `ov-h ov-h-${key}`, key, label, arrowClass: 'ov-arrow', arrows: ['↑', '↓'], onSort: k => setSort(k, false),
+      });
       heads.set(key, cell);
-    } else cell.textContent = label;
-    head.append(cell);
+      head.append(cell);
+    } else head.append(el('div', { className: `ov-h ov-h-${key || 'trend'}`, role: 'columnheader', textContent: label }));
   }
   const body = el('div', { className: 'ov-body', role: 'rowgroup' });
   const empty = el('p', { className: 'ov-empty', hidden: true });
@@ -395,14 +395,13 @@ export function initOverview(host) {
     }
     // The row under the pointer would move away mid-click if a changing
     // value re-sorted the list, so order waits for the pointer to leave.
-    if (reorder || !hovering || !painted) orderRows(shown);
+    if (reorder || !hovering || !painted) orderChildren(body, shown.map(r => entries.get(r.id).row));
     painted = true;
 
-    for (const [key, cell] of heads) cell.setAttribute('aria-sort', key === prefs.sort ? (prefs.dir === 'asc' ? 'ascending' : 'descending') : 'none');
+    for (const [key, cell] of heads) markSort(cell, key === prefs.sort, prefs.dir);
     sortSel.value = prefs.sort;
     dirBtn.textContent = prefs.dir === 'asc' ? '↑' : '↓';
     dirBtn.setAttribute('aria-label', prefs.dir === 'asc' ? 'Ascending' : 'Descending');
-    for (const [key, cell] of heads) cell.querySelector('.ov-arrow').textContent = key === prefs.sort ? (prefs.dir === 'asc' ? '↑' : '↓') : '';
 
     const filteredOn = isFiltered(prefs.filter);
     const sub = sum.events ? ` · done and failed count the last ${sum.events} events${sum.since ? ` since ${new Date(sum.since).toLocaleTimeString([], { hour12: false })}` : ''}` : '';
@@ -413,20 +412,6 @@ export function initOverview(host) {
     empty.hidden = !(all.length && !shown.length);
     emptyText.textContent = 'No unit matches the filters.';
     measure('fleet-render', t0);
-  }
-
-  // Moves only rows that are out of place; a list already in order costs no
-  // DOM writes, and a focused row keeps focus through a move.
-  function orderRows(shown) {
-    const active = document.activeElement;
-    let ref = body.firstElementChild;
-    for (const r of shown) {
-      const node = entries.get(r.id).row;
-      while (ref && ref !== node && ref.hidden) ref = ref.nextElementSibling;
-      if (ref === node) ref = ref.nextElementSibling;
-      else body.insertBefore(node, ref);
-    }
-    if (active && active !== document.activeElement && body.contains(active)) active.focus({ preventScroll: true });
   }
 
   let kindSig = '';

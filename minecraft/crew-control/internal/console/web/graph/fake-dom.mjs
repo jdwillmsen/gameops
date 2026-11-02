@@ -75,6 +75,15 @@ export class FakeEl {
     this.children = [];
     this.append(...kids);
   }
+  // A node that moves loses focus, as in a browser.
+  insertBefore(node, ref) {
+    if (node.parent) this.doc.detached(node);
+    const [n] = this.adopt([node]);
+    const at = ref ? this.children.indexOf(ref) : -1;
+    if (at < 0) this.children.push(n);
+    else this.children.splice(at, 0, n);
+    return n;
+  }
   removeChild(node) { node.remove(); }
   remove() {
     if (!this.parent) return;

@@ -2,11 +2,12 @@
 // and paints. Signed in, the history comes from the server and a live tail
 // streams new rows; signed out, the same filter runs over the public feed the
 // page already holds, which carries no coordinates.
-import { openStream } from '/static/kit/stream.js';
+import { openStream } from './kit/stream.js';
+import { createTable } from './kit/table.js';
 import {
   KINDS, SEVERITIES, RANGES, PAGE, ROW_CAP, severityOf, readFilter, formatFilter, toServerQuery, emptyFilter, isDefault, chips, dropChip,
   toggleIn, fromPublic, filterAndSort, mergeRows, nextSort, tailsToTop, detailText, matchRow, sortRows,
-} from '/static/explorer.js';
+} from './explorer.js';
 
 function el(tag, props = {}, ...kids) {
   const e = document.createElement(tag);
@@ -222,10 +223,33 @@ export function initExplorer(host) {
     parts.hint = el('span', { className: 'ex-hint' });
     parts.saved = el('span', { className: 'ex-saved' }, parts.views, parts.del, parts.name, parts.save, parts.hint);
     parts.note = el('span', { className: 'ex-note', role: 'status' });
-    parts.table = el('table', { className: 'ex-table' });
+    parts.grid = createTable({
+      label: 'Events',
+      className: 'ex-table',
+      rowKey: r => r.id,
+      onSort: key => change(nextSort(filter, key)),
+      onActivate: r => { open.has(r.id) ? open.delete(r.id) : open.add(r.id); paint(); },
+      rowClass: r => 'ex-row ' + r.severity,
+      detail: r => (open.has(r.id) ? fullText(r) : null),
+      detailClass: 'ex-full',
+      messages: { loading: 'Loading...', empty: 'No events yet.', filtered: 'No events match these filters.' },
+      noteClass: 'ex-empty',
+      errorClass: 'err',
+      columns: [
+        { key: 'at', label: 'Time', sortable: true, className: 'ex-time', text: r => clock(r.at) },
+        {
+          key: 'severity', label: 'Level', sortable: true, className: 'ex-level', sig: r => r.severity,
+          node: r => { const sev = severityOf(r.severity); return [el('span', { className: 'ico', textContent: sev.icon, 'aria-hidden': 'true' }), sev.label]; },
+        },
+        { key: 'unit', label: 'Unit', sortable: true, text: r => { const name = (host.statuses.get(r.unit) || {}).name; return name ? `${name} (${r.unit})` : r.unit; } },
+        { key: 'kind', label: 'Kind', sortable: true, text: r => r.kind },
+        { key: 'details', label: 'Details', className: 'ex-detail', text: detailText },
+      ],
+    });
+    parts.table = parts.grid.el;
     parts.more = el('button', { type: 'button', className: 'ex-more', textContent: 'Load more' });
     parts.more.addEventListener('click', () => load(true));
-    parts.empty = el('p', { className: 'ex-empty' });
+    parts.empty = parts.grid.note;
     root.replaceChildren(
       el('div', { className: 'ex-bar' }, parts.search, parts.range, parts.custom, parts.unit, parts.kind, parts.sev),
       el('div', { className: 'ex-bar' }, parts.chips, parts.reset, parts.link),
@@ -270,45 +294,13 @@ export function initExplorer(host) {
     parts.views.replaceChildren(el('option', { value: '', textContent: views.length ? 'Saved views...' : 'No saved views' }), ...views.map(v => el('option', { value: v.id, textContent: v.name })));
   }
 
-  const HEADS = [['at', 'Time'], ['severity', 'Level'], ['unit', 'Unit'], ['kind', 'Kind']];
+  // The pos is the operator's: the public feed never carries it.
+  const fullText = r => JSON.stringify({ id: r.id, task: r.task, job: r.job, ...(signedIn() && r.pos ? { pos: r.pos } : {}), payload: r.payload }, null, 2);
 
   function paint() {
     if (!mounted) return;
     paintBar();
-    const op = signedIn();
-    const head_ = el('tr', {}, ...HEADS.map(([key, label]) => {
-      const th = el('th', { scope: 'col' });
-      const b = el('button', { type: 'button', textContent: label + (filter.sort === key ? (filter.dir === 'asc' ? ' ▲' : ' ▼') : '') });
-      th.setAttribute('aria-sort', filter.sort === key ? (filter.dir === 'asc' ? 'ascending' : 'descending') : 'none');
-      b.addEventListener('click', () => change(nextSort(filter, key)));
-      th.append(b);
-      return th;
-    }), el('th', { scope: 'col', textContent: 'Details' }));
-    const body = el('tbody');
-    for (const r of rows) {
-      const sev = severityOf(r.severity);
-      const tr = el('tr', { className: 'ex-row ' + r.severity, tabIndex: 0 });
-      tr.setAttribute('aria-expanded', String(open.has(r.id)));
-      const toggle = () => { open.has(r.id) ? open.delete(r.id) : open.add(r.id); paint(); };
-      tr.addEventListener('click', toggle);
-      tr.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } });
-      const name = (host.statuses.get(r.unit) || {}).name;
-      tr.append(
-        el('td', { className: 'ex-time', textContent: clock(r.at) }),
-        el('td', { className: 'ex-level' }, el('span', { className: 'ico', textContent: sev.icon, 'aria-hidden': 'true' }), sev.label),
-        el('td', { textContent: name ? `${name} (${r.unit})` : r.unit }),
-        el('td', { textContent: r.kind }),
-        el('td', { className: 'ex-detail', textContent: detailText(r) }),
-      );
-      body.append(tr);
-      if (open.has(r.id)) {
-        const full = { id: r.id, task: r.task, job: r.job, ...(op && r.pos ? { pos: r.pos } : {}), payload: r.payload };
-        body.append(el('tr', { className: 'ex-full' }, el('td', { colSpan: 5 }, el('pre', { textContent: JSON.stringify(full, null, 2) }))));
-      }
-    }
-    parts.table.replaceChildren(el('thead', {}, head_), body);
-    parts.empty.textContent = loading ? 'Loading...' : error || (rows.length ? '' : isDefault(filter) ? 'No events yet.' : 'No events match these filters.');
-    parts.empty.className = 'ex-empty' + (error ? ' err' : '');
+    parts.grid.update({ rows, sort: filter.sort, dir: filter.dir, loading, error, filtered: !isDefault(filter) });
     parts.more.hidden = !next;
     parts.more.disabled = loading;
   }
