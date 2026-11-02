@@ -45,6 +45,16 @@ test('queries read the filter', () => {
   assert.equal(PANELS['recent-events'].query(none).rows.length, 0);
 });
 
+test('the deaths panel plots the four phases and says nothing when there were no deaths', () => {
+  const c = ctx();
+  assert.deepEqual(PANELS['deaths-by-phase'].query(c), { categories: [], series: [{ key: 'deaths', name: 'Deaths', values: [] }], total: 0 });
+  c.data.onEvents([ev(4, 11, 'c', 'died', { level: 'crit', day_phase: 'night' }), ev(5, 12, 'a', 'died', { level: 'crit', day_phase: 'night' })]);
+  const m = PANELS['deaths-by-phase'].query(c);
+  assert.deepEqual(m.categories, ['Dawn', 'Day', 'Dusk', 'Night']);
+  assert.deepEqual(m.series[0].values, [0, 0, 0, 2]);
+  assert.ok(!JSON.stringify(m).includes('biome'));
+});
+
 test('a single point is padded so a line has a width', () => {
   const m = twoPoints({ x: [5000], series: [{ key: 'k', name: 'K', values: [3] }] });
   assert.deepEqual(m.x, [4000, 5000]);
