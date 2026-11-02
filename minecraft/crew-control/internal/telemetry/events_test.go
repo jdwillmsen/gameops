@@ -274,7 +274,7 @@ func TestFinishedTaskEventsCarryTemplateAndDuration(t *testing.T) {
 func TestPollerStampsEventsWithTheUnitsSessionAndVersion(t *testing.T) {
 	running := strings.Replace(stateKnownWithTask, `"version":"dev"`, `"version":"1.79.0","session_id":"6a36f7ecb575"`, 1)
 	failed := strings.Replace(running, `"current":{"id":"run"`, `"current":null,"gone":{"id":"run"`, 1)
-	failed = strings.Replace(failed, `"recent":[]`, `"recent":[{"id":"run","state":"failed","reason":"no axe in inventory","reason_code":"missing_tool"}]`, 1)
+	failed = strings.Replace(failed, `"recent":[]`, `"recent":[{"id":"run","state":"failed","reason":"no axe in inventory","reason_code":"missing_tool","created":"2026-10-19T10:00:00Z","updated":"2026-10-19T10:00:02.5Z"}]`, 1)
 	unit := newFakeUnit(t, running)
 	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, 20*time.Millisecond)
 	got := make(chan []Born, 64)
@@ -302,5 +302,8 @@ func TestPollerStampsEventsWithTheUnitsSessionAndVersion(t *testing.T) {
 	}
 	if ev.Session != "6a36f7ecb575" || ev.Version != "1.79.0" {
 		t.Fatalf("session %q version %q", ev.Session, ev.Version)
+	}
+	if ev.ReasonCode != "missing_tool" || ev.Took != 2500*time.Millisecond {
+		t.Fatalf("reason code %q took %v", ev.ReasonCode, ev.Took)
 	}
 }
