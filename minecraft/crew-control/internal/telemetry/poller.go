@@ -151,6 +151,7 @@ type stateResponse struct {
 	Tasks struct {
 		Current *TaskSummary `json:"current"`
 		Recent  []recentTask `json:"recent"`
+		Fight   *fightWire   `json:"fight"`
 	} `json:"tasks"`
 }
 
@@ -429,6 +430,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	}
 	o.recent = res.st.Tasks.Recent
 	o.effects = res.st.State.Effects
+	o.fight = res.st.Tasks.Fight.totals()
 	o.dayPhase = closedEnv(res.st.State.Env).DayPhase
 	if t := res.st.Threat; t != nil {
 		o.threat = &Threat{Hostiles: min(max(t.Hostiles, 0), maxThreatCount), Players: min(max(t.Players, 0), maxThreatCount)}

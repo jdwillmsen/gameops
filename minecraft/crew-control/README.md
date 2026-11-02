@@ -699,7 +699,7 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`, `fight_ended`. A `fight_ended` event closes a run of fight activity read from the growth of a warrior's totals: it is raised when they have held still for 10 s, or at once when a death is counted, and its payload has `swings`, `hits`, `damage` and an `outcome`. The unit sends counts and no verdict, so the outcome is inferred: `loss` if the unit died, else `win` if it landed any hit (it survived having hit something, not necessarily a kill), else `disengaged`; `other` when the fight was cut off by a restart, a lost field or the unit going offline. The mob that killed the unit is not reported. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
 event is raised once as the unit's reported hostile count (within 16 blocks,
 capped at 9 by the unit) reaches 3, and again only after it has fallen to 1 or
 fewer; its payload and text carry the counts and nothing else. Only the bit
@@ -893,6 +893,7 @@ the units' own.
 | `crew_fleet_task_duration_seconds` | histogram | `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
 | `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
 | `crew_fleet_unit_deaths_total` | counter | `unit` | Deaths a poll saw |
+| `crew_fleet_unit_swings_total`, `crew_fleet_unit_hits_landed_total`, `crew_fleet_unit_damage_taken_total` | counter | `unit` | A warrior's swings, landed hits and health lost, summed from the growth of `tasks.fight.total` in its state between polls. The first reading, one after the unit was offline or reported no fight, and one after a restart (any total going down) only set a baseline, so a unit's history from before crew-control watched is never counted and growth across such a gap is lost. Hits are an upper bound when several warriors fight one target |
 | `crew_fleet_deaths_by_day_phase_total` | counter | `phase` | The same deaths by the unit's own day phase when found dead: `dawn`, `day`, `dusk`, `night`, or `unknown` for a unit with no clock (an older unit, or before the server sent the time) |
 | `crew_fleet_unit_stuck_total` | counter | `unit` | Stalls (no progress for 90 s on a running task), once each |
 | `crew_fleet_units` | gauge | `state` | Units per state at the last poll; the five states sum to the roster |

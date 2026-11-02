@@ -85,15 +85,21 @@ type Fleet struct {
 	hunger     *prometheus.GaugeVec
 	toolPct    *prometheus.GaugeVec
 	deathsAt   *prometheus.CounterVec
+	swings     *prometheus.CounterVec
+	hits       *prometheus.CounterVec
+	damageTkn  *prometheus.CounterVec
 
 	mu   sync.Mutex
 	last time.Time
+	// fights is each unit's fight totals at its last poll, the baseline the
+	// next poll's growth is measured from.
+	fights map[string]telemetry.FightTotals
 }
 
 // New returns a Fleet for the given unit ids. Events from any other unit are
 // dropped, so the unit label is the roster and cannot outgrow it.
 func New(unitIDs []string) *Fleet {
-	f := &Fleet{reg: prometheus.NewRegistry(), units: make(map[string]bool, len(unitIDs))}
+	f := &Fleet{reg: prometheus.NewRegistry(), units: make(map[string]bool, len(unitIDs)), fights: map[string]telemetry.FightTotals{}}
 	for _, id := range unitIDs {
 		f.units[id] = true
 	}
@@ -158,7 +164,19 @@ func New(unitIDs []string) *Fleet {
 		Name: "crew_fleet_deaths_by_day_phase_total",
 		Help: "Deaths the poller saw, by the unit's own day phase at the poll that found it dead (dawn, day, dusk, night, or unknown when the unit had no clock). The same sampling caveat as crew_fleet_unit_deaths_total applies.",
 	}, []string{"phase"})
-	f.reg.MustRegister(f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
+	f.swings = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_unit_swings_total",
+		Help: "Melee swings and bow releases a warrior sent, summed from the growth of the totals in its state between polls. A unit that restarts, or goes offline, starts a new baseline, so growth in a poll gap that spans either is lost and the series undercounts; it never counts a unit's history from before crew-control watched. Absent units (not warriors, older units) stay at zero.",
+	}, []string{"unit"})
+	f.hits = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_unit_hits_landed_total",
+		Help: "Swings and shots a warrior's target answered with a hurt animation or its death, on the same terms as crew_fleet_unit_swings_total. An upper bound when several warriors fight one target.",
+	}, []string{"unit"})
+	f.damageTkn = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_unit_damage_taken_total",
+		Help: "Health points a warrior lost, on the same terms as crew_fleet_unit_swings_total.",
+	}, []string{"unit"})
+	f.reg.MustRegister(f.swings, f.hits, f.damageTkn, f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
 		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger, f.toolPct)
 
 	for _, p := range append(DayPhases, PhaseUnknown) {
@@ -170,6 +188,9 @@ func New(unitIDs []string) *Fleet {
 	for _, id := range unitIDs {
 		f.deaths.WithLabelValues(id)
 		f.stuck.WithLabelValues(id)
+		f.swings.WithLabelValues(id)
+		f.hits.WithLabelValues(id)
+		f.damageTkn.WithLabelValues(id)
 		for _, s := range States {
 			f.unitState.WithLabelValues(id, s)
 			f.inState.WithLabelValues(id, s)
@@ -256,6 +277,7 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 			}
 			f.unitState.WithLabelValues(u.ID, s).Set(v)
 		}
+		f.observeFight(u.ID, u.Fight)
 		if dt > 0 && validState(u.State) {
 			f.inState.WithLabelValues(u.ID, u.State).Add(dt.Seconds())
 		}
@@ -264,6 +286,31 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 		f.fleetUnits.WithLabelValues(s).Set(float64(count[s]))
 	}
 	f.online.Set(float64(count[telemetry.StateWorking] + count[telemetry.StateIdle] + count[telemetry.StateStuck] + count[telemetry.StateDead]))
+}
+
+// observeFight adds the growth of one unit's fight totals since the last
+// poll. The first reading, one after a gap, and one after a restart (a total
+// that went down) only set the baseline.
+func (f *Fleet) observeFight(unit string, cur *telemetry.FightTotals) {
+	f.mu.Lock()
+	prev, had := f.fights[unit]
+	if cur == nil {
+		delete(f.fights, unit)
+		f.mu.Unlock()
+		return
+	}
+	f.fights[unit] = *cur
+	f.mu.Unlock()
+	if !had {
+		return
+	}
+	d, ok := cur.Since(prev)
+	if !ok {
+		return
+	}
+	f.swings.WithLabelValues(unit).Add(float64(d.Swings))
+	f.hits.WithLabelValues(unit).Add(float64(d.Hits))
+	f.damageTkn.WithLabelValues(unit).Add(d.Damage)
 }
 
 // setOrClear drops the series for an unknown reading: Prometheus would
