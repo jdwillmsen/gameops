@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"testing"
 	"time"
@@ -12,6 +13,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/unitlog"
 )
+
+var regexpDigits = regexp.MustCompile(`[0-9]`)
 
 var t0 = time.Date(2026, 10, 23, 6, 21, 0, 0, time.UTC)
 
@@ -67,6 +70,18 @@ func TestExplain(t *testing.T) {
 		{"a threat_high long past explains nothing",
 			[]unitlog.Event{ev(1, 0, unitlog.KindThreatHigh, ""), ev(2, 600, unitlog.KindTaskFailed, "other")},
 			"", "", nil, 1},
+		{"rubberbanding shortly before a stall",
+			[]unitlog.Event{ev(1, 0, unitlog.KindRubberbanding, "movement_corrected"), ev(2, 120, unitlog.KindTaskFailed, "other")},
+			ClassMovementCorrected, "movement_corrected.rubberbanding", []int64{1, 2}, 0},
+		{"rubberbanding wins over the combat and vitals it happened beside",
+			[]unitlog.Event{ev(1, 0, unitlog.KindThreatHigh, ""), ev(2, 10, unitlog.KindLowHealth, ""), ev(3, 20, unitlog.KindRubberbanding, "movement_corrected"), ev(4, 40, unitlog.KindTaskFailed, "other")},
+			ClassMovementCorrected, "movement_corrected.rubberbanding", []int64{3, 4}, 0},
+		{"rubberbanding long past explains nothing",
+			[]unitlog.Event{ev(1, 0, unitlog.KindRubberbanding, "movement_corrected"), ev(2, 600, unitlog.KindTaskFailed, "other")},
+			"", "", nil, 1},
+		{"a missing tool keeps its own cause even beside rubberbanding",
+			[]unitlog.Event{ev(1, 0, unitlog.KindKitFailed, ""), ev(2, 10, unitlog.KindRubberbanding, "movement_corrected"), ev(3, 30, unitlog.KindTaskFailed, "missing_tool")},
+			ClassMissingTool, "missing_tool.kit_failed", []int64{1, 3}, 0},
 		{"anything else is unexplained",
 			[]unitlog.Event{ev(1, 0, unitlog.KindTaskFailed, "other")},
 			"", "", nil, 1},
@@ -178,5 +193,24 @@ func TestAPI(t *testing.T) {
 		if code, _ = get("/v1/units/crew-16/explain" + bad); code != 400 {
 			t.Fatalf("%s: %d", bad, code)
 		}
+	}
+}
+
+func TestRubberbandingOutranksTheTrapRuleItWouldOtherwiseFeedInto(t *testing.T) {
+	failed := func(id int64, s int) unitlog.Event {
+		return unitlog.Event{ID: id, Unit: "u", At: at(s), Kind: unitlog.KindTaskFailed, Reason: "no_path", Anchor: "same"}
+	}
+	run := []unitlog.Event{failed(1, 0), failed(2, 20), failed(3, 40)}
+
+	if res := Explain("u", at(-10), at(7200), run); len(res.Findings) != 1 || res.Findings[0].Class != ClassGeometryTrap || res.Findings[0].Count != 3 {
+		t.Fatalf("without rubberbanding the run is a trap: %+v", res.Findings)
+	}
+
+	res := Explain("u", at(-10), at(7200), append([]unitlog.Event{ev(9, -5, unitlog.KindRubberbanding, "movement_corrected")}, run...))
+	if len(res.Findings) != 1 || res.Findings[0].Class != ClassMovementCorrected || res.Findings[0].Count != 3 || res.Unexplained.Count != 0 {
+		t.Fatalf("with rubberbanding before the run the cause is the correction: %+v", res.Findings)
+	}
+	if got := res.Findings[0].Sentence; got == "" || regexpDigits.MatchString(got) {
+		t.Errorf("sentence %q must be plain words, no counts", got)
 	}
 }

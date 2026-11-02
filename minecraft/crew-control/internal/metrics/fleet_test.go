@@ -329,7 +329,10 @@ func TestLabelSetIsClosed(t *testing.T) {
 func maxSeries(n, w int) int {
 	t, o, r, s := len(Templates)+1, len(Outcomes), len(Reasons), len(States)
 	hist := t * 2 * (len(durationBuckets) + 3)
-	perUnit := n*t + n*t*o + n + 2*n + n*s*2 + n + 3*n + n    // n more each: tool durability, dimension
+	// Per unit: last done, deaths, stuck, health, hunger, tool wear, dimension
+	// and corrections, the three fight counters, and the two state series
+	// over every state.
+	perUnit := n*t + n*t*o + 2*n*s + 11*n
 	perWorld := t*r + hist + s + 1 + len(DayPhases) + 1 + 3*2 // the last term is the skipped position samples
 	return perUnit + w*perWorld
 }
@@ -719,5 +722,62 @@ func TestDroppedPositionSamplesAreCountedByWorldDimensionAndStore(t *testing.T) 
 func TestWorstCaseSeriesGrowsByTheFleetWideSeriesPerWorld(t *testing.T) {
 	if maxSeries(20, 2)-maxSeries(20, 1) != maxSeries(0, 1) {
 		t.Error("a second world must add only the series that carry no unit")
+	}
+}
+
+func TestCorrectionCounterGrowsByPollDeltasAndRebaselinesOnRestartOrGap(t *testing.T) {
+	f := New(roster3)
+	u := roster3[0]
+	n := func(v uint64) *uint64 { return &v }
+	got := func() float64 {
+		return value(t, f, "crew_fleet_unit_corrections_total", map[string]string{"unit": u})
+	}
+	poll := func(sec int64, c *uint64) {
+		f.ObservePoll(time.Unix(sec, 0), []telemetry.UnitState{{ID: u, State: "working", Corrections: c}})
+	}
+
+	// History from before crew-control looked adds nothing.
+	poll(0, n(900))
+	if got() != 0 {
+		t.Fatalf("a first reading counted %v", got())
+	}
+	poll(1, n(905))
+	poll(2, n(905))
+	if got() != 5 {
+		t.Fatalf("growth = %v, want 5", got())
+	}
+	// A restart makes the count go down: nothing is added for that poll.
+	poll(3, n(2))
+	poll(4, n(4))
+	if got() != 7 {
+		t.Fatalf("after a restart = %v, want 7", got())
+	}
+	// A gap, offline or an older unit, drops the baseline.
+	poll(5, nil)
+	poll(6, n(1000))
+	if got() != 7 {
+		t.Fatalf("a count after a gap was read as growth: %v", got())
+	}
+	poll(7, n(1003))
+	if got() != 10 {
+		t.Fatalf("growth after the new baseline = %v, want 10", got())
+	}
+}
+
+func TestCorrectionCounterExistsForEveryUnitAndIgnoresStrangers(t *testing.T) {
+	f := worldsFleet()
+	name := "crew_fleet_unit_corrections_total"
+	fam := families(t, f)
+	for unit, world := range map[string]string{"crew-01": "lab", "crew-02": "lab", "crew-03": "fwb"} {
+		if find(fam[name], map[string]string{"world": world, "unit": unit}) == nil {
+			t.Errorf("%s{%s,%s} is not exported from start", name, world, unit)
+		}
+	}
+	c := uint64(5)
+	f.ObservePoll(time.Unix(1, 0), []telemetry.UnitState{{ID: "crew-99", State: "idle", Corrections: &c}})
+	c = 50
+	f.ObservePoll(time.Unix(2, 0), []telemetry.UnitState{{ID: "crew-99", State: "idle", Corrections: &c}})
+	if find(families(t, f)[name], map[string]string{"unit": "crew-99"}) != nil {
+		t.Error("a unit outside the roster got a series")
 	}
 }
