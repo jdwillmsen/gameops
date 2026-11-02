@@ -35,6 +35,9 @@ const (
 	// KindFightEnded closes a warrior's run of fighting; the payload has the
 	// counts and an outcome from a closed list.
 	KindFightEnded = "fight_ended"
+	// KindRubberbanding is the server repeatedly overruling a unit's
+	// movement; the payload has the correction count and window only.
+	KindRubberbanding = "rubberbanding"
 )
 
 // Event carries no position by construction.

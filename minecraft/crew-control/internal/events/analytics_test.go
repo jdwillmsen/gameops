@@ -192,7 +192,7 @@ func TestFromUnitValidatesAndBounds(t *testing.T) {
 }
 
 func TestFromUnitKeepsAMovementClipReasonAndNothingPositional(t *testing.T) {
-	for _, code := range []string{"predicted_inside_block", "corrected_inside_block", "corrected_in_free_space"} {
+	for _, code := range []string{"predicted_inside_block", "corrected_inside_block", "corrected_in_free_space", "movement_corrected"} {
 		e, err := FromUnit("crew-03", UnitEvent{Kind: "movement_clip", ReasonCode: code}, t0)
 		if err != nil {
 			t.Fatalf("%s: %v", code, err)
