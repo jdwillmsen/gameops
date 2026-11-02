@@ -220,11 +220,70 @@ func TestEndpointAnswersAndValidates(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &g); err != nil || rec.Code != 200 || total(g) != 1 {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
+	if r := serve(true, "/v1/heatmap?layer=yield"); r.Code != 200 {
+		t.Errorf("layer=yield: %d", r.Code)
+	}
 	for url, code := range map[string]int{
 		"/v1/heatmap?layer=x": 400, "/v1/heatmap?window=2d": 400, "/v1/heatmap?unit=nope": 404,
 	} {
 		if r := serve(true, url); r.Code != code {
 			t.Errorf("%s: %d want %d", url, r.Code, code)
 		}
+	}
+}
+
+func TestYieldLayerWeighsACellByTheItemsGainedThere(t *testing.T) {
+	s := New()
+	// Two long stays at one cell, one short stay at another: time on task
+	// would call the first twice as hot, items say the second is.
+	s.Add("a", t0, 2, 2, true)
+	s.Add("a", t0.Add(2*time.Second), 2, 2, true)
+	s.AddYield("a", t0.Add(time.Second), 2, 2, 1)
+	s.Add("a", t0.Add(4*time.Second), 40, 2, true)
+	s.AddYield("a", t0.Add(4*time.Second), 40, 2, 9)
+	s.AddYield("b", t0.Add(5*time.Second), 40, 3, 3)
+
+	g := s.Query("a", Yield, "15m", t0.Add(time.Minute))
+	if len(g.Cells) != 2 || g.Cells[0] != [3]int32{0, 0, 1} || g.Cells[1] != [3]int32{10, 0, 9} || g.Max != 9 {
+		t.Fatalf("yield cells = %v max %d", g.Cells, g.Max)
+	}
+	if g.Samples != 10 || g.Layer != Yield {
+		t.Errorf("samples = %d (items gained), layer %q", g.Samples, g.Layer)
+	}
+	if m := s.Query("a", Mining, "15m", t0.Add(time.Minute)); m.Cells[0][2] != 2 {
+		t.Errorf("mining must still count time: %v", m.Cells)
+	}
+	if all := s.Query("", Yield, "15m", t0.Add(time.Minute)); total(all) != 13 || all.Samples != 13 {
+		t.Errorf("fleet yield = %d items (samples %d), want 13", total(all), all.Samples)
+	}
+	if p := s.Query("a", Position, "15m", t0.Add(time.Minute)); p.Samples != 3 {
+		t.Errorf("a yield credit must not count as a position sample: %d", p.Samples)
+	}
+}
+
+func TestYieldIgnoresNothingGainedAndStaysInsideTheCellCap(t *testing.T) {
+	s := New()
+	s.AddYield("a", t0, 0, 0, 0)
+	s.AddYield("a", t0, 0, 0, -4)
+	if len(s.slices) != 0 {
+		t.Fatalf("no gain made a slice: %d", len(s.slices))
+	}
+	for i := 0; i < maxCellsPerSlice+5; i++ {
+		s.AddYield("a", t0, float64(i*CellSize), 0, 1)
+	}
+	g := s.Query("a", Yield, "15m", t0.Add(time.Minute))
+	if len(g.Cells) != maxCellsPerSlice || g.Dropped != 5 {
+		t.Fatalf("cells %d dropped %d, want %d and 5", len(g.Cells), g.Dropped, maxCellsPerSlice)
+	}
+}
+
+func TestEveryLayerIsValidAndOthersAreNot(t *testing.T) {
+	for _, l := range []Layer{Position, Mining, Travel, Yield} {
+		if !ValidLayer(l) {
+			t.Errorf("%q is not valid", l)
+		}
+	}
+	if ValidLayer("") || ValidLayer("yields") || len(layers) != numLayers {
+		t.Error("layer list and bucket size drifted apart")
 	}
 }

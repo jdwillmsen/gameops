@@ -6,6 +6,7 @@ package heat
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -38,11 +39,16 @@ const (
 	Position Layer = "position"
 	Mining   Layer = "mining"
 	Travel   Layer = "travel"
+	// Yield weights a cell by the items a unit gained there, where Mining
+	// counts the time spent gathering.
+	Yield Layer = "yield"
 )
 
-var layers = []Layer{Position, Mining, Travel}
+var layers = []Layer{Position, Mining, Travel, Yield}
 
-func ValidLayer(l Layer) bool { return l == Position || l == Mining || l == Travel }
+const numLayers = 4
+
+func ValidLayer(l Layer) bool { return slices.Contains(layers, l) }
 
 // Windows are the only spans a client may ask for, which also keeps the
 // work per request bounded.
@@ -54,11 +60,11 @@ type bucket map[cell]uint32
 
 type slice struct {
 	at      int64 // unix minute
-	counts  map[string]*[3]bucket
+	counts  map[string]*[numLayers]bucket
 	samples map[string]uint32
 	// Overflow is kept per unit and layer so a query reports only what
 	// fell out of the grid it is answering.
-	dropped map[string]*[3]uint32
+	dropped map[string]*[numLayers]uint32
 }
 
 type last struct {
@@ -101,22 +107,11 @@ func cellOf(x, z float64) cell {
 func (s *Store) Add(unit string, at time.Time, x, z float64, mining bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	minute := at.Unix() / 60
-	sl := s.slices[minute]
-	if sl == nil {
-		sl = &slice{at: minute, counts: map[string]*[3]bucket{}, samples: map[string]uint32{}, dropped: map[string]*[3]uint32{}}
-		s.slices[minute] = sl
-		s.pruneLocked(at)
-	}
-	b := sl.counts[unit]
-	if b == nil {
-		b = &[3]bucket{}
-		sl.counts[unit] = b
-	}
+	sl, b := s.bucketsLocked(unit, at)
 	sl.samples[unit]++
-	s.bump(sl, unit, b, Position, cellOf(x, z))
+	s.bump(sl, unit, b, Position, cellOf(x, z), 1)
 	if mining {
-		s.bump(sl, unit, b, Mining, cellOf(x, z))
+		s.bump(sl, unit, b, Mining, cellOf(x, z), 1)
 	}
 	if p := s.last[unit]; p.present && at.After(p.at) && at.Sub(p.at) <= maxTravelGap {
 		dx, dz := x-p.x, z-p.z
@@ -132,11 +127,41 @@ func (s *Store) Add(unit string, at time.Time, x, z float64, mining bool) {
 					continue
 				}
 				prev = c
-				s.bump(sl, unit, b, Travel, c)
+				s.bump(sl, unit, b, Travel, c, 1)
 			}
 		}
 	}
 	s.last[unit] = last{at: at, x: x, z: z, present: true}
+}
+
+// AddYield credits items gained by a unit to the cell it stood in. It is not
+// a position sample, so it leaves the sample count and the travel line alone.
+func (s *Store) AddYield(unit string, at time.Time, x, z float64, items int) {
+	if items <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sl, b := s.bucketsLocked(unit, at)
+	s.bump(sl, unit, b, Yield, cellOf(x, z), uint32(items))
+}
+
+// bucketsLocked finds the minute slice for at, and the unit's layers in it,
+// creating both as needed.
+func (s *Store) bucketsLocked(unit string, at time.Time) (*slice, *[numLayers]bucket) {
+	minute := at.Unix() / 60
+	sl := s.slices[minute]
+	if sl == nil {
+		sl = &slice{at: minute, counts: map[string]*[numLayers]bucket{}, samples: map[string]uint32{}, dropped: map[string]*[numLayers]uint32{}}
+		s.slices[minute] = sl
+		s.pruneLocked(at)
+	}
+	b := sl.counts[unit]
+	if b == nil {
+		b = &[numLayers]bucket{}
+		sl.counts[unit] = b
+	}
+	return sl, b
 }
 
 // Forget drops a unit's last position, so a respawn or an offline gap does
@@ -147,7 +172,7 @@ func (s *Store) Forget(unit string) {
 	s.mu.Unlock()
 }
 
-func (s *Store) bump(sl *slice, unit string, b *[3]bucket, l Layer, c cell) {
+func (s *Store) bump(sl *slice, unit string, b *[numLayers]bucket, l Layer, c cell, by uint32) {
 	i := layerIdx(l)
 	if b[i] == nil {
 		b[i] = bucket{}
@@ -155,13 +180,13 @@ func (s *Store) bump(sl *slice, unit string, b *[3]bucket, l Layer, c cell) {
 	if _, ok := b[i][c]; !ok && len(b[i]) >= maxCellsPerSlice {
 		d := sl.dropped[unit]
 		if d == nil {
-			d = &[3]uint32{}
+			d = &[numLayers]uint32{}
 			sl.dropped[unit] = d
 		}
 		d[i]++
 		return
 	}
-	b[i][c]++
+	b[i][c] += by
 }
 
 func (s *Store) pruneLocked(now time.Time) {
@@ -176,12 +201,14 @@ func (s *Store) pruneLocked(now time.Time) {
 // Grid is a density answer. Cells are [cellX, cellZ, count], sorted by x
 // then z, so equal inputs give equal bytes.
 type Grid struct {
-	Cell    int        `json:"cell"`
-	Layer   Layer      `json:"layer"`
-	Window  string     `json:"window"`
-	Unit    string     `json:"unit"`
-	Since   time.Time  `json:"since"`
-	Until   time.Time  `json:"until"`
+	Cell   int       `json:"cell"`
+	Layer  Layer     `json:"layer"`
+	Window string    `json:"window"`
+	Unit   string    `json:"unit"`
+	Since  time.Time `json:"since"`
+	Until  time.Time `json:"until"`
+	// Samples is the position samples behind the grid, or for the yield layer
+	// the items gained.
 	Samples uint64     `json:"samples"`
 	Max     uint32     `json:"max"`
 	Dropped uint64     `json:"dropped"`
@@ -207,7 +234,10 @@ func (s *Store) Query(unit string, layer Layer, window string, now time.Time) Gr
 			if unit != "" && u != unit {
 				continue
 			}
-			g.Samples += uint64(sl.samples[u])
+			// A yield answer counts items, below, not position samples.
+			if layer != Yield {
+				g.Samples += uint64(sl.samples[u])
+			}
 			if d := sl.dropped[u]; d != nil {
 				g.Dropped += uint64(d[idx])
 			}
@@ -219,6 +249,9 @@ func (s *Store) Query(unit string, layer Layer, window string, now time.Time) Gr
 	s.mu.Unlock()
 
 	for c, n := range sum {
+		if layer == Yield {
+			g.Samples += uint64(n)
+		}
 		g.Cells = append(g.Cells, [3]int32{c.X, c.Z, int32(n)})
 		if n > g.Max {
 			g.Max = n

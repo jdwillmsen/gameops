@@ -23,6 +23,8 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/auth"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/gather"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/jobs"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/ledger"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/metrics"
@@ -728,4 +730,54 @@ func TestBornFailureRowCarriesItsAnalyticColumns(t *testing.T) {
 		e.SessionID != "6a36f7ecb575" || e.CrewVersion != "1.79.0" {
 		t.Fatalf("%+v", e)
 	}
+}
+
+func TestGatheringBecomesPerClassCountsAndAYieldHeatCellOnlyWhileGatheringInTheOverworld(t *testing.T) {
+	ids := []string{"crew-01", "crew-02"}
+	fleet := metrics.New(ids)
+	hm := heat.New()
+	tracker := gather.NewTracker()
+	at := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+
+	items := func(log, stone int) []telemetry.LiveItem {
+		return []telemetry.LiveItem{{Slot: 0, Name: "oak_log", Count: log}, {Slot: 1, Name: "cobblestone", Count: stone}}
+	}
+	lives := map[string]telemetry.Live{}
+	step := func(sec int, task string, dim int32, log, stone int) {
+		snap := []telemetry.Status{{ID: "crew-01", Task: &telemetry.TaskSummary{Template: task}}, {ID: "crew-02"}}
+		pos := []telemetry.Position{{ID: "crew-01", X: 41, Z: -7, Dim: dim, Known: true}, {ID: "crew-02", X: 1, Z: 1, Known: true}}
+		lives["crew-01"] = telemetry.Live{ID: "crew-01", Online: true, Inventory: items(log, stone)}
+		lives["crew-02"] = telemetry.Live{ID: "crew-02", Online: true, Inventory: items(500, 500)}
+		recordGathering(at.Add(time.Duration(sec)*time.Second), ids, tracker, fleet, hm, snap, pos, func(id string) (telemetry.Live, bool) {
+			lv, ok := lives[id]
+			return lv, ok
+		})
+	}
+	step(0, "gather_and_deposit", 0, 2, 0)
+	step(1, "gather_and_deposit", 0, 5, 1)  // 3 wood, 1 stone, in the overworld
+	step(2, "withdraw", 0, 5, 41)           // a chest withdrawal: nothing
+	step(3, "gather_and_deposit", 0, 5, 41) // and it is not counted later
+	step(4, "gather_and_deposit", 1, 6, 41) // 1 wood in the nether: counted, not mapped
+
+	body := scrape(t, fleet)
+	for _, want := range []string{
+		`crew_fleet_gathered_items_total{class="wood",unit="crew-01",world="lab"} 4`,
+		`crew_fleet_gathered_items_total{class="stone",unit="crew-01",world="lab"} 1`,
+		`crew_fleet_gathered_items_total{class="wood",unit="crew-02",world="lab"} 0`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("metrics lack %q", want)
+		}
+	}
+	g := hm.Query("crew-01", heat.Yield, "15m", at.Add(time.Minute))
+	if len(g.Cells) != 1 || g.Cells[0] != [3]int32{10, -2, 4} {
+		t.Errorf("yield cells = %v, want the 4 overworld items in the cell around x 41 z -7", g.Cells)
+	}
+}
+
+func scrape(t *testing.T, f *metrics.Fleet) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	f.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	return rec.Body.String()
 }

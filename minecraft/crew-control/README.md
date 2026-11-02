@@ -44,7 +44,7 @@ crew-control; it never calls them to command them.
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`. The state route forwards the unit's own `/v1/state` as it is, without sign-in, because the camera page reads it: it is public and already carries the unit's position, inventory, armour with durability, threat counts and `env.biome`. Only the stream's status, the event feed, `/v1/alerts` and `/metrics` are curated public surfaces. `{id}` is the unit's id, or its in-game name when exactly one unit has it (an id wins over a name; a name two units share matches neither), so tools that only know a warrior's name, like the trainer's bridge, can read its state
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `sky.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
 - `GET /units/{id}/detail`: the unit's inventory, armour, experience and all 27 ender chest slots from the world save, merged with its live polled state. Signed-in operators only, `Cache-Control: no-store`; see [Unit detail](#unit-detail)
-- `GET /v1/heatmap?layer=position|mining|travel&window=15m|1h|6h[&unit=<id>]`: signed-in, `Cache-Control: no-store`, 401 otherwise; see [Heatmaps](#heatmaps)
+- `GET /v1/heatmap?layer=position|mining|travel|yield&window=15m|1h|6h[&unit=<id>]`: signed-in, `Cache-Control: no-store`, 401 otherwise; see [Heatmaps](#heatmaps)
 - `GET /v1/replay/positions?since=&until=[&unit=<id>][&limit=][&cursor=]`: recorded unit positions, oldest first, keyset-paged; signed-in, `Cache-Control: no-store`, 401 otherwise; see [Replay](#replay)
 - `GET /healthz`
 - `GET /metrics`: Prometheus text of the fleet series, see [Fleet metrics](#fleet-metrics). Cluster-only: the chart's public route lists paths and does not list this one
@@ -156,6 +156,35 @@ counted in `crew_fleet_position_samples_dropped_total{store="heat"}`.
 - **Travel**: cells crossed between two consecutive samples under 10 s
   apart and under 64 blocks apart; teleports, respawns and gaps draw
   nothing.
+- **Yield**: items gained, in the cell the unit stood in when the poll saw its
+  inventory grow, counted only while its task is a gathering one
+  (`gather_and_deposit`, `mine_shaft`). Where Mining is time, Yield is what
+  the time produced, so a cell where a unit stood long and found nothing stays
+  cold. Its `samples` is the items gained, not position samples. See
+  [Gathered items](#gathered-items) for what is and is not counted.
+
+### Gathered items
+
+Each poll the service compares a unit's inventory, summed by item name across
+every slot, with the poll before. Growth counts as gathered only while the
+unit's task is `gather_and_deposit` or `mine_shaft`; on any other task (a
+`withdraw`, a `haul`, a `craft`, a `deposit`) the inventory is still read, so
+what a chest or a craft put in becomes the baseline and is never counted later.
+A fall (a deposit) counts nothing. A unit that is offline or dead has no
+baseline, and neither does one seen for the first time, so a restart of the
+service, or of a unit, never turns its whole inventory into yield; the pickups
+of that gap are lost. One item's growth in one poll is capped at 64.
+
+Items are sorted into seven classes by a fixed table in `internal/gather`: `wood`
+(logs, stems, planks, sticks), `stone` (stone, cobblestone, deepslate,
+andesite and similar), `ore` (ore blocks, raw metals, coal, diamond, redstone,
+lapis, quartz), `dirt` (dirt, sand, gravel, clay), `crop` (wheat, carrots,
+potatoes, cane, melons, pumpkins, berries, seeds), `food` (cooked and
+ready-to-eat items) and `other` for every name not in the table. A carrot or a
+potato is a crop until it is cooked. The count is exported as
+`crew_fleet_gathered_items_total{world,unit,class}` and is a sample, like the
+rest: an item picked up and spent inside one second is not seen. Item names
+never leave the service; the metric carries the class only.
 
 The answer is `{cell, layer, window, unit, since, until, samples, max,
 dropped, cells: [[cellX, cellZ, count]...]}` with cell coordinates in cell
@@ -923,6 +952,7 @@ the units' own.
 | `crew_fleet_unit_hunger` | gauge | `world`, `unit` | Food level (0 to 20) at the last poll, absent on the same terms |
 | `crew_fleet_unit_dimension` | gauge | `world`, `unit` | The dimension at the last poll: `0` overworld, `1` nether, `2` end, `3` any other id. Absent while offline or before the unit knows where it is, so a gap is never the overworld |
 | `crew_fleet_position_samples_dropped_total` | counter | `world`, `dim`, `store` | Position samples the heat grid (`store="heat"`) or the replay recorder (`store="replay"`) skipped because the unit stood outside the overworld, by `dim` (`nether`, `end`, `other`) |
+| `crew_fleet_gathered_items_total` | counter | `world`, `unit`, `class` | Items the unit's inventory gained while its task was a gathering one, by item class (below). Withdrawals and crafts are never counted; a unit's first sight, an offline gap or a death only set a baseline |
 | `crew_fleet_unit_tool_durability_pct` | gauge | `world`, `unit` | Durability left (0 to 100) on the item the unit held at the last poll. Absent while offline, empty-handed, holding an item that cannot wear out, or from a unit that predates the field. Armour wear is in the `tool_worn` events |
 | `crew_event_store_degraded` | gauge | none | 1 while event history is held in memory because Postgres is unreachable or not yet reached |
 | `crew_event_store_diverted_events_total` | counter | none | Events written to memory instead of Postgres |
@@ -933,6 +963,7 @@ Label values are closed sets, never a raw string a unit sent:
 
 - `unit`: the roster. Events from any other id are dropped.
 - `world`: the roster's world slugs (`lab` unless a unit says otherwise). It comes from the unit's roster entry, never from the unit's own report. A unit is in one world, so the label does not multiply any series that already carries `unit`.
+- `class`: `wood`, `stone`, `ore`, `dirt`, `crop`, `food`, `other` (see [Gathered items](#gathered-items)).
 - `dim`: `nether`, `end` or `other`, from the unit's dimension id; ids other than 0, 1 and 2 are `other`.
 - `state`: `working`, `idle`, `stuck`, `dead`, `offline`. Offline wins, then dead, then stuck, then working, else idle.
 - `outcome`: `done`, `failed`, `cancelled`, `unknown` (the unit's recent list no longer held the verdict), `idle` (a successful finish of an idle-eligible template within 2 s, the rule the history's idle roll-up uses; it is the idle-poll count).
@@ -955,12 +986,13 @@ Label values are closed sets, never a raw string a unit sent:
 | `other` | anything else | |
 
 Series stay bounded by the label sets. A unit has one world, so the per-unit
-series (1,980 for 20 units, the vitals, tool, dimension and correction gauges
-included) do not grow with the world count. The fleet-wide series (failure
-reasons, duration histograms, state and online gauges, deaths by day phase,
-dropped position samples) do: 537 per world. The worst case is therefore
-1,980 + 537 x worlds, so 2,517 for the one lab and 3,591 for three worlds, and
-adding a unit to an existing world adds only its own series. The usual count is a few hundred because a series appears only
+series (2,120 for 20 units, the vitals, tool, dimension, correction and
+gathered-item series included) do not grow with the world count. The
+fleet-wide series (failure reasons, duration histograms, state and online
+gauges, deaths by day phase, dropped position samples) do: 537 per world. The
+worst case is therefore 2,120 + 537 x worlds, so 2,657 for the one lab and
+3,731 for three worlds, and adding a unit to an existing world adds only its
+own series. The usual count is a few hundred because a series appears only
 once its event has happened. Per-unit state, death and stall series exist from
 start so that every unit shows up before it does anything.
 

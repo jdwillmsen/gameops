@@ -28,10 +28,12 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/capacity"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/console"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/detail"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explain"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/explorer"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/export"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/gather"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/heat"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/insight"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/invhistory"
@@ -144,15 +146,20 @@ func main() {
 	}
 	alertEngine := alerts.NewEngine(alertCfg, time.Now())
 	inventory := invhistory.NewTracker()
+	gathered := gather.NewTracker()
+	heatmap := heat.New()
+	heatmap.OnDrop = func(p telemetry.Position) { fleet.PositionDropped(metrics.StoreHeat, p) }
 	poller.OnPoll = func(now time.Time, states []telemetry.UnitState) {
 		fleet.ObservePoll(now, states)
-		alertEngine.Poll(now, poller.Snapshot(), states)
+		snap := poller.Snapshot()
+		alertEngine.Poll(now, snap, states)
 		for _, id := range ids {
 			lv, _ := poller.Live(id)
 			if ev, ok := inventory.Observe(now, id, lv.Online, lv.Inventory); ok {
 				recorder.Add(ev, events.Hint{})
 			}
 		}
+		recordGathering(now, ids, gathered, fleet, heatmap, snap, poller.Positions(), poller.Live)
 	}
 	poller.OnEvents = func(batch []telemetry.Born) {
 		fleet.Observe(batch)
@@ -177,8 +184,6 @@ func main() {
 	// own; cancelling the base context when shutdown starts ends them at once.
 	streamCtx, endStreams := context.WithCancel(context.Background())
 	defer endStreams()
-	heatmap := heat.New()
-	heatmap.OnDrop = func(p telemetry.Position) { fleet.PositionDropped(metrics.StoreHeat, p) }
 	// Like the event history, replay never goes dark: memory serves until
 	// the database answers.
 	positions := replay.NewFallback(log)
@@ -277,6 +282,35 @@ func main() {
 	<-recordDone
 	<-insightDone
 	<-storeDone
+}
+
+// recordGathering turns each unit's inventory growth under a gathering task
+// into the per-class counter and the yield heat layer. The heat credit lands
+// on the cell the unit stood in at the poll, and only in the overworld, as
+// every heat layer is.
+func recordGathering(now time.Time, ids []string, tracker *gather.Tracker, fleet *metrics.Fleet, heatmap *heat.Store,
+	snap []telemetry.Status, positions []telemetry.Position, live func(string) (telemetry.Live, bool)) {
+	template := make(map[string]string, len(snap))
+	for _, st := range snap {
+		if st.Task != nil {
+			template[st.ID] = st.Task.Template
+		}
+	}
+	at := make(map[string]telemetry.Position, len(positions))
+	for _, p := range positions {
+		at[p.ID] = p
+	}
+	for _, id := range ids {
+		lv, _ := live(id)
+		g := tracker.Observe(id, lv.Online && !lv.Dead, template[id], lv.Inventory)
+		if g.Total() == 0 {
+			continue
+		}
+		fleet.Gathered(id, g.ByClass)
+		if p := at[id]; p.Known && dimension.Name(p.Dim) == dimension.Overworld {
+			heatmap.AddYield(id, now, float64(p.X), float64(p.Z), g.Total())
+		}
+	}
 }
 
 // mountMetrics serves /metrics on the listener the cluster scrapes. It is
