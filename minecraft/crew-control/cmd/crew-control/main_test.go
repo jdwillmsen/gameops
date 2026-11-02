@@ -693,3 +693,16 @@ func TestUnitEventSinkStoresAKitFailureWithItsSession(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 }
+
+func TestBornFailureRowCarriesItsAnalyticColumns(t *testing.T) {
+	b := telemetry.Born{
+		Event: telemetry.Event{Unit: "crew-01", At: time.Now(), Kind: "task_failed", Level: "crit",
+			Template: "gather_and_deposit", Took: 1500 * time.Millisecond, ReasonCode: "missing_tool"},
+		Session: "6a36f7ecb575", Version: "1.79.0",
+	}
+	e, _ := bornEvent(b)
+	if e.ReasonCode != "missing_tool" || e.Outcome != events.OutcomeFailed || e.DurationMS == nil || *e.DurationMS != 1500 ||
+		e.SessionID != "6a36f7ecb575" || e.CrewVersion != "1.79.0" {
+		t.Fatalf("%+v", e)
+	}
+}
