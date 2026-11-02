@@ -9,3 +9,6 @@
 .kit-empty, .kit-loading { opacity: .8; }
 /* Off-screen but still announced; display:none would silence the live region. */
 .kit-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.kit-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); }
+.kit-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 4px 10px; color: inherit; }
+.kit-tab.selected { border-bottom-color: var(--focus); }
