@@ -436,10 +436,70 @@
         }
       },
       "minecraft:entity_born": {
+        "sequence": [
+          {
+            "add": {
+              "component_groups": [
+                "gameops:baby",
+                "gameops:wild"
+              ]
+            }
+          },
+          {
+            "randomize": [
+              {
+                "weight": 1,
+                "add": {
+                  "component_groups": [
+                    "gameops:variant_regular"
+                  ]
+                }
+              },
+              {
+                "weight": 1,
+                "add": {
+                  "component_groups": [
+                    "gameops:variant_alpha"
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gameops:on_orphan": {
         "add": {
           "component_groups": [
-            "gameops:baby",
+            "gameops:tamed"
+          ]
+        },
+        "remove": {
+          "component_groups": [
             "gameops:wild"
+          ]
+        }
+      },
+      "gameops:set_variant_regular": {
+        "add": {
+          "component_groups": [
+            "gameops:variant_regular"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:variant_alpha"
+          ]
+        }
+      },
+      "gameops:set_variant_alpha": {
+        "add": {
+          "component_groups": [
+            "gameops:variant_alpha"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:variant_regular"
           ]
         }
       },

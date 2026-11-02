@@ -82,7 +82,23 @@ class Generators(unittest.TestCase):
             self.assertEqual(baby["minecraft:ageable"]["feed_items"], [s.tame_item])
             ev = doc["events"]
             self.assertEqual(ev["gameops:as_baby"]["add"]["component_groups"], ["gameops:baby"])
-            self.assertEqual(ev["minecraft:entity_born"]["add"]["component_groups"], ["gameops:baby", "gameops:wild"])
+            born = ev["minecraft:entity_born"]["sequence"]
+            self.assertEqual(born[0]["add"]["component_groups"], ["gameops:baby", "gameops:wild"])
+            self.assertEqual(ev["gameops:on_orphan"]["add"]["component_groups"], ["gameops:tamed"])
+            self.assertEqual(ev["gameops:on_orphan"]["remove"]["component_groups"], ["gameops:wild"])
+            self.assertNotIn("minecraft:behavior.nearest_attackable_target", doc["component_groups"]["gameops:tamed"])
+            self.assertIn("minecraft:persistent", doc["component_groups"]["gameops:tamed"])
+            groups = [f"gameops:variant_{v}" for v in s.variants]
+            if s.variants:
+                rolled = [r["add"]["component_groups"][0] for r in born[1]["randomize"]]
+                self.assertEqual(rolled, groups)
+                for v in s.variants:
+                    own = ev[f"gameops:set_variant_{v}"]
+                    self.assertEqual(own["add"]["component_groups"], [f"gameops:variant_{v}"])
+                    self.assertNotIn(f"gameops:variant_{v}", own["remove"]["component_groups"])
+                    self.assertEqual(len(own["remove"]["component_groups"]), len(s.variants) - 1)
+            else:
+                self.assertEqual(len(born), 1)
             self.assertEqual(ev["gameops:grow_up"]["remove"]["component_groups"], ["gameops:baby"])
             client = json.loads(self.load(f"resource_pack/entity/{s.id}.entity.json"))["minecraft:client_entity"]["description"]
             self.assertIn("query.is_baby", client["scripts"]["scale"])
@@ -109,6 +125,10 @@ class Generators(unittest.TestCase):
         self.assertEqual({k: v.litter for k, v in SPECIES.items()}, expected)
         with open(os.path.join(generate.PACK, "behavior_pack/scripts/abilities.js")) as f:
             js = f.read()
+        with open(os.path.join(generate.PACK, "behavior_pack/scripts/main.js")) as f:
+            main = re.search(r"const VARIANTS = \{(.*?)\};", f.read(), re.S).group(1)
+        scripted = {m[0]: tuple(re.findall(r'"(\w+)"', m[1])) for m in re.findall(r'"gameops:(\w+)": \[(.*?)\]', main)}
+        self.assertEqual(scripted, {k: v.variants for k, v in SPECIES.items() if v.variants})
         table = re.search(r"export const LITTERS = \{(.*?)\};", js, re.S).group(1)
         parsed = {m[0]: (int(m[1]), int(m[2])) for m in re.findall(r'"gameops:(\w+)": \[(\d+), (\d+)\]', table)}
         self.assertEqual(parsed, expected)

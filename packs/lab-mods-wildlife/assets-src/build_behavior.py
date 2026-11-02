@@ -154,6 +154,16 @@ def entity_json(s: Species) -> dict:
         spawn.append({"randomize": [
             {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]})
 
+    # entity_born replaces entity_spawned, so a bred cub rolls its variant here; main.js then overrides it with
+    # its parent's through the set_variant events.
+    variant_roll, variant_events = [], {}
+    if s.variants:
+        variant_roll = [{"randomize": [
+            {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]}]
+        for name in s.variants:
+            others = [f"gameops:variant_{o}" for o in s.variants if o != name]
+            variant_events[f"gameops:set_variant_{name}"] = event(add=[f"gameops:variant_{name}"], remove=others)
+
     w, h = s.box
     return {
         "format_version": "1.21.0",
@@ -200,7 +210,10 @@ def entity_json(s: Species) -> dict:
                                         props={SITTING_PROPERTY: False}),
                 "gameops:as_baby": event(add=["gameops:baby"]),
                 # Wild too, so main.js can tame the newborn to its parent's owner through the tameable component.
-                "minecraft:entity_born": event(add=["gameops:baby", "gameops:wild"]),
+                "minecraft:entity_born": {"sequence": [event(add=["gameops:baby", "gameops:wild"]), *variant_roll]},
+                # A newborn with no owned parent nearby: passive and persistent rather than a wild predator.
+                "gameops:on_orphan": event(add=["gameops:tamed"], remove=["gameops:wild"]),
+                **variant_events,
                 "gameops:grow_up": event(remove=["gameops:baby"]),
                 **ability_events,
             },

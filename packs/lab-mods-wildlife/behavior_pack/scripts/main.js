@@ -61,6 +61,9 @@ system.run(() => {
 });
 // Lets a headless smoke test tell "script never loaded" from "script loaded, nothing to do".
 console.warn("gameops:wildlife script loaded");
+const VARIANTS = {
+  "gameops:tiger": ["orange", "white"], "gameops:lion": ["male", "female"], "gameops:hyena": ["regular", "alpha"],
+};
 const SITTING_PROPERTY = "gameops:sitting";
 // The owner is saved on the entity when taming happens because the tameable component is removed with the wild group.
 const OWNER_PROPERTY = "gameops:owner";
@@ -215,6 +218,20 @@ function tameCub(cub, player) {
   }
 }
 
+function variantOf(entity) {
+  return entity.getComponent("minecraft:variant")?.value;
+}
+
+// Only species with variants define the event; a missing one throws and is ignored.
+function inheritVariant(cub, value) {
+  if (value === undefined || !VARIANTS[cub.typeId]) return;
+  try {
+    cub.triggerEvent(`gameops:set_variant_${VARIANTS[cub.typeId][value]}`);
+  } catch {
+    // The cub keeps the variant it rolled at birth.
+  }
+}
+
 // The game spawns one cub per breeding; the rest of the litter is added here as extra cubs beside it.
 // Deferred a tick because the newborn's groups are not applied when the trigger fires.
 world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
@@ -226,14 +243,18 @@ world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
         .getEntities({ location: cub.location, maxDistance: PARENT_RANGE, type: cub.typeId }).map(breedingData));
       const player = parent && ownerPlayer(parent.owner);
       if (!parent || !player) {
+        cub.triggerEvent("gameops:on_orphan");
         logEvent("info", "born", { type: cub.typeId, id: cub.id, owner: null, litter: 1 });
         return;
       }
+      const variant = variantOf(parent.ref);
       const size = litterSize(cub.typeId, Math.random());
+      inheritVariant(cub, variant);
       tameCub(cub, player);
       for (let i = 1; i < size; i++) {
         const extra = cub.dimension.spawnEntity(cub.typeId, cub.location);
         extra.triggerEvent("gameops:as_baby");
+        inheritVariant(extra, variant);
         system.run(() => tameCub(extra, player));
       }
       logEvent("info", "born", { type: cub.typeId, id: cub.id, owner: parent.owner, litter: size });
