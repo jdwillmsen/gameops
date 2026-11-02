@@ -12,6 +12,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 // visit stands in for the withdraw: it walks for a few ticks, then ends the
@@ -187,6 +188,25 @@ func TestAVisitThatFillsTheHotbarIsReportedAsNoRoom(t *testing.T) {
 	}
 	if r.logged("kit_empty") || !r.logged("kit_no_room") {
 		t.Errorf("log = %+v, want kit_no_room and no kit_empty", r.log.lines)
+	}
+}
+
+func TestAFailedVisitIsReportedToTheController(t *testing.T) {
+	var got []unitevent.Event
+	unitevent.SetSink(func(e unitevent.Event) { got = append(got, e) })
+	t.Cleanup(func() { unitevent.SetSink(nil) })
+	r, visits := kitRig(t)
+	r.l.makeKit = func(bool, int) skill.Skill {
+		v := &visit{r: r, ticks: 2, failure: errors.New("getting to the chest: walking to the goal: no path")}
+		*visits = append(*visits, v)
+		return v
+	}
+	r.run(kitSettleTicks + 30)
+	if len(got) != 1 {
+		t.Fatalf("reported %d events, want 1", len(got))
+	}
+	if e := got[0]; e.Kind != "kit_failed" || e.ReasonCode != "kit_no_path" || !strings.Contains(e.Reason, "no path") {
+		t.Errorf("event = %+v", e)
 	}
 }
 

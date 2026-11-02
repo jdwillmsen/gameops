@@ -20,6 +20,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 const (
@@ -52,6 +53,13 @@ const (
 
 	// Far above a real item (a template is about 100 bytes).
 	maxWorkBytes = 64 << 10
+
+	// Unit events are history, not work: a few queued ride out a controller
+	// restart, and past that the newest are dropped rather than the loop
+	// that noticed them slowed down.
+	unitEventQueue = 16
+	// A failed post is tried again this many times in all, then dropped.
+	unitEventTries = 4
 )
 
 // Runner is the part of task.Runner the client drives.
@@ -147,6 +155,9 @@ type Client struct {
 	pending map[string]event // latest unsent event per id
 	order   []string         // ids in the order they first became pending
 	wake    chan struct{}
+	// unitEvents carries kit and session reports from the game loop to the
+	// goroutine that posts them.
+	unitEvents chan unitevent.Event
 	// stopped is the last stopMemory handled stop and cancel_task ids, oldest
 	// first: a redelivered stop must not cancel work queued after the first
 	// one, and a redelivered cancel_task must not hit a task of the same id
@@ -164,6 +175,8 @@ func New(base *url.URL, unit, token string, r Runner, log Logger) *Client {
 		owned:     map[string]struct{}{},
 		pending:   map[string]event{},
 		wake:      make(chan struct{}, 1),
+
+		unitEvents: make(chan unitevent.Event, unitEventQueue),
 	}
 	r.Observe(c.observe)
 	return c
@@ -207,7 +220,14 @@ func (c *Client) Run(ctx context.Context) {
 		defer wg.Done()
 		c.beat(ctx)
 	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.sendUnitEvents(ctx)
+	}()
+	unitevent.SetSink(c.queueUnitEvent)
 	defer wg.Wait()
+	defer unitevent.SetSink(nil)
 
 	var (
 		b    backoff
@@ -642,6 +662,74 @@ func (c *Client) drain(ctx context.Context) bool {
 		}
 		c.mu.Unlock()
 	}
+}
+
+// queueUnitEvent never blocks the game loop that called it.
+func (c *Client) queueUnitEvent(e unitevent.Event) {
+	select {
+	case c.unitEvents <- e:
+	default:
+		c.log.Error("control_unit_event_dropped", map[string]any{"kind": e.Kind})
+	}
+}
+
+// sendUnitEvents posts unit events in the order they happened. Unlike task
+// reports they are not kept until delivered: an event the controller will
+// not take, or one that still fails after a few tries, is dropped so a
+// controller that predates the route costs nothing.
+func (c *Client) sendUnitEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-c.unitEvents:
+			var b backoff
+			for try := 1; try <= unitEventTries; try++ {
+				err := c.postUnitEvent(ctx, e)
+				if err == nil {
+					break
+				}
+				var rej rejected
+				if errors.As(err, &rej) || try == unitEventTries {
+					c.log.Error("control_unit_event_dropped", map[string]any{"kind": e.Kind, "error": err.Error()})
+					break
+				}
+				if !c.sleep(ctx, b.next()) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (c *Client) postUnitEvent(ctx context.Context, e unitevent.Event) error {
+	e.Reason = clipReason(e.Reason)
+	body, err := json.Marshal(e)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, postTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("unit-events"), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	switch {
+	case resp.StatusCode/100 == 2:
+		return nil
+	case resp.StatusCode/100 == 4 && resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusRequestTimeout && resp.StatusCode != http.StatusTooManyRequests:
+		return rejected(resp.StatusCode)
+	}
+	return fmt.Errorf("unit event: status %d", resp.StatusCode)
 }
 
 // rejected is a 4xx the controller will answer the same way every time.

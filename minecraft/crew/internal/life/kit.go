@@ -13,6 +13,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 const (
@@ -197,7 +198,9 @@ func (l *Life) endKit(err error) {
 	full, _ := k.visit.(interface{ Full() bool })
 	k.visit = nil
 	if err != nil {
-		l.logEvent("kit_failed", map[string]any{"error": err.Error(), "reason_code": task.KitReasonCode(err), "session_id": sessionid.Current()})
+		code := task.KitReasonCode(err)
+		l.logEvent("kit_failed", map[string]any{"error": err.Error(), "reason_code": code, "session_id": sessionid.Current()})
+		unitevent.Emit(unitevent.Event{Kind: "kit_failed", ReasonCode: code, Reason: err.Error()})
 		early := errors.Is(err, skill.ErrChestChunkNotLoaded) || errors.Is(err, skill.ErrChestNotOpened)
 		if early && k.retryTries < kitRetryTries {
 			// A chest whose chunk is merely late, or whose open failed while
