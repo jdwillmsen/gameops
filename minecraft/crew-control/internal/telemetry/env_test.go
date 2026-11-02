@@ -46,7 +46,9 @@ func stateWithEnv(env string) string {
 	return strings.Replace(stateKnownWithTask, `"unique_id":"-4294967290"},`, `"unique_id":"-4294967290","env":`+env+`},`, 1)
 }
 
-func TestPublicStatusCarriesPhaseAndRainButNeverTheBiome(t *testing.T) {
+// Status is a curated surface, not a secrecy boundary: the unit's own state,
+// proxied publicly, still carries the biome.
+func TestPublicStatusCarriesPhaseAndRainButLeavesOutTheBiome(t *testing.T) {
 	unit := newFakeUnit(t, stateWithEnv(`{"day_phase":"night","biome":"swampland","raining":true}`))
 	p := startPoller(t, rosterFor(t, unit.server.URL), 20*time.Millisecond)
 	waitFor(t, "online", func() bool { return p.Snapshot()[0].Online })

@@ -93,6 +93,35 @@ func TestProxyAllowList(t *testing.T) {
 	}
 }
 
+// The state route is public and the camera page needs it, so it is the unit's
+// body untouched. The README says as much; this keeps that claim true.
+func TestProxyStateRouteIsTheUnitsRawStateWithoutSignIn(t *testing.T) {
+	const body = `{"unit":{"id":"crew-01"},"state":{"position":[10,64,-20],"position_known":true,` +
+		`"inventory":[{"slot":0,"name":"iron_pickaxe","count":1,"durability_pct":7}],` +
+		`"armour":[{"slot":"helmet","name":"iron_helmet","durability_pct":40}],` +
+		`"env":{"day_phase":"night","biome":"swampland","raining":true}},"threat":{"hostiles":6,"players":2}}`
+	unit := newFakeUnit(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, body)
+	}))
+	p := newProxy(t, unit.URL)
+
+	resp, err := http.Get(p.URL + "/units/crew-01/v1/state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	got, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(got) != body {
+		t.Fatalf("state = %d %s", resp.StatusCode, got)
+	}
+	for _, field := range []string{`"position"`, `"inventory"`, `"durability_pct"`, `"threat"`, `"biome":"swampland"`} {
+		if !strings.Contains(string(got), field) {
+			t.Errorf("the raw state lost %s", field)
+		}
+	}
+}
+
 func TestProxyRefuses(t *testing.T) {
 	cases := []struct{ method, path string }{
 		{"GET", "/units/crew-01/v1/tasks"},
