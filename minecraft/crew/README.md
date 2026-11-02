@@ -246,7 +246,10 @@ seconds; a task submitted sooner runs first, barehanded.
 
 The unit predicts its own movement and sends the result with every input; the
 server accepts it or corrects it, and `crew_movement_corrections_total` counts
-the corrections. Each correction is also logged as `movement_corrected`, at
+the corrections, and `/v1/state` carries the same running count as
+`movement.corrections` (it survives a reconnect and restarts from zero with the
+process) so the controller can raise `rubberbanding` when it climbs fast. Each
+correction is also logged as `movement_corrected`, at
 most one line per unit per 10 s with a `suppressed` count, carrying the skill,
 movement state and block names around the feet but no positions; the query
 that groups them is in
@@ -556,6 +559,7 @@ failed task to them. `/v1/state` carries `session_id` for the same reason.
 | `no_progress` | an action ran and changed nothing | `block did not break`, `no progress after 5 replans` | mining, climb, shaft |
 | `unit_died` | the unit died with the task running | `unit died` | runner |
 | `unsafe_nearby` | the task stood down for a hostile mob or a stranger | `a hostile mob is nearby` | repair |
+| `movement_corrected` | the server keeps pulling the unit back | none: never a task's reason | crew-control's `rubberbanding` event, from `movement.corrections` |
 | `other` | anything not listed | `something nobody wrote a rule for` | the fallback |
 
 A reason that matches no rule is `other`; the rules are one table in

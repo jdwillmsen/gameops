@@ -144,7 +144,7 @@ func tacticsView(cfg config.Config, src profileReader) *tacticsState {
 // added only for a non-nil view: a nil *tacticsState inside the option's
 // interface would not read as absent.
 func statusOptions(lf *life.Life, view *tacticsState, harness bool) []statusapi.Option {
-	opts := []statusapi.Option{statusapi.WithFight(lf), statusapi.WithSightings(lf), statusapi.WithNearby(lf)}
+	opts := []statusapi.Option{statusapi.WithFight(lf), statusapi.WithSightings(lf), statusapi.WithNearby(lf), statusapi.WithMovement(lf.MoveCounters())}
 	if harness {
 		opts = append(opts, statusapi.WithEntities(lf.EachEntity))
 	}
