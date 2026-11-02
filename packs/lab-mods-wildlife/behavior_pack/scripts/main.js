@@ -1,9 +1,11 @@
-import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server";
+import { world, system, ScriptEventSource, EffectTypes, ItemStack } from "@minecraft/server";
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
   packStrengthAmplifier, packSize, formatCensus, formatEffects, CENSUS_SPECIES,
   formatEvent, levelAllows, eventDue, litterSize, pickParent, PARENT_RANGE, LITTERS,
 } from "./abilities.js";
+import { armorAction, itemOfTier } from "./armor.js";
+import { ARMOR_PROPERTY } from "./armor_tiers.js";
 
 // "off" | "info" | "debug". info logs one line per taming, sit, stand, burst, ability and hit, and an
 // aura at most every AURA_LOG_TICKS per animal; debug logs every aura application. Edit and release to change it.
@@ -410,3 +412,58 @@ system.afterEvents.scriptEventReceive.subscribe((event) => {
     }, 200);
   }
 }, { namespaces: ["gameops"] });
+
+// Armor is worn through a property and data-driven groups (see assets-src/armor.py); script only decides who
+// may change it and moves the item. The before-event cannot write, so the change runs a tick later.
+function setArmor(entity, tier) {
+  entity.triggerEvent(`gameops:armor_${tier}`);
+}
+
+function applyArmorAction(player, animal, action) {
+  if (!animal.isValid || !player.isValid) return;
+  if (action.kind === "deny") {
+    player.sendMessage(action.reason);
+    return;
+  }
+  if (action.kind === "equip") {
+    const slot = player.getComponent("minecraft:inventory")?.container?.getSlot(player.selectedSlotIndex);
+    // The hand may have changed in the tick since the click.
+    if (!slot?.hasItem() || slot.typeId !== action.item) return;
+    if (slot.amount > 1) slot.amount -= 1;
+    else slot.setItem(undefined);
+    setArmor(animal, action.tier);
+    animal.dimension.playSound(action.sound, animal.location);
+    logEvent("info", "armor", { type: animal.typeId, id: animal.id, owner: ownerOf(animal), tier: action.tier, change: "equip" });
+    return;
+  }
+  const item = itemOfTier(action.tier);
+  setArmor(animal, 0);
+  if (item) {
+    const left = player.getComponent("minecraft:inventory")?.container?.addItem(new ItemStack(item, 1));
+    if (left) animal.dimension.spawnItem(left, animal.location);
+  }
+  logEvent("info", "armor", { type: animal.typeId, id: animal.id, owner: ownerOf(animal), tier: action.tier, change: "remove" });
+}
+
+world.beforeEvents.playerInteractWithEntity.subscribe((event) => {
+  const animal = event.target;
+  if (!animal.typeId.startsWith("gameops:") || animal.getProperty(ARMOR_PROPERTY) === undefined) return;
+  const player = event.player;
+  const action = armorAction({
+    tamed: isTamed(animal),
+    ownerId: ownerOf(animal),
+    playerId: player.id,
+    sneaking: player.isSneaking,
+    heldItem: event.itemStack?.typeId,
+    current: animal.getProperty(ARMOR_PROPERTY),
+  });
+  if (action.kind === "ignore") return;
+  event.cancel = true;
+  system.run(() => {
+    try {
+      applyArmorAction(player, animal, action);
+    } catch {
+      // An animal or player that unloaded in the tick between the click and now has nothing to change.
+    }
+  });
+});

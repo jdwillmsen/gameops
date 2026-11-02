@@ -28,3 +28,26 @@ armor for the animals, collar texture plus hearts and a sound on taming.
 - Stable names: component groups, events and properties already in worlds must not change; stages add only.
 - Bump both pack versions and the dependency each time (clients cache by UUID and version).
 - The collar and armor art cannot be judged headlessly; the owner's eyes are the final check.
+
+## Armor spike findings (stage 4)
+
+Bedrock gives a custom mob no generic armor slot, and `EntityEquippableComponent` is not available on it, so
+armor is state on the animal rather than an item it holds. Chosen design, the simplest that needs no new items:
+
+- **Item and input.** Vanilla leather, iron and diamond horse armor. The owner uses one on a tamed animal
+  (`playerInteractWithEntity`, before-event, cancelled so the click does not also sit it). The script takes one
+  item, then fires `gameops:armor_N`. An empty hand while sneaking takes the armor off and returns the item.
+  Only the owner may change it; one tier at a time (remove first to swap).
+- **State.** Entity property `gameops:armor` (int 0-3, `client_sync`), set by the event. Per-tier component group
+  `gameops:armor_N` is added, so it survives reloads.
+- **Damage.** `minecraft:damage_sensor` with `damage_multiplier` 0.8 / 0.6 / 0.4 in the tier group. Data-driven, so
+  it applies before a lethal hit, which an after-hurt script heal could not.
+- **Drops.** The tier group swaps `minecraft:loot` for a per-species table that is the normal drops plus the
+  horse armor, so it returns on death with no script at that moment.
+- **Look.** A second geometry per species (`geometry.gameops.<id>_armor`) holds the chest and rear cubes inflated,
+  with the same UVs and bone names as the base rig, and a conditional render controller
+  (`query.property('gameops:armor') > 0`) picks a tier texture. It is separate from the coat and collar textures.
+  Everything is generated from `assets-src/armor.py`; the script's item table is generated too.
+- **Not verifiable headlessly:** that `damage_multiplier` is honored at format 1.21.0 on BDS, that bone
+  animations move the second geometry, `query.property` in the client render controller, the item click not
+  also triggering sit, and how the barding looks.

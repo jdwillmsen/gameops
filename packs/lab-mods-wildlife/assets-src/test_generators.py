@@ -13,6 +13,7 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import armor  # noqa: E402
 import build_behavior  # noqa: E402
 import build_models  # noqa: E402
 import build_textures  # noqa: E402
@@ -626,6 +627,72 @@ class Generators(unittest.TestCase):
             self.assertEqual((prop["type"], prop["default"]), ("bool", False), s.id)
             self.assertEqual(ent["events"]["gameops:on_sit"]["set_property"], {"gameops:sitting": True}, s.id)
             self.assertEqual(ent["events"]["gameops:on_stand"]["set_property"], {"gameops:sitting": False}, s.id)
+
+    def test_armor_tiers_set_property_group_and_events(self):
+        for s in SPECIES.values():
+            ent = build_behavior.entity_json(s)["minecraft:entity"]
+            prop = ent["description"]["properties"]["gameops:armor"]
+            self.assertEqual((prop["type"], prop["range"], prop["default"], prop["client_sync"]),
+                             ("int", [0, 3], 0, True), s.id)
+            mult = []
+            for t in armor.TIERS:
+                group = ent["component_groups"][f"gameops:armor_{t.number}"]
+                trigger = group["minecraft:damage_sensor"]["triggers"][0]
+                mult.append(trigger["damage_multiplier"])
+                self.assertEqual(group["minecraft:loot"]["table"], f"loot_tables/entities/{s.id}_armor_{t.name}.json")
+                ev = ent["events"][f"gameops:armor_{t.number}"]
+                self.assertEqual(ev["set_property"], {"gameops:armor": t.number})
+                self.assertEqual(ev["add"]["component_groups"], [f"gameops:armor_{t.number}"])
+                self.assertEqual(len(ev["remove"]["component_groups"]), 2)
+            self.assertEqual(mult, sorted(mult, reverse=True), s.id)
+            clear = ent["events"]["gameops:armor_0"]
+            self.assertNotIn("add", clear)
+            self.assertEqual(len(clear["remove"]["component_groups"]), 3)
+
+    def test_armored_loot_returns_the_armor_and_keeps_normal_drops(self):
+        for s in SPECIES.values():
+            base = json.loads(generate.files()[f"behavior_pack/loot_tables/entities/{s.id}.json"])
+            for t in armor.TIERS:
+                table = json.loads(generate.files()[f"behavior_pack/loot_tables/entities/{s.id}_armor_{t.name}.json"])
+                self.assertEqual(table["pools"][:-1], base["pools"])
+                self.assertEqual(table["pools"][-1]["entries"][0]["name"], t.item)
+
+    def test_armor_geometry_covers_only_the_body_and_leaves_uvs_alone(self):
+        for s in SPECIES.values():
+            base = build_models.geometry(s)["minecraft:geometry"][0]
+            geo = armor.geometry(s)["minecraft:geometry"][0]
+            self.assertEqual(geo["description"]["identifier"], f"geometry.gameops.{s.id}_armor")
+            self.assertEqual([b["name"] for b in geo["bones"]], [b["name"] for b in base["bones"]])
+            cubes = [(b["name"], c) for b in geo["bones"] for c in b["cubes"]]
+            self.assertEqual(len(cubes), 2, s.id)
+            self.assertTrue(all(bone == "body" and c["inflate"] > 0 for bone, c in cubes), s.id)
+            base_uvs = [c["uv"] for b in base["bones"] for c in b["cubes"]]
+            self.assertTrue(all(c["uv"] in base_uvs for _, c in cubes), s.id)
+
+    def test_armor_textures_are_distinct_per_tier_and_only_paint_the_body(self):
+        for s in SPECIES.values():
+            pngs = [armor.paint(s, t) for t in armor.TIERS]
+            self.assertEqual(len(set(pngs)), 3, s.id)
+            self.assertTrue(all(pngs))
+
+    def test_client_entity_layers_armor_only_when_worn(self):
+        for s in SPECIES.values():
+            desc = json.loads(generate.files()[f"resource_pack/entity/{s.id}.entity.json"])[
+                "minecraft:client_entity"]["description"]
+            self.assertEqual(desc["geometry"]["armor"], f"geometry.gameops.{s.id}_armor")
+            for t in armor.TIERS:
+                self.assertEqual(desc["textures"][f"armor_{t.name}"], f"textures/entity/{s.id}_armor_{t.name}")
+            self.assertEqual(desc["render_controllers"][1],
+                             {f"controller.render.gameops.{s.id}_armor": "query.property('gameops:armor') > 0"})
+            ctl = json.loads(generate.files()[f"resource_pack/render_controllers/{s.id}.render_controllers.json"])
+            armor_ctl = ctl["render_controllers"][f"controller.render.gameops.{s.id}_armor"]
+            self.assertEqual(armor_ctl["geometry"], "Geometry.armor")
+            self.assertEqual(armor_ctl["textures"], ["Array.plates[query.property('gameops:armor') - 1]"])
+
+    def test_script_tier_table_is_generated_from_the_tiers(self):
+        js = generate.files()["behavior_pack/scripts/armor_tiers.js"].decode()
+        for t in armor.TIERS:
+            self.assertIn(f'"{t.item}"', js)
 
 
 if __name__ == "__main__":

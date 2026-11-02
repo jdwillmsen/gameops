@@ -7,10 +7,14 @@
         "default": "entity_alphatest"
       },
       "textures": {
-        "default": "textures/entity/brown_bear"
+        "default": "textures/entity/brown_bear",
+        "armor_leather": "textures/entity/brown_bear_armor_leather",
+        "armor_iron": "textures/entity/brown_bear_armor_iron",
+        "armor_diamond": "textures/entity/brown_bear_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.brown_bear"
+        "default": "geometry.gameops.brown_bear",
+        "armor": "geometry.gameops.brown_bear_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -32,7 +36,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.brown_bear"
+        "controller.render.gameops.brown_bear",
+        {
+          "controller.render.gameops.brown_bear_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#5a3a22",
