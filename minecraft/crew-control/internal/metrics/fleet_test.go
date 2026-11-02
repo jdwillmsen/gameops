@@ -623,7 +623,7 @@ func TestEveryFleetSeriesCarriesItsUnitsWorld(t *testing.T) {
 		born("crew-03", "task_done", "gather_and_deposit", 9*time.Second, ""),
 		born("crew-03", "task_failed", "mine_shaft", 5*time.Second, "no pickaxe in inventory"),
 		born("crew-03", "stuck", "", 0, ""),
-		{Event: telemetry.Event{Unit: "crew-03", Kind: "died", Attrs: map[string]any{"day_phase": "night"}}},
+		{Event: telemetry.Event{Unit: "crew-03", Kind: "died", DayPhase: "night"}},
 	})
 	f.ObservePoll(time.Unix(1, 0), []telemetry.UnitState{
 		{ID: "crew-01", World: "lab", State: "working"}, {ID: "crew-02", State: "idle"}, {ID: "crew-03", State: "offline"},
