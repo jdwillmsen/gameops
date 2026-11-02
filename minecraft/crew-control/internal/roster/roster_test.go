@@ -153,3 +153,29 @@ func TestNameOfIsTheInGameNameOfAKnownUnit(t *testing.T) {
 		t.Error("an unknown unit has a name")
 	}
 }
+
+func TestParseDefaultsAUnitsWorldToTheLab(t *testing.T) {
+	r, err := Parse(`[{"id":"crew-01","name":"A","url":"http://h:1"},
+		{"id":"crew-02","name":"B","url":"http://h:2","world":"fwb"},
+		{"id":"crew-03","name":"C","url":"http://h:3","world":"fwb"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{"crew-01": DefaultWorld, "crew-02": "fwb", "crew-03": "fwb"} {
+		if u, _ := r.Get(id); u.World != want {
+			t.Errorf("%s world = %q, want %q", id, u.World, want)
+		}
+	}
+	if got := r.Worlds(); len(got) != 2 || got[0] != "lab" || got[1] != "fwb" {
+		t.Errorf("Worlds = %v, want [lab fwb] in first-seen order", got)
+	}
+}
+
+func TestParseRejectsAWorldThatIsNotASlug(t *testing.T) {
+	for _, bad := range []string{"Lab", "1lab", "la b", `la"b`, "lab\n", "a-very-long-world-name", "é"} {
+		raw := fmt.Sprintf(`[{"id":"crew-01","name":"A","url":"http://h:1","world":%q}]`, bad)
+		if _, err := Parse(raw); err == nil {
+			t.Errorf("world %q was accepted", bad)
+		}
+	}
+}

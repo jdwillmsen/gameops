@@ -7,12 +7,16 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"unicode/utf8"
 )
 
 const (
 	maxUnits   = 26
 	maxNameLen = 16
+	// DefaultWorld is the world a unit belongs to when the roster names none:
+	// today's whole fleet is the one lab.
+	DefaultWorld = "lab"
 )
 
 var (
@@ -21,6 +25,9 @@ var (
 	// by: the player's UniqueID, written as a signed decimal. Both readings
 	// of the 64 bits are accepted, as the map's own lookup does.
 	playerPattern = regexp.MustCompile(`^-?[0-9]{1,20}$`)
+	// worldPattern keeps a world slug safe as a metric label value and a
+	// public sentence fragment: lowercase, short, no punctuation but a dash.
+	worldPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 )
 
 // Unit is one worker the console can show.
@@ -30,6 +37,10 @@ type Unit struct {
 	// Player is the unit's player id in the world save, set by hand; empty
 	// when the unit's own report of it is to be used.
 	Player string
+	// World is the slug of the world the unit plays in. The roster's slugs
+	// are the whole vocabulary of the world label, so a unit cannot make up
+	// a new one.
+	World string
 }
 
 // Roster keeps units in the order they were configured.
@@ -40,6 +51,21 @@ type Roster struct {
 
 func (r Roster) Units() []Unit {
 	return append([]Unit(nil), r.units...)
+}
+
+// ValidWorld reports whether s has the shape of a world slug, which is what
+// a reader of stored events checks before it lets a world into a sentence.
+func ValidWorld(s string) bool { return worldPattern.MatchString(s) }
+
+// Worlds lists the distinct world slugs in the order each first appears.
+func (r Roster) Worlds() []string {
+	var out []string
+	for _, u := range r.units {
+		if !slices.Contains(out, u.World) {
+			out = append(out, u.World)
+		}
+	}
+	return out
 }
 
 // Has reports whether id names a unit on the roster, as the squad routes
@@ -92,6 +118,8 @@ type rawUnit struct {
 	// Player is the unit's id in the world save, and is optional: without
 	// it the id the unit reports for itself is used.
 	Player string `json:"player"`
+	// World is optional and defaults to DefaultWorld.
+	World string `json:"world"`
 }
 
 // Parse reads the CREW_UNITS JSON. The roster is operator-supplied, but the
@@ -130,8 +158,15 @@ func Parse(raw string) (Roster, error) {
 		if ru.Player != "" && !playerPattern.MatchString(ru.Player) {
 			return Roster{}, fmt.Errorf("unit %s player %q must match %s", ru.ID, ru.Player, playerPattern)
 		}
+		world := ru.World
+		if world == "" {
+			world = DefaultWorld
+		}
+		if !worldPattern.MatchString(world) {
+			return Roster{}, fmt.Errorf("unit %s world %q must match %s", ru.ID, world, worldPattern)
+		}
 		r.byID[ru.ID] = len(r.units)
-		r.units = append(r.units, Unit{ID: ru.ID, Name: ru.Name, URL: u, Player: ru.Player})
+		r.units = append(r.units, Unit{ID: ru.ID, Name: ru.Name, URL: u, Player: ru.Player, World: world})
 	}
 	return r, nil
 }

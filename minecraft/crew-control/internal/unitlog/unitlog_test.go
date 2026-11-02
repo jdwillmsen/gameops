@@ -54,3 +54,20 @@ func TestFromPrefersTheAnalyticColumns(t *testing.T) {
 		t.Fatalf("event = %+v", e)
 	}
 }
+
+func TestWorldAndDimensionComeFromTheClosedListsOnly(t *testing.T) {
+	for _, c := range []struct{ payload, world, dim string }{
+		{`{"world":"fwb","dim":"nether"}`, "fwb", "nether"},
+		{`{"world":"lab","dim":"end"}`, "lab", "end"},
+		{`{"world":"lab","dim":"overworld"}`, "lab", "overworld"},
+		{`{"dim":"Steve at 1 2 3"}`, "", "other"},
+		{`{"world":"Steve at 1 2 3"}`, "", ""},
+		{`{"world":"<img src=x>"}`, "", ""},
+		{`{}`, "", ""},
+	} {
+		e := From(events.Event{Kind: KindDied, Payload: []byte(c.payload)})
+		if e.World != c.world || e.Dim != c.dim {
+			t.Errorf("%s: world %q dim %q, want %q %q", c.payload, e.World, e.Dim, c.world, c.dim)
+		}
+	}
+}

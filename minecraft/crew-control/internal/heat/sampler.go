@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
 
@@ -20,7 +21,9 @@ type Source interface {
 }
 
 // Sample records one reading of every unit. Only the overworld is mapped:
-// coordinates in another dimension would land on unrelated lab cells.
+// coordinates in another dimension would land on unrelated lab cells. A
+// sample skipped for that reason is reported to OnDrop, so the gap is
+// countable.
 func (s *Store) Sample(src Source, now time.Time) {
 	status := map[string]telemetry.Status{}
 	for _, st := range src.Snapshot() {
@@ -28,8 +31,15 @@ func (s *Store) Sample(src Source, now time.Time) {
 	}
 	for _, p := range src.Positions() {
 		st := status[p.ID]
-		if !p.Known || p.Dim != 0 || !st.Online || st.Dead {
+		if !p.Known || !st.Online || st.Dead {
 			s.Forget(p.ID)
+			continue
+		}
+		if dimension.Name(p.Dim) != dimension.Overworld {
+			s.Forget(p.ID)
+			if s.OnDrop != nil {
+				s.OnDrop(p)
+			}
 			continue
 		}
 		mining := st.Task != nil && strings.HasPrefix(st.Task.Template, "gather")

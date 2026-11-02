@@ -163,6 +163,33 @@ func TestSampleSkipsOfflineDeadAndOtherDimensions(t *testing.T) {
 	}
 }
 
+func TestSampleReportsTheDimensionOfEachSampleItLeavesOut(t *testing.T) {
+	s := New()
+	var dropped []telemetry.Position
+	s.OnDrop = func(p telemetry.Position) { dropped = append(dropped, p) }
+	s.Sample(fakeSrc{
+		pos: []telemetry.Position{
+			{ID: "ow", X: 8, Z: 8, Known: true},
+			{ID: "nether", X: 8, Z: 8, Known: true, Dim: 1},
+			{ID: "end", X: 8, Z: 8, Known: true, Dim: 2},
+			// Not located, offline or dead: there is no dimension to report.
+			{ID: "lost", Known: false, Dim: 1},
+			{ID: "off", X: 8, Z: 8, Known: true, Dim: 1},
+			{ID: "dead", X: 8, Z: 8, Known: true, Dim: 1},
+		},
+		st: []telemetry.Status{
+			{ID: "ow", Online: true}, {ID: "nether", Online: true}, {ID: "end", Online: true}, {ID: "lost", Online: true},
+			{ID: "off"}, {ID: "dead", Online: true, Dead: true},
+		},
+	}, t0)
+	if len(dropped) != 2 || dropped[0].ID != "nether" || dropped[1].ID != "end" {
+		t.Fatalf("dropped = %+v, want the nether and end samples only", dropped)
+	}
+	if g := s.Query("", Position, "15m", t0); total(g) != 1 {
+		t.Errorf("the overworld sample must still be kept: %v", g.Cells)
+	}
+}
+
 type gate bool
 
 func (g gate) Operator(*http.Request) (auth.Operator, bool) { return auth.Operator{}, bool(g) }

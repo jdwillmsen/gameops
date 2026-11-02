@@ -135,7 +135,7 @@ func main() {
 	for _, u := range units.Units() {
 		ids = append(ids, u.ID)
 	}
-	fleet := metrics.New(ids)
+	fleet := metrics.New(ids, metrics.ForRoster(units))
 	fleet.WatchEventStore(eventFallback)
 	alertCfg, err := alerts.ParseConfig(os.Getenv("CREW_ALERTS"))
 	if err != nil {
@@ -178,6 +178,7 @@ func main() {
 	streamCtx, endStreams := context.WithCancel(context.Background())
 	defer endStreams()
 	heatmap := heat.New()
+	heatmap.OnDrop = func(p telemetry.Position) { fleet.PositionDropped(metrics.StoreHeat, p) }
 	// Like the event history, replay never goes dark: memory serves until
 	// the database answers.
 	positions := replay.NewFallback(log)
@@ -233,7 +234,9 @@ func main() {
 	defer stop()
 
 	go heatmap.Run(ctx, poller, heatEvery(log))
-	go replay.NewRecorder(positions).Run(ctx, poller, replay.DefaultEvery)
+	positionRecorder := replay.NewRecorder(positions)
+	positionRecorder.OnDrop = func(p telemetry.Position) { fleet.PositionDropped(metrics.StoreReplay, p) }
+	go positionRecorder.Run(ctx, poller, replay.DefaultEvery)
 
 	pollDone := make(chan struct{})
 	go func() { poller.Run(ctx); close(pollDone) }()
@@ -518,6 +521,14 @@ func bornEvent(b telemetry.Born) (events.Event, events.Hint) {
 	}
 	for k, v := range b.Attrs {
 		payload[k] = v
+	}
+	// Two names from closed lists: the stored form of where the unit was. They
+	// are payload keys, not columns, so history from before them reads empty.
+	if b.World != "" {
+		payload["world"] = b.World
+	}
+	if b.Dim != "" {
+		payload["dim"] = b.Dim
 	}
 	e := events.Event{Unit: b.Unit, At: b.At, Kind: b.Kind, Severity: b.Level,
 		SessionID: events.CleanSession(b.Session), CrewVersion: events.CleanVersion(b.Version)}

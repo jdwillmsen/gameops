@@ -14,6 +14,9 @@ const (
 type UnitState struct {
 	ID    string
 	State string
+	// World is the unit's roster world. Dim is its dimension's closed name,
+	// empty while offline or before it knows where it stands.
+	World, Dim string
 	// Health and Hunger are nil while the unit is offline or has not reported
 	// them, so an absent reading is never exported as zero.
 	Health, Hunger *float32
@@ -50,7 +53,7 @@ func (p *Poller) statesLocked() []UnitState {
 	out := make([]UnitState, len(p.units))
 	for i, u := range p.units {
 		st := p.statuses[i]
-		out[i] = UnitState{ID: u.ID, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger, ToolDurability: p.tracks[i].held, ToolItem: p.tracks[i].heldItem, Fight: p.tracks[i].fightPrev}
+		out[i] = UnitState{ID: u.ID, World: u.World, Dim: p.positions[i].DimName, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger, ToolDurability: p.tracks[i].held, ToolItem: p.tracks[i].heldItem, Fight: p.tracks[i].fightPrev}
 	}
 	return out
 }

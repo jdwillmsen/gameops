@@ -542,6 +542,29 @@ func TestBornEventKeepsItsDayPhaseForTheReplay(t *testing.T) {
 	}
 }
 
+func TestBornEventStoresWorldAndDimensionInThePayloadNotAColumn(t *testing.T) {
+	b := telemetry.Born{Event: telemetry.Event{Unit: "crew-01", At: time.Now(), Kind: "died", Level: "crit", Text: "died", World: "fwb", Dim: "nether"},
+		Pos: telemetry.Position{X: 1, Y: 2, Z: 3, Known: true}}
+	e, _ := bornEvent(b)
+	var p map[string]any
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p["world"] != "fwb" || p["dim"] != "nether" {
+		t.Fatalf("payload: %s (%v)", e.Payload, err)
+	}
+	// The coordinates stay in the position column, never in the payload.
+	for _, k := range []string{"x", "y", "z", "pos"} {
+		if _, leaked := p[k]; leaked {
+			t.Errorf("payload carries %q: %s", k, e.Payload)
+		}
+	}
+
+	// An older event with neither stays free of both keys.
+	b.World, b.Dim = "", ""
+	e, _ = bornEvent(b)
+	if strings.Contains(string(e.Payload), "world") || strings.Contains(string(e.Payload), `"dim"`) {
+		t.Errorf("empty world or dim was written: %s", e.Payload)
+	}
+}
+
 func TestUnitDetailRouteIsServedBeforeTheProxy(t *testing.T) {
 	// If the detail path ever reached the proxy it would be 404d there;
 	// the upstream counts to prove it never got that far.
