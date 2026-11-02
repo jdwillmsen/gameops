@@ -111,15 +111,16 @@ Goal: learn whether a licence is required, at the lowest cost and risk.
 4. **Condition B (if A fails):** sign into the official launcher once with that
    account, buy nothing, retry. [from S9]
 5. **Condition C (if B fails):** buy the Java and Bedrock bundle for that one
-   account ($29.99, section 2) and retry. This is the only spend, and it
-   isolates "licence required".
+   account ($29.99, section 2) and retry. This is the only spend, but it does
+   not isolate "licence required" on its own: B and C also change launcher and
+   profile state, so read the table as evidence, not proof.
 
 | Result | Meaning | Next |
 |---|---|---|
 | A joins | Free account is enough for this BDS version. Re-test after BDS updates. | Section 7 plan, licence cost 0 |
-| A fails, B joins | Profile or launcher first-run was missing, not a licence | Add "launcher first-run" to the creation checklist |
-| B fails, C joins | Licence required | Section 2 costs apply per account |
-| C fails | Not a licence or profile issue | Stop; file a ticket; compare with disconnect reason in BDS log |
+| A fails, B joins | Consistent with a missing profile or launcher first-run | Add "launcher first-run" to the creation checklist |
+| B fails, C joins | Consistent with a licence requirement; confirm before buying more | Section 2 costs apply per account if confirmed |
+| C fails | Does not rule out a licence or profile cause | Stop; file a ticket; compare with disconnect reason in BDS log |
 
 A side result of the same run is a reference for which disconnect reason we get
 for each cause. [unverified: whether the reasons differ]
@@ -382,11 +383,14 @@ Do not record dates of birth beyond "adult: yes".
 - One token cache **per unit on the cluster PVC** (`/data`), keyed by the
   account id; the repo's `mcauth` file store does this, and a database-backed
   store exists for failover. [verified: S37]
-- Refresh tokens rotate, so two writers racing can retire the stored one; the
-  store refuses stale writes (`ErrStoreConflict`). [verified: S37] Never copy a
+- Refresh tokens rotate, so two writers racing can retire the stored one. The
+  database store refuses stale writes (`ErrStoreConflict`). [verified: S37]
+  The file cache does not, so run one live writer per account. Never copy a
   cache between units.
 - Never in git, tickets, chat, CI variables or logs. Pod logs contain the
-  device code by design (S37), so read them in your own terminal.
+  device code by design (S37): anyone who can read them can finish the login.
+  Restrict pod-log access and retention for the pool's namespace, and read
+  them in your own terminal.
 
 ### 7.4 Device-code login (per account)
 
@@ -406,10 +410,15 @@ already splits "no token yet" from every other failure for that reason.
 - **Rotate** a password on suspicion of leak; changing it at
   account.microsoft.com should invalidate refresh tokens [unverified], so
   re-run 7.4 afterwards.
-- **Revoke:** stop the unit, delete the PVC cache, change the password, remove
-  the allowlist entry.
-- **Expired or rejected token:** the unit stops and alerts; the owner re-runs
-  7.4. Do not loop retries.
+- **Revoke:** stop every unit using the account, remove its token from every
+  configured store (the PVC cache and the database store), change the password,
+  remove the allowlist entry, and check that no cached refresh token remains.
+- **Expired or rejected token:** the owner re-runs 7.4. Note the current
+  behaviour: `mcauth.TokenSource` paces refresh failures and may offer a
+  device-code login after repeated refusals, and `runConnectLoop` logs, waits
+  and starts another session. So the unit does not stop by itself; a hard-stop
+  and an alert on repeated refusal are a build item before G3, and until
+  then stop the unit by hand. [verified: S37]
 - **Lock or verification prompt:** use the on-screen unlock path or Microsoft's
   support route yourself. Do not create a replacement account to get around it
   (S21 lists that as a violation).
@@ -426,7 +435,7 @@ already splits "no token yet" from every other failure for that reason.
 | G0 | Owner reads MSA 3.a/4.a and the Minecraft EULA; optional written question to support | Owner accepts the "unclear" risk in 3.3 | Fall back to 6.1 and 6.4 |
 | G1 | The 1-account experiment (1.4), plus the zero-cost RakNet and Dragonfly checks (6.1, 6.2) | Account joins under A, B or C | If C fails, stop and file a ticket |
 | G2 | Make 2 more accounts by hand, spread over days, true details, no retries after any block | All sign-ups complete first try | Any block: stop, ask support |
-| G3 | Run 3 warriors for 7 days | No lock, no re-auth prompt, tokens refresh | Park all, investigate |
+| G3 | Build the hard-stop and alert on repeated token refusal; then run 3 warriors for 7 days | No lock, no re-auth prompt, tokens refresh | Park all, investigate |
 | G4 | Add 3 duel and 2 CI accounts; run 14 days | Same | Hold at 3 |
 | G5 | Decide 22 | 60 days clean, written support answer if obtained, budget approved | Stay at 8 to 12 |
 
