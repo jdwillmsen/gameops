@@ -662,3 +662,34 @@ func TestBornEventKeepsOnlyAPlausibleSessionAndVersion(t *testing.T) {
 		t.Fatalf("unusable values stored: %q %q", e.SessionID, e.CrewVersion)
 	}
 }
+
+func TestUnitEventSinkStoresAKitFailureWithItsSession(t *testing.T) {
+	mem := events.NewMemory()
+	l := &events.Lazy{}
+	l.Set(mem)
+	w := events.NewWriter(l, logging.New("error"))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(ctx); close(done) }()
+
+	now := time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)
+	sink := unitEventSink(w, func() time.Time { return now })
+	body := `{"kind":"kit_failed","at":"2026-11-02T03:00:00Z","reason_code":"kit_no_path","reason":"no path","session_id":"6a36f7ecb575","crew_version":"1.79.0","future":1}`
+	if err := sink("crew-01", []byte(body)); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{`{"kind":"task_failed"}`, `{"kind":"kit_failed","session_id":"NOT A SESSION"}`, `not json`} {
+		if err := sink("crew-01", []byte(bad)); err == nil {
+			t.Errorf("%s was accepted", bad)
+		}
+	}
+	cancel()
+	<-done
+	page, err := mem.Query(context.Background(), events.Query{Kind: "kit_failed"})
+	if err != nil || len(page.Events) != 1 {
+		t.Fatalf("stored %v, %v", page.Events, err)
+	}
+	if e := page.Events[0]; e.Unit != "crew-01" || e.ReasonCode != "kit_no_path" || e.SessionID != "6a36f7ecb575" || e.CrewVersion != "1.79.0" {
+		t.Fatalf("%+v", e)
+	}
+}
