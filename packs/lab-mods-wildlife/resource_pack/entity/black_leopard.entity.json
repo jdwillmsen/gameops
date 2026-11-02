@@ -7,10 +7,14 @@
         "default": "entity_alphatest"
       },
       "textures": {
-        "default": "textures/entity/black_leopard"
+        "default": "textures/entity/black_leopard",
+        "armor_leather": "textures/entity/black_leopard_armor_leather",
+        "armor_iron": "textures/entity/black_leopard_armor_iron",
+        "armor_diamond": "textures/entity/black_leopard_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.black_leopard"
+        "default": "geometry.gameops.black_leopard",
+        "armor": "geometry.gameops.black_leopard_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -32,7 +36,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.black_leopard"
+        "controller.render.gameops.black_leopard",
+        {
+          "controller.render.gameops.black_leopard_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#26262c",

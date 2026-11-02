@@ -185,7 +185,8 @@ WILDLIFE_COMPONENTS = frozenset((
     "minecraft:behavior.melee_attack", "minecraft:behavior.nearest_attackable_target",
     "minecraft:behavior.owner_hurt_target", "minecraft:behavior.owner_hurt_by_target",
     "minecraft:behavior.random_look_around", "minecraft:behavior.random_stroll",
-    "minecraft:behavior.stay_while_sitting", "minecraft:collision_box", "minecraft:follow_range",
+    "minecraft:behavior.stay_while_sitting", "minecraft:collision_box", "minecraft:damage_sensor",
+    "minecraft:follow_range",
     "minecraft:breedable", "minecraft:experience_reward", "minecraft:health", "minecraft:is_baby", "minecraft:is_tamed", "minecraft:jump.static",
     "minecraft:loot", "minecraft:movement",
     "minecraft:movement.basic", "minecraft:nameable", "minecraft:navigation.walk", "minecraft:persistent",
@@ -360,8 +361,11 @@ def check_pack_dir(pack, rep):
         for name, ref in (desc.get("geometry") or {}).items():
             if ref not in geometries:
                 rep.fail(f"{path}: geometry {ref!r} is not defined under models/")
-        for ref in desc.get("render_controllers") or []:
-            if ref not in controllers:
+        for entry in desc.get("render_controllers") or []:
+            # A conditional controller is written as {name: molang}.
+            for ref in (entry if isinstance(entry, dict) else [entry]):
+                if ref in controllers:
+                    continue
                 rep.fail(f"{path}: render controller {ref!r} is not defined")
         for name, ref in (desc.get("textures") or {}).items():
             if not os.path.isfile(os.path.join(rp, ref + ".png")):

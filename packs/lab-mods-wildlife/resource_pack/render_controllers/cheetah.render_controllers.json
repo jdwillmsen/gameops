@@ -19,6 +19,26 @@
       "textures": [
         "Texture.default"
       ]
+    },
+    "controller.render.gameops.cheetah_armor": {
+      "geometry": "Geometry.armor",
+      "materials": [
+        {
+          "*": "Material.default"
+        }
+      ],
+      "arrays": {
+        "textures": {
+          "Array.plates": [
+            "Texture.armor_leather",
+            "Texture.armor_iron",
+            "Texture.armor_diamond"
+          ]
+        }
+      },
+      "textures": [
+        "Array.plates[query.property('gameops:armor') - 1]"
+      ]
     }
   }
 }

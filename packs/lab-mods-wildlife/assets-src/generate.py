@@ -8,6 +8,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import armor  # noqa: E402
 import build_behavior  # noqa: E402
 import build_models  # noqa: E402
 import build_textures  # noqa: E402
@@ -28,8 +29,8 @@ def client_entity(s: Species) -> dict:
             "description": {
                 "identifier": f"gameops:{s.id}",
                 "materials": {"default": "entity_alphatest"},
-                "textures": textures,
-                "geometry": {"default": f"geometry.gameops.{s.id}"},
+                "textures": {**textures, **{f"armor_{t.name}": armor.texture_path(s, t) for t in armor.TIERS}},
+                "geometry": {"default": f"geometry.gameops.{s.id}", "armor": armor.geometry_id(s)},
                 "animations": {n: build_models.ANIMATION_PREFIX + n for n in build_models.ANIMATION_NAMES},
                 "scripts": {
                     "scale": f"{s.adult_scale} * (query.is_baby ? 0.5 : 1.0)" if s.adult_scale != 1.0
@@ -40,7 +41,10 @@ def client_entity(s: Species) -> dict:
                         {"attack": "variable.attack_time > 0"},
                     ],
                 },
-                "render_controllers": [f"controller.render.gameops.{s.id}"],
+                "render_controllers": [
+                    f"controller.render.gameops.{s.id}",
+                    {f"controller.render.gameops.{s.id}_armor": f"query.property('{armor.ARMOR_PROPERTY}') > 0"},
+                ],
                 "spawn_egg": {"base_color": s.egg[0], "overlay_color": s.egg[1]},
             },
         },
@@ -59,7 +63,20 @@ def render_controller(s: Species) -> dict:
         ctl["textures"] = ["Array.skins[query.variant]"]
     else:
         ctl["textures"] = ["Texture.default"]
-    return {"format_version": "1.8.0", "render_controllers": {f"controller.render.gameops.{s.id}": ctl}}
+    return {"format_version": "1.8.0", "render_controllers": {
+        f"controller.render.gameops.{s.id}": ctl,
+        f"controller.render.gameops.{s.id}_armor": armor_render_controller(),
+    }}
+
+
+def armor_render_controller() -> dict:
+    """Barding drawn over the coat; only active while the entity property is above 0, so index is tier - 1."""
+    return {
+        "geometry": "Geometry.armor",
+        "materials": [{"*": "Material.default"}],
+        "arrays": {"textures": {"Array.plates": [f"Texture.armor_{t.name}" for t in armor.TIERS]}},
+        "textures": [f"Array.plates[query.property('{armor.ARMOR_PROPERTY}') - 1]"],
+    }
 
 
 def loot_table(s: Species) -> dict:
@@ -89,12 +106,18 @@ def files() -> dict:
     out = {
         "resource_pack/animations/cat.animation.json": dump(build_models.animations()),
         "resource_pack/texts/en_US.lang": lang(species),
+        "behavior_pack/scripts/armor_tiers.js": armor.script_module(),
     }
     for s in species:
         out[f"behavior_pack/entities/{s.id}.json"] = dump(build_behavior.entity_json(s))
         out[f"behavior_pack/loot_tables/entities/{s.id}.json"] = dump(loot_table(s))
         out[f"resource_pack/entity/{s.id}.entity.json"] = dump(client_entity(s))
         out[f"resource_pack/models/entity/{s.id}.geo.json"] = dump(build_models.geometry(s))
+        out[f"resource_pack/models/entity/{s.id}_armor.geo.json"] = dump(armor.geometry(s))
+        for tier in armor.TIERS:
+            out[f"behavior_pack/loot_tables/entities/{s.id}_armor_{tier.name}.json"] = dump(
+                armor.loot_table(loot_table(s), tier))
+            out[f"resource_pack/{armor.texture_path(s, tier)}.png"] = armor.paint(s, tier)
         out[f"resource_pack/render_controllers/{s.id}.render_controllers.json"] = dump(render_controller(s))
         for variant, path in build_textures.texture_names(s):
             out[f"resource_pack/{path}.png"] = build_textures.paint(s, variant)

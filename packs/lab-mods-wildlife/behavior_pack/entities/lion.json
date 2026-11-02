@@ -15,6 +15,15 @@
           "type": "bool",
           "default": false,
           "client_sync": true
+        },
+        "gameops:armor": {
+          "type": "int",
+          "range": [
+            0,
+            3
+          ],
+          "default": 0,
+          "client_sync": true
         }
       }
     },
@@ -272,6 +281,45 @@
           }
         }
       },
+      "gameops:armor_1": {
+        "minecraft:damage_sensor": {
+          "triggers": [
+            {
+              "cause": "all",
+              "damage_multiplier": 0.8
+            }
+          ]
+        },
+        "minecraft:loot": {
+          "table": "loot_tables/entities/lion_armor_leather.json"
+        }
+      },
+      "gameops:armor_2": {
+        "minecraft:damage_sensor": {
+          "triggers": [
+            {
+              "cause": "all",
+              "damage_multiplier": 0.6
+            }
+          ]
+        },
+        "minecraft:loot": {
+          "table": "loot_tables/entities/lion_armor_iron.json"
+        }
+      },
+      "gameops:armor_3": {
+        "minecraft:damage_sensor": {
+          "triggers": [
+            {
+              "cause": "all",
+              "damage_multiplier": 0.4
+            }
+          ]
+        },
+        "minecraft:loot": {
+          "table": "loot_tables/entities/lion_armor_diamond.json"
+        }
+      },
       "gameops:variant_male": {
         "minecraft:variant": {
           "value": 0
@@ -498,6 +546,66 @@
         "remove": {
           "component_groups": [
             "gameops:baby"
+          ]
+        }
+      },
+      "gameops:armor_0": {
+        "set_property": {
+          "gameops:armor": 0
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:armor_1",
+            "gameops:armor_2",
+            "gameops:armor_3"
+          ]
+        }
+      },
+      "gameops:armor_1": {
+        "set_property": {
+          "gameops:armor": 1
+        },
+        "add": {
+          "component_groups": [
+            "gameops:armor_1"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:armor_2",
+            "gameops:armor_3"
+          ]
+        }
+      },
+      "gameops:armor_2": {
+        "set_property": {
+          "gameops:armor": 2
+        },
+        "add": {
+          "component_groups": [
+            "gameops:armor_2"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:armor_1",
+            "gameops:armor_3"
+          ]
+        }
+      },
+      "gameops:armor_3": {
+        "set_property": {
+          "gameops:armor": 3
+        },
+        "add": {
+          "component_groups": [
+            "gameops:armor_3"
+          ]
+        },
+        "remove": {
+          "component_groups": [
+            "gameops:armor_1",
+            "gameops:armor_2"
           ]
         }
       }

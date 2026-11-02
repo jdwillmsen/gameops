@@ -7,10 +7,14 @@
         "default": "entity_alphatest"
       },
       "textures": {
-        "default": "textures/entity/cheetah"
+        "default": "textures/entity/cheetah",
+        "armor_leather": "textures/entity/cheetah_armor_leather",
+        "armor_iron": "textures/entity/cheetah_armor_iron",
+        "armor_diamond": "textures/entity/cheetah_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.cheetah"
+        "default": "geometry.gameops.cheetah",
+        "armor": "geometry.gameops.cheetah_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -32,7 +36,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.cheetah"
+        "controller.render.gameops.cheetah",
+        {
+          "controller.render.gameops.cheetah_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#d9b25a",

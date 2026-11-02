@@ -1,3 +1,4 @@
+import armor
 from species import Species
 
 NOT_PLAYER = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
@@ -139,6 +140,18 @@ def entity_json(s: Species) -> dict:
     }
     groups = {"gameops:wild": wild, "gameops:tamed": tamed, "gameops:tamed_active": active,
               "gameops:sitting": sitting, "gameops:baby": baby}
+    # Armor is a tier on the entity: each tier's group cuts the damage taken and swaps the death drops for a
+    # table that also returns the armor, so neither needs script at the moment of the hit or the death.
+    armor_events = {}
+    for tier in armor.TIERS:
+        groups[armor.group_name(tier.number)] = {
+            "minecraft:damage_sensor": {"triggers": [{"cause": "all", "damage_multiplier": tier.multiplier}]},
+            "minecraft:loot": {"table": f"loot_tables/entities/{s.id}_armor_{tier.name}.json"},
+        }
+    for n in range(len(armor.TIERS) + 1):
+        others = [armor.group_name(o.number) for o in armor.TIERS if o.number != n]
+        armor_events[armor.event_name(n)] = event(
+            add=[armor.group_name(n)] if n else (), remove=others, props={armor.ARMOR_PROPERTY: n})
     ability_events = {}
     if s.active_speed:
         ability_group_defs, ability_events = ability_groups(s)
@@ -178,6 +191,8 @@ def entity_json(s: Species) -> dict:
                 "properties": {
                     SITTING_PROPERTY: {"type": "bool", "default": False},
                     TAMED_PROPERTY: {"type": "bool", "default": False, "client_sync": True},
+                    armor.ARMOR_PROPERTY: {"type": "int", "range": [0, len(armor.TIERS)], "default": 0,
+                                           "client_sync": True},
                 },
             },
             "component_groups": groups,
@@ -217,6 +232,7 @@ def entity_json(s: Species) -> dict:
                 "gameops:on_orphan": event(add=["gameops:tamed"], remove=["gameops:wild"]),
                 **variant_events,
                 "gameops:grow_up": event(remove=["gameops:baby"]),
+                **armor_events,
                 **ability_events,
             },
         },

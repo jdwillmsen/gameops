@@ -8,10 +8,14 @@
       },
       "textures": {
         "regular": "textures/entity/hyena_regular",
-        "alpha": "textures/entity/hyena_alpha"
+        "alpha": "textures/entity/hyena_alpha",
+        "armor_leather": "textures/entity/hyena_armor_leather",
+        "armor_iron": "textures/entity/hyena_armor_iron",
+        "armor_diamond": "textures/entity/hyena_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.hyena"
+        "default": "geometry.gameops.hyena",
+        "armor": "geometry.gameops.hyena_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -33,7 +37,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.hyena"
+        "controller.render.gameops.hyena",
+        {
+          "controller.render.gameops.hyena_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#b59a62",

@@ -8,10 +8,14 @@
       },
       "textures": {
         "male": "textures/entity/lion_male",
-        "female": "textures/entity/lion_female"
+        "female": "textures/entity/lion_female",
+        "armor_leather": "textures/entity/lion_armor_leather",
+        "armor_iron": "textures/entity/lion_armor_iron",
+        "armor_diamond": "textures/entity/lion_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.lion"
+        "default": "geometry.gameops.lion",
+        "armor": "geometry.gameops.lion_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -33,7 +37,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.lion"
+        "controller.render.gameops.lion",
+        {
+          "controller.render.gameops.lion_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#c9a05a",

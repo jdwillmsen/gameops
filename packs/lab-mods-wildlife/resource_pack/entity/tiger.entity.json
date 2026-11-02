@@ -8,10 +8,14 @@
       },
       "textures": {
         "orange": "textures/entity/tiger_orange",
-        "white": "textures/entity/tiger_white"
+        "white": "textures/entity/tiger_white",
+        "armor_leather": "textures/entity/tiger_armor_leather",
+        "armor_iron": "textures/entity/tiger_armor_iron",
+        "armor_diamond": "textures/entity/tiger_armor_diamond"
       },
       "geometry": {
-        "default": "geometry.gameops.tiger"
+        "default": "geometry.gameops.tiger",
+        "armor": "geometry.gameops.tiger_armor"
       },
       "animations": {
         "walk": "animation.gameops.cat.walk",
@@ -33,7 +37,10 @@
         ]
       },
       "render_controllers": [
-        "controller.render.gameops.tiger"
+        "controller.render.gameops.tiger",
+        {
+          "controller.render.gameops.tiger_armor": "query.property('gameops:armor') > 0"
+        }
       ],
       "spawn_egg": {
         "base_color": "#d9822b",

@@ -1,0 +1,138 @@
+{
+  "format_version": "1.12.0",
+  "minecraft:geometry": [
+    {
+      "description": {
+        "identifier": "geometry.gameops.cheetah_armor",
+        "texture_width": 128,
+        "texture_height": 128,
+        "visible_bounds_width": 3,
+        "visible_bounds_height": 2,
+        "visible_bounds_offset": [
+          0,
+          0.47,
+          0
+        ]
+      },
+      "bones": [
+        {
+          "name": "body",
+          "pivot": [
+            0,
+            11.5,
+            -7.0
+          ],
+          "cubes": [
+            {
+              "origin": [
+                -3.0,
+                8,
+                -10.0
+              ],
+              "size": [
+                6,
+                7,
+                10
+              ],
+              "uv": [
+                44,
+                0
+              ],
+              "inflate": 0.6
+            },
+            {
+              "origin": [
+                -3.0,
+                10,
+                0.0
+              ],
+              "size": [
+                6,
+                5,
+                10
+              ],
+              "uv": [
+                76,
+                0
+              ],
+              "inflate": 0.6
+            }
+          ]
+        },
+        {
+          "name": "head",
+          "pivot": [
+            0,
+            12.5,
+            -9.0
+          ],
+          "parent": "body",
+          "cubes": []
+        },
+        {
+          "name": "tail",
+          "pivot": [
+            0,
+            13,
+            9.0
+          ],
+          "parent": "body",
+          "rotation": [
+            -12,
+            0,
+            0
+          ],
+          "cubes": []
+        },
+        {
+          "name": "front_left_leg",
+          "pivot": [
+            1.5,
+            8,
+            -8.5
+          ],
+          "cubes": []
+        },
+        {
+          "name": "front_right_leg",
+          "pivot": [
+            -1.5,
+            8,
+            -8.5
+          ],
+          "cubes": []
+        },
+        {
+          "name": "back_left_leg",
+          "pivot": [
+            1.5,
+            10,
+            8.5
+          ],
+          "parent": "body",
+          "cubes": []
+        },
+        {
+          "name": "back_right_leg",
+          "pivot": [
+            -1.5,
+            10,
+            8.5
+          ],
+          "parent": "body",
+          "cubes": []
+        },
+        {
+          "name": "collar",
+          "pivot": [
+            0,
+            11.5,
+            -7.0
+          ],
+          "parent": "body",
+          "cubes": []
+        }
+      ]
+    }
+  ]
+}
