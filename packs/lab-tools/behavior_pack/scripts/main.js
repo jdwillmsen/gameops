@@ -229,6 +229,7 @@ function placeSigns() {
   let placed = 0;
   let missing = 0;
   for (const s of signs()) {
+    if (!inLab({ x: s.x, y: STAND_Y, z: s.z })) continue;
     try {
       const block = dim.getBlock({ x: s.x, y: STAND_Y, z: s.z });
       if (!block) {
@@ -263,6 +264,8 @@ system.runInterval(() => {
     say(player, pad.name);
   }
 }, 10);
+
+world.afterEvents.playerLeave.subscribe((ev) => padCooldown.delete(ev.playerId));
 
 // Builds every form shape without showing it, so a wrong argument shape for this server's UI module
 // shows up in the log at startup and not when a player first right-clicks a lectern.
