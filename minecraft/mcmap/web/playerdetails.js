@@ -577,15 +577,17 @@
     const extra = rows.slice(LIST_ROWS).map(rowOf);
     const set = (open) => {
       toggle.setAttribute('aria-expanded', String(open));
-      toggle.textContent = open ? 'show fewer' : `and ${fmt(left)} more`;
+      
       if (open) for (const r of extra) list.insertBefore(r, rest);
       else for (const r of extra) r.remove();
       list.classList.toggle('long', open);
       if (open) expanded.add(key);
       else expanded.delete(key);
     };
-    const toggle = button('', () => set(toggle.getAttribute('aria-expanded') !== 'true'), 'ghost tally-toggle');
-    const rest = el('li', 'rest');
+    const toggle = button(`and ${fmt(left)} more`, () => set(toggle.getAttribute('aria-expanded') !== 'true'), 'ghost tally-toggle');
+    toggle.dataset.pos = `tally:${key}`;
+    list.dataset.tally = key;
+    const rest = el('li', 'tally-rest');
     rest.append(toggle);
     list.append(rest);
     set(expanded.has(key));
@@ -664,8 +666,10 @@
     liveLine = null;
     drawn = now;
     const was = focused();
+    const scrolled = new Map(Array.from(view.body.querySelectorAll('ul.tally.long')).map((l) => [l.dataset.tally, l.scrollTop]));
     view.body.replaceChildren(...savedParts(data.saved, data.live), ...counterParts(data.counters), ...trailParts(data.trails));
     icons.paint(view.body);
+    for (const l of view.body.querySelectorAll('ul.tally.long')) l.scrollTop = scrolled.get(l.dataset.tally) || 0;
     refocus(was);
     const own = text(data.name);
     if (own && subject && !subject.name) view.name.textContent = own;

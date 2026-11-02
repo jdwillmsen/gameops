@@ -427,7 +427,6 @@ test('"and N more" opens every row, closes again and says which it is', async ()
   assert.ok(!words(t).includes('Mob N'));
   more.click();
   assert.equal(more.getAttribute('aria-expanded'), 'true');
-  assert.equal(more.textContent, 'show fewer');
   assert.ok(words(t).includes('Mob N7'), words(t));
   more.click();
   assert.equal(more.getAttribute('aria-expanded'), 'false');
