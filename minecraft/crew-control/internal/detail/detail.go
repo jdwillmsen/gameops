@@ -78,11 +78,14 @@ type body struct {
 	// move it, as the live poll reports a number and not a name.
 	Dimension string `json:"dimension,omitempty"`
 
-	Effects   []telemetry.LiveEffect `json:"effects"`
-	Inventory []playerdata.Item      `json:"inventory"`
-	Armor     []playerdata.Item      `json:"armor"`
-	Mainhand  *playerdata.Item       `json:"mainhand,omitempty"`
-	Offhand   *playerdata.Item       `json:"offhand,omitempty"`
+	Effects []telemetry.LiveEffect `json:"effects"`
+	// Env is the unit's own reading of its world, with the biome; live only,
+	// so absent for an offline unit.
+	Env       *telemetry.LiveEnv `json:"env,omitempty"`
+	Inventory []playerdata.Item  `json:"inventory"`
+	Armor     []playerdata.Item  `json:"armor"`
+	Mainhand  *playerdata.Item   `json:"mainhand,omitempty"`
+	Offhand   *playerdata.Item   `json:"offhand,omitempty"`
 	// EnderChest is every slot of the chest, index 0 to 26; an empty slot
 	// is null, and the whole list is null when no record was read.
 	EnderChest []*playerdata.Item `json:"enderChest"`
@@ -174,6 +177,10 @@ func detail(unit roster.Unit, live func(string) (telemetry.Live, bool), saves So
 
 	if lv.Online && lv.Effects != nil {
 		out.Effects = lv.Effects
+	}
+	if lv.Online {
+		env := lv.Env
+		out.Env = &env
 	}
 	if liveFresh && lv.Health != nil {
 		max := 20.0

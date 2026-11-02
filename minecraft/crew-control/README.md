@@ -39,7 +39,7 @@ crew-control; it never calls them to command them.
 ## Routes
 
 - `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) the world ledger (`?view=ledger`) or the timeline (`?view=timeline`, with `&job=<id>` for one job); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
-- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; each unit's `effects` there are closed effect names only (the units' 36, else `other`), which the wall tiles show as chips; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
+- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; each unit's `effects` there are closed effect names only (the units' 36, else `other`), and its `day_phase` (dawn, day, dusk, night) and `raining` are there too, which the wall tiles show as chips; the biome is not, and the detail route gives it to signed-in operators as `env`; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) and `POST /v1/alerts/rules/{rule}/mute` (the same body, for a whole alert type) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`. `{id}` is the unit's id, or its in-game name when exactly one unit has it (an id wins over a name; a name two units share matches neither), so tools that only know a warrior's name, like the trainer's bridge, can read its state
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `sky.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
@@ -699,7 +699,7 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`. A `threat_high`
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
 event is raised once as the unit's reported hostile count (within 16 blocks,
 capped at 9 by the unit) reaches 3, and again only after it has fallen to 1 or
 fewer; its payload and text carry the counts and nothing else. Only the bit
@@ -893,6 +893,7 @@ the units' own.
 | `crew_fleet_task_duration_seconds` | histogram | `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
 | `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
 | `crew_fleet_unit_deaths_total` | counter | `unit` | Deaths a poll saw |
+| `crew_fleet_deaths_by_day_phase_total` | counter | `phase` | The same deaths by the unit's own day phase when found dead: `dawn`, `day`, `dusk`, `night`, or `unknown` for a unit with no clock (an older unit, or before the server sent the time) |
 | `crew_fleet_unit_stuck_total` | counter | `unit` | Stalls (no progress for 90 s on a running task), once each |
 | `crew_fleet_units` | gauge | `state` | Units per state at the last poll; the five states sum to the roster |
 | `crew_fleet_units_online` | gauge | none | Everything but `offline` |

@@ -12,6 +12,7 @@ package metrics
 
 import (
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,6 +39,20 @@ var Outcomes = []string{OutcomeDone, OutcomeFailed, OutcomeCancelled, OutcomeUnk
 var States = []string{
 	telemetry.StateWorking, telemetry.StateIdle, telemetry.StateStuck,
 	telemetry.StateDead, telemetry.StateOffline,
+}
+
+// PhaseUnknown labels a death at a time the unit could not name.
+const PhaseUnknown = "unknown"
+
+// DayPhases lists every day phase a unit may report.
+var DayPhases = []string{"dawn", "day", "dusk", "night"}
+
+// phaseLabel keeps the label inside the closed list whatever the event held.
+func phaseLabel(v any) string {
+	if s, ok := v.(string); ok && slices.Contains(DayPhases, s) {
+		return s
+	}
+	return PhaseUnknown
 }
 
 // maxTickGap caps the time one poll adds to a unit's time-in-state. A poll
@@ -69,6 +84,7 @@ type Fleet struct {
 	health     *prometheus.GaugeVec
 	hunger     *prometheus.GaugeVec
 	toolPct    *prometheus.GaugeVec
+	deathsAt   *prometheus.CounterVec
 
 	mu   sync.Mutex
 	last time.Time
@@ -138,9 +154,16 @@ func New(unitIDs []string) *Fleet {
 		Name: "crew_fleet_unit_tool_durability_pct",
 		Help: "Durability left (0 to 100) on the item each unit held at the last poll. Absent while the unit is offline, holds nothing, holds an item that cannot wear out, or has not reported it, so a gap is never a zero. Armour wear is in the tool_worn events, not here.",
 	}, []string{"unit"})
-	f.reg.MustRegister(f.started, f.finished, f.failures, f.duration, f.lastDone,
+	f.deathsAt = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_deaths_by_day_phase_total",
+		Help: "Deaths the poller saw, by the unit's own day phase at the poll that found it dead (dawn, day, dusk, night, or unknown when the unit had no clock). The same sampling caveat as crew_fleet_unit_deaths_total applies.",
+	}, []string{"phase"})
+	f.reg.MustRegister(f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
 		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger, f.toolPct)
 
+	for _, p := range append(DayPhases, PhaseUnknown) {
+		f.deathsAt.WithLabelValues(p)
+	}
 	for _, s := range States {
 		f.fleetUnits.WithLabelValues(s)
 	}
@@ -188,6 +211,7 @@ func (f *Fleet) Observe(batch []telemetry.Born) {
 			f.finished.WithLabelValues(b.Unit, tpl, OutcomeUnknown).Inc()
 		case "died":
 			f.deaths.WithLabelValues(b.Unit).Inc()
+			f.deathsAt.WithLabelValues(phaseLabel(b.Attrs["day_phase"])).Inc()
 		case "stuck":
 			f.stuck.WithLabelValues(b.Unit).Inc()
 		}

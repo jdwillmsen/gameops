@@ -284,6 +284,7 @@ func TestLabelSetIsClosed(t *testing.T) {
 		"reason":   Reasons,
 		"outcome":  Outcomes,
 		"state":    States,
+		"phase":    append(slices.Clone(DayPhases), PhaseUnknown),
 	}
 	series := 0
 	for name, mf := range families(t, f) {
@@ -318,7 +319,8 @@ func TestLabelSetIsClosed(t *testing.T) {
 func maxSeries(n int) int {
 	t, o, r, s := len(Templates)+1, len(Outcomes), len(Reasons), len(States)
 	hist := t * 2 * (len(durationBuckets) + 3)
-	return n*t + n*t*o + t*r + hist + n + 2*n + s + 1 + n*s*2
+	// n more for the tool durability gauge, and the day phases plus unknown.
+	return n*t + n*t*o + t*r + hist + n + 2*n + s + 1 + n*s*2 + n + len(DayPhases) + 1
 }
 
 func TestEveryNameInTheCatalogueIsExported(t *testing.T) {
@@ -498,5 +500,29 @@ func TestToolDurabilityGaugeFollowsTheHeldItemAndVanishesWhenUnknown(t *testing.
 	f.ObservePoll(at.Add(time.Second), []telemetry.UnitState{{ID: roster3[0], State: "working"}})
 	if mf := families(t, f)[name]; mf != nil && find(mf, map[string]string{"unit": roster3[0]}) != nil {
 		t.Fatal("durability still exported after the unit put the tool away")
+	}
+}
+
+func TestDeathsAreCountedByTheDayPhaseTheyHappenedIn(t *testing.T) {
+	f := New(roster3)
+	death := func(attrs map[string]any) telemetry.Born {
+		return telemetry.Born{Event: telemetry.Event{Unit: roster3[0], Kind: "died", At: time.Unix(1_700_000_000, 0), Attrs: attrs}}
+	}
+	f.Observe([]telemetry.Born{
+		death(map[string]any{"day_phase": "night"}),
+		death(map[string]any{"day_phase": "night"}),
+		death(map[string]any{"day_phase": "day"}),
+		death(nil),
+		death(map[string]any{"day_phase": "<script>"}),
+		{Event: telemetry.Event{Unit: "crew-99", Kind: "died", Attrs: map[string]any{"day_phase": "dawn"}}},
+	})
+	const name = "crew_fleet_deaths_by_day_phase_total"
+	for phase, want := range map[string]float64{"night": 2, "day": 1, "unknown": 2, "dawn": 0, "dusk": 0} {
+		if got := value(t, f, name, map[string]string{"phase": phase}); got != want {
+			t.Errorf("%s{phase=%s} = %v, want %v", name, phase, got, want)
+		}
+	}
+	if n := len(families(t, f)[name].Metric); n != 5 {
+		t.Errorf("%d series, want exactly the five phases", n)
 	}
 }
