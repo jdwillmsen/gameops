@@ -60,6 +60,9 @@ type Snapshot struct {
 	Creative bool `json:"creative"`
 	// Chest is the item worn on the chest, such as elytra; empty when none.
 	Chest string `json:"chest,omitempty"`
+	// Armour is every worn piece in helmet, chest, legs, boots order, the
+	// empty slots left out.
+	Armour []ArmourPiece `json:"armour,omitempty"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -70,7 +73,7 @@ type Tracker struct {
 	s    Snapshot
 
 	inv       [inventorySize]stackRef
-	chest     stackRef
+	armour    [armourSlots]stackRef
 	itemNames map[int32]string
 	effects   map[int32]Effect
 	uniqueID  string
@@ -88,7 +91,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	defer t.mu.Unlock()
 	t.self = runtimeID
 	t.inv = [inventorySize]stackRef{}
-	t.chest = stackRef{}
+	t.armour = [armourSlots]stackRef{}
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
@@ -204,7 +207,7 @@ func (t *Tracker) Reset() {
 	defer t.mu.Unlock()
 	t.self = 0
 	t.inv = [inventorySize]stackRef{}
-	t.chest = stackRef{}
+	t.armour = [armourSlots]stackRef{}
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
@@ -225,6 +228,7 @@ func (t *Tracker) Snapshot() Snapshot {
 	s := t.s
 	s.Inventory = t.inventoryLocked()
 	s.Chest = t.chestLocked()
+	s.Armour = t.armourLocked()
 	s.Effects = t.effectsLocked()
 	s.UniqueID = t.uniqueID
 	return s

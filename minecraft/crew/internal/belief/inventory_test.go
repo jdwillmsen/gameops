@@ -59,7 +59,7 @@ func TestInventoryContentFillsTheSnapshot(t *testing.T) {
 	tr.Apply(&packet.InventoryContent{WindowID: 0, Content: content})
 
 	want := []Item{
-		{Slot: 0, Name: "wooden_pickaxe", Count: 1, StackNetworkID: 10},
+		{Slot: 0, Name: "wooden_pickaxe", Count: 1, StackNetworkID: 10, DurabilityPct: pct(100)},
 		{Slot: 2, Name: "cobblestone", Count: 41, StackNetworkID: 11},
 		{Slot: 35, Name: "stick", Count: 3, StackNetworkID: 12},
 	}
@@ -84,7 +84,7 @@ func TestInventorySlotReplacesOneSlot(t *testing.T) {
 	tr.Apply(slotPacket(0, 0, stack(cobblestone, 6, 3)))
 	want := []Item{
 		{Slot: 0, Name: "cobblestone", Count: 6, StackNetworkID: 3},
-		{Slot: 1, Name: "wooden_pickaxe", Count: 1, StackNetworkID: 2},
+		{Slot: 1, Name: "wooden_pickaxe", Count: 1, StackNetworkID: 2, DurabilityPct: pct(100)},
 	}
 	if got := withoutWire(tr.Snapshot().Inventory); !reflect.DeepEqual(got, want) {
 		t.Errorf("inventory = %+v, want %+v", got, want)
