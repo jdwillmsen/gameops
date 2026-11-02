@@ -1,3 +1,4 @@
+import { h } from '../kit/dom.js';
 // The world ledger view: places, chests and resources as a node graph, with
 // the ledger's last-known contents in a details panel. graph.js draws and
 // interacts; ledger.js maps data; this file owns fetching (the signed-out and
@@ -9,15 +10,6 @@ import { ledgerModel, mapPlace, legendChips, staleChip, EDGE_WORDS } from './led
 
 const REFRESH_MS = 15000;
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-')) e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 const clock = d => d.toLocaleTimeString(undefined, { hour12: false });
 const at = iso => {
@@ -44,21 +36,21 @@ export function initLedgerGraph(host, { now = Date.now, refreshMs = REFRESH_MS }
     onClose: () => closeDetails(),
   });
   comp.setLegend(legendChips());
-  const edgeKey = el('p', { className: 'lv-edges', textContent:
+  const edgeKey = h('p', { className: 'lv-edges', textContent:
     `Lines: solid, ${EDGE_WORDS.stored}; dashed, ${EDGE_WORDS.supplies}; dotted, ${EDGE_WORDS.used}. Hover a line for its meaning.` });
 
-  const title = el('h2', { className: 'jv-title', textContent: 'World ledger' });
-  const status = el('span', { className: 'jv-timing', role: 'status' });
-  const auto = el('button', { type: 'button', textContent: 'Auto layout' });
-  const map = el('button', { type: 'button', textContent: 'Map layout', title: 'Place nodes at world coordinates' });
-  const refresh = el('button', { type: 'button', textContent: 'Refresh' });
-  const modes = el('span', { className: 'lv-modes', role: 'group', 'aria-label': 'Layout' }, auto, map);
-  const empty = el('div', { className: 'dg-empty', role: 'status' });
-  const root = el('section', { className: 'dg-view cc-root' });
+  const title = h('h2', { className: 'jv-title', textContent: 'World ledger' });
+  const status = h('span', { className: 'jv-timing', role: 'status' });
+  const auto = h('button', { type: 'button', textContent: 'Auto layout' });
+  const map = h('button', { type: 'button', textContent: 'Map layout', title: 'Place nodes at world coordinates' });
+  const refresh = h('button', { type: 'button', textContent: 'Refresh' });
+  const modes = h('span', { className: 'lv-modes', role: 'group', 'aria-label': 'Layout' }, auto, map);
+  const empty = h('div', { className: 'dg-empty', role: 'status' });
+  const root = h('section', { className: 'dg-view cc-root' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', 'World ledger');
-  root.append(el('div', { className: 'jv-main lv' },
-    el('header', { className: 'jv-head' }, title, modes, refresh, status), edgeKey, comp.root, empty));
+  root.append(h('div', { className: 'jv-main lv' },
+    h('header', { className: 'jv-head' }, title, modes, refresh, status), edgeKey, comp.root, empty));
 
   function paintModes() {
     auto.setAttribute('aria-pressed', String(layoutMode === 'auto'));
@@ -203,13 +195,13 @@ export function initLedgerGraph(host, { now = Date.now, refreshMs = REFRESH_MS }
     }
     // A repaint replaces the panel; keep the focus it held.
     const held = panel && panel.dl === document.activeElement;
-    const dl = el('dl', { tabIndex: '0', 'data-autofocus': '' });
-    for (const [k, v] of rows) dl.append(el('dt', { textContent: k }), el('dd', { textContent: v }));
-    const close = el('button', { type: 'button', textContent: 'x', title: 'Close details', 'aria-label': 'Close details' });
+    const dl = h('dl', { tabIndex: '0', 'data-autofocus': '' });
+    for (const [k, v] of rows) dl.append(h('dt', { textContent: k }), h('dd', { textContent: v }));
+    const close = h('button', { type: 'button', textContent: 'x', title: 'Close details', 'aria-label': 'Close details' });
     close.addEventListener('click', () => closeDetails());
     panel = { key: selected, sig, dl };
-    comp.setContent(el('div', { className: 'dg-details' },
-      el('div', { className: 'dg-details-bar' }, el('h3', { textContent: f.title }), close), dl), { focus });
+    comp.setContent(h('div', { className: 'dg-details' },
+      h('div', { className: 'dg-details-bar' }, h('h3', { textContent: f.title }), close), dl), { focus });
     if (held && !focus) dl.focus();
   }
 

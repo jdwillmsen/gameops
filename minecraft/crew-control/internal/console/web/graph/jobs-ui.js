@@ -1,3 +1,4 @@
+import { h } from '../kit/dom.js';
 // The jobs view: one open job's DAG with the plain list of open jobs beside
 // it. graph.js draws and interacts; this file owns jobs data — the signed-out
 // and empty states, the stream updates (which patch in place, so a live state
@@ -7,15 +8,6 @@
 import { jobList, jobRow, jobModel, pickJob, taskText, stepChip } from './jobs.js';
 import { createDagGraph } from './graph.js';
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-')) e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 const clock = iso => {
   const t = Date.parse(iso);
@@ -52,21 +44,21 @@ export function initJobGraph(host) {
   });
   comp.setLegend(['waiting', 'queued', 'running', 'done', 'failed', 'cancelled'].map(stepChip));
 
-  const list = el('ul', { className: 'jv-rows' });
-  const noRows = el('li', { className: 'dg-empty-row', textContent: 'no jobs yet' });
-  const listBox = el('aside', { className: 'jv-list' },
-    el('h2', { textContent: 'Jobs' }), list);
-  const title = el('h2', { className: 'jv-title' });
-  const headChip = el('span');
-  const progress = el('span', { className: 'jv-progress' });
-  const timing = el('span', { className: 'jv-timing' });
-  const cancel = el('button', { type: 'button', className: 'jv-cancel', textContent: 'Cancel job', hidden: true });
-  const cancelMsg = el('span', { className: 'jv-msg', role: 'status' });
-  const empty = el('div', { className: 'dg-empty', role: 'status' });
-  const shell = el('div', { className: 'jv' }, listBox,
-    el('div', { className: 'jv-main' },
-      el('header', { className: 'jv-head' }, title, headChip, progress, timing, cancel, cancelMsg), comp.root, empty));
-  const root = el('section', { className: 'dg-view cc-root' });
+  const list = h('ul', { className: 'jv-rows' });
+  const noRows = h('li', { className: 'dg-empty-row', textContent: 'no jobs yet' });
+  const listBox = h('aside', { className: 'jv-list' },
+    h('h2', { textContent: 'Jobs' }), list);
+  const title = h('h2', { className: 'jv-title' });
+  const headChip = h('span');
+  const progress = h('span', { className: 'jv-progress' });
+  const timing = h('span', { className: 'jv-timing' });
+  const cancel = h('button', { type: 'button', className: 'jv-cancel', textContent: 'Cancel job', hidden: true });
+  const cancelMsg = h('span', { className: 'jv-msg', role: 'status' });
+  const empty = h('div', { className: 'dg-empty', role: 'status' });
+  const shell = h('div', { className: 'jv' }, listBox,
+    h('div', { className: 'jv-main' },
+      h('header', { className: 'jv-head' }, title, headChip, progress, timing, cancel, cancelMsg), comp.root, empty));
+  const root = h('section', { className: 'dg-view cc-root' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', 'Jobs');
   root.append(shell);
@@ -177,17 +169,17 @@ export function initJobGraph(host) {
   const rowsById = new Map(); // id -> {li, btn, name, chip, count, reason}
 
   function makeRow(id) {
-    const name = el('span', { className: 'jv-row-title' });
-    const chip = el('span');
-    const count = el('span', { className: 'jv-progress' });
-    const reason = el('span', { className: 'jv-reason' });
-    const btn = el('button', { type: 'button', className: 'jv-row' },
-      el('div', { className: 'jv-row-main' }, name, chip, count), reason);
+    const name = h('span', { className: 'jv-row-title' });
+    const chip = h('span');
+    const count = h('span', { className: 'jv-progress' });
+    const reason = h('span', { className: 'jv-reason' });
+    const btn = h('button', { type: 'button', className: 'jv-row' },
+      h('div', { className: 'jv-row-main' }, name, chip, count), reason);
     btn.addEventListener('click', () => {
       syncJobParam(id);
       update();
     });
-    return { li: el('li', { className: 'jv-li' }, btn), btn, name, chip, count, reason };
+    return { li: h('li', { className: 'jv-li' }, btn), btn, name, chip, count, reason };
   }
 
   const setText = (node, text) => {
@@ -230,7 +222,7 @@ export function initJobGraph(host) {
     const model = jobModel(job);
     title.textContent = model.title;
     const chip = stepChip(job.state);
-    headChip.replaceChildren(el('span', { className: `dg-chip dg-${chip.tone}`, textContent: chip.word }));
+    headChip.replaceChildren(h('span', { className: `dg-chip dg-${chip.tone}`, textContent: chip.word }));
     const steps = job.steps || [];
     const done = steps.filter(s => s.state === 'done').length;
     progress.textContent = `${done}/${steps.length} steps`;
@@ -271,17 +263,17 @@ export function initJobGraph(host) {
   ];
 
   function buildPanel(step, rows) {
-    const dl = el('dl', { tabIndex: '0', 'data-autofocus': '' });
+    const dl = h('dl', { tabIndex: '0', 'data-autofocus': '' });
     const values = rows.map(([word, text]) => {
-      const dd = el('dd', { textContent: text });
-      dl.append(el('dt', { textContent: word }), dd);
+      const dd = h('dd', { textContent: text });
+      dl.append(h('dt', { textContent: word }), dd);
       return dd;
     });
-    const close = el('button', { type: 'button', textContent: 'x', title: 'Close details', 'aria-label': 'Close details' });
+    const close = h('button', { type: 'button', textContent: 'x', title: 'Close details', 'aria-label': 'Close details' });
     close.addEventListener('click', () => closeDetails());
     panel = { key: step.key, dl, values };
-    return el('div', { className: 'dg-details' },
-      el('div', { className: 'dg-details-bar' }, el('h3', { textContent: step.key }), close), dl);
+    return h('div', { className: 'dg-details' },
+      h('div', { className: 'dg-details-bar' }, h('h3', { textContent: step.key }), close), dl);
   }
 
   // Repaints the open details for the job as it is now. Only the values that

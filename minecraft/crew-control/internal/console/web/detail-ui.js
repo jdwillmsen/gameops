@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The unit detail page: what the world save and the live poll hold of one
 // unit — vitals, effects, what it carries — read from the detail route.
 // detail.js holds the logic; this file only fetches and paints. A read that
@@ -18,15 +19,6 @@ const POLL_MS = 10_000;
 // Hyphenated keys (aria-*, data-*) are not DOM properties, so assigning
 // them silently does nothing; they must go through setAttribute. So does
 // role, which not every browser reflects as a property.
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 const unitPath = (id, suffix) => `/units/${encodeURIComponent(id)}${suffix}`;
 
@@ -34,7 +26,7 @@ const unitPath = (id, suffix) => `/units/${encodeURIComponent(id)}${suffix}`;
 export function initDetail(host) {
   const why = createWhyPanel();
   const history = createInventoryHistoryPanel();
-  const root = el('section', { className: 'dt' });
+  const root = h('section', { className: 'dt' });
   root.setAttribute('aria-label', 'Unit detail');
   root.setAttribute('data-theme', 'dark');
 
@@ -109,21 +101,21 @@ export function initDetail(host) {
   }
 
   function paintNote(text) {
-    showState(el('div', { className: 'dt-state' }, el('h2', { textContent: text })));
+    showState(h('div', { className: 'dt-state' }, h('h2', { textContent: text })));
   }
 
   function paintAuth() {
-    showState(el('div', { className: 'dt-state' },
-      el('h2', { textContent: "Sign in to see a unit's inventory" }),
-      el('p', {}, 'Unit inventory and the ender chest are operator-only. ', el('a', { href: '/signin', textContent: 'Sign in' }), '.')));
+    showState(h('div', { className: 'dt-state' },
+      h('h2', { textContent: "Sign in to see a unit's inventory" }),
+      h('p', {}, 'Unit inventory and the ender chest are operator-only. ', h('a', { href: '/signin', textContent: 'Sign in' }), '.')));
   }
 
   function paintRetry(text) {
-    const retry = el('button', { type: 'button', textContent: 'Try again' });
+    const retry = h('button', { type: 'button', textContent: 'Try again' });
     retry.addEventListener('click', load);
-    showState(el('div', { className: 'dt-state' },
-      el('h2', { textContent: 'Could not read this unit.' }),
-      el('p', { textContent: text }),
+    showState(h('div', { className: 'dt-state' },
+      h('h2', { textContent: 'Could not read this unit.' }),
+      h('p', { textContent: text }),
       retry));
   }
 
@@ -144,11 +136,11 @@ export function initDetail(host) {
   function paint(d) {
     seenAt = Date.now();
     if (!view) {
-      const title = el('h2');
-      const fresh = el('p');
-      const stale = el('p', { className: 'dt-stale', hidden: true });
+      const title = h('h2');
+      const fresh = h('p');
+      const stale = h('p', { className: 'dt-stale', hidden: true });
       stale.setAttribute('role', 'status');
-      const page = el('div', { className: 'dt-page' }, el('header', { className: 'dt-head' }, title, fresh, stale));
+      const page = h('div', { className: 'dt-page' }, h('header', { className: 'dt-head' }, title, fresh, stale));
       view = { title, fresh, stale, page, nodes: new Map(), keys: new Map() };
       root.replaceChildren(page);
     }
@@ -203,26 +195,26 @@ export function initDetail(host) {
   function vitals(d) {
     const bar = (label, cur, max, cls) => {
       const known = typeof cur === 'number';
-      const fill = el('i');
+      const fill = h('i');
       if (known) fill.style.width = `${Math.max(0, Math.min(100, (cur / max) * 100))}%`;
-      const box = el('div', { className: `dt-gauge ${cls}` + (known && cur <= 6 ? ' low' : '') },
-        el('span', { className: 'dt-glabel', textContent: label }),
-        el('span', { className: 'dt-track' }, fill),
-        el('span', { className: 'dt-gval', textContent: known ? String(Math.round(cur)) : '-' }));
+      const box = h('div', { className: `dt-gauge ${cls}` + (known && cur <= 6 ? ' low' : '') },
+        h('span', { className: 'dt-glabel', textContent: label }),
+        h('span', { className: 'dt-track' }, fill),
+        h('span', { className: 'dt-gval', textContent: known ? String(Math.round(cur)) : '-' }));
       box.title = known ? `${label} ${Math.round(cur)} of ${max}` : `${label} unknown`;
       return box;
     };
-    const box = el('div', { className: 'dt-vitals' }, bar('Health', d.health ? d.health.current : null, d.health ? d.health.max : 20, 'hp'),
+    const box = h('div', { className: 'dt-vitals' }, bar('Health', d.health ? d.health.current : null, d.health ? d.health.max : 20, 'hp'),
       bar('Hunger', d.hunger ? d.hunger.current : null, 20, 'food'));
     if (typeof d.air === 'number') box.append(bar('Air', d.air, 300, 'air'));
     const xp = d.xp || {};
     const level = typeof xp.level === 'number';
-    const fill = el('i');
+    const fill = h('i');
     fill.style.width = `${Math.round(Math.max(0, Math.min(1, xp.progress ?? 0)) * 100)}%`;
-    const xpBox = el('div', { className: 'dt-gauge xpl' },
-      el('span', { className: 'dt-glabel', textContent: 'XP' }),
-      el('span', { className: 'dt-track' }, fill),
-      el('span', { className: 'dt-gval', textContent: level ? `Lv ${xp.level}` : '-' }));
+    const xpBox = h('div', { className: 'dt-gauge xpl' },
+      h('span', { className: 'dt-glabel', textContent: 'XP' }),
+      h('span', { className: 'dt-track' }, fill),
+      h('span', { className: 'dt-gval', textContent: level ? `Lv ${xp.level}` : '-' }));
     xpBox.title = level ? `Level ${xp.level}` : 'XP unknown';
     box.append(xpBox);
     return box;
@@ -233,20 +225,20 @@ export function initDetail(host) {
     if (d.gameMode) list.push([d.gameMode, 'mode']);
     if (d.dimension) list.push([d.dimension, 'dim']);
     list.push([d.online ? 'online' : 'offline', d.online ? 'on' : 'off']);
-    return el('div', { className: 'dt-chips' }, ...list.map(([t, cls]) => el('span', { className: `dt-chip ${cls}`, textContent: t })));
+    return h('div', { className: 'dt-chips' }, ...list.map(([t, cls]) => h('span', { className: `dt-chip ${cls}`, textContent: t })));
   }
 
   function effects(d) {
-    const box = el('section', { className: 'dt-sec' }, el('h3', { textContent: 'Effects' }));
-    if (!(d.effects || []).length) box.append(el('p', { className: 'dt-none', textContent: 'no effects on this unit' }));
-    else box.append(el('div', { className: 'dt-chips' }, ...d.effects.map(e => el('span', { className: 'dt-chip fx', title: `Amplifier ${e.amplifier}` }, `${effectLabel(e)} · ${effectTime(e.duration)}`, ))));
+    const box = h('section', { className: 'dt-sec' }, h('h3', { textContent: 'Effects' }));
+    if (!(d.effects || []).length) box.append(h('p', { className: 'dt-none', textContent: 'no effects on this unit' }));
+    else box.append(h('div', { className: 'dt-chips' }, ...d.effects.map(e => h('span', { className: 'dt-chip fx', title: `Amplifier ${e.amplifier}` }, `${effectLabel(e)} · ${effectTime(e.duration)}`, ))));
     return box;
   }
 
   // ---- slots ----
 
   function slotCell(item, opts = {}) {
-    const b = el('button', {
+    const b = h('button', {
       type: 'button',
       className: 'dt-slot' + (item ? ' filled' : ' empty'),
       tabIndex: -1,
@@ -255,14 +247,14 @@ export function initDetail(host) {
     });
     const icon = item && itemIcon(item);
     if (icon) b.append(icon);
-    else if (item) b.append(el('span', { className: 'dt-noicon', 'aria-hidden': 'true', textContent: iconLabel(item.name) }));
+    else if (item) b.append(h('span', { className: 'dt-noicon', 'aria-hidden': 'true', textContent: iconLabel(item.name) }));
     if (item) {
-      if (item.count > 1) b.append(el('span', { className: 'dt-count', textContent: String(item.count) }));
-      if (item.enchantments && item.enchantments.length) b.append(el('span', { className: 'dt-mark ench', title: 'enchanted', 'aria-hidden': 'true', textContent: '✦' }));
-      if (item.contents && item.contents.length) b.append(el('span', { className: 'dt-mark boxl', title: 'shulker box with contents', 'aria-hidden': 'true', textContent: '▣' }));
+      if (item.count > 1) b.append(h('span', { className: 'dt-count', textContent: String(item.count) }));
+      if (item.enchantments && item.enchantments.length) b.append(h('span', { className: 'dt-mark ench', title: 'enchanted', 'aria-hidden': 'true', textContent: '✦' }));
+      if (item.contents && item.contents.length) b.append(h('span', { className: 'dt-mark boxl', title: 'shulker box with contents', 'aria-hidden': 'true', textContent: '▣' }));
       const left = durability(item);
       if (left !== null) {
-        const bar = el('i', { className: 'dt-dur' + (left <= .2 ? ' low' : '') });
+        const bar = h('i', { className: 'dt-dur' + (left <= .2 ? ' low' : '') });
         bar.style.setProperty('--f', `${Math.round(Math.max(0, Math.min(1, left)) * 100)}%`);
         b.append(bar);
       }
@@ -277,7 +269,7 @@ export function initDetail(host) {
     const rect = iconRect(sheet.doc, item.name);
     const st = iconStyle(rect);
     if (!st) return null;
-    const i = el('i', { className: 'dt-icon', 'aria-hidden': 'true' });
+    const i = h('i', { className: 'dt-icon', 'aria-hidden': 'true' });
     for (const [k, v] of Object.entries(st)) i.style[k] = v;
     i.style.backgroundImage = `url('${sheet.url}')`;
     return i;
@@ -299,8 +291,8 @@ export function initDetail(host) {
     const cells = slots.map((item, i) => wrapCell(
       slotCell(item, { emptyLabel: emptyFor(i), slotName: places && places.names[i] }),
       places && places.captions[i]));
-    const grid = el('div', { className: `dt-grid ${cls}`, role: 'group', 'aria-label': label }, ...cells);
-    const line = el('p', { className: 'dt-inspect', role: 'status', 'aria-live': 'polite' });
+    const grid = h('div', { className: `dt-grid ${cls}`, role: 'group', 'aria-label': label }, ...cells);
+    const line = h('p', { className: 'dt-inspect', role: 'status', 'aria-live': 'polite' });
     // What outlives a remade grid: the tab stop, the one box held open and
     // the slot the line beneath last spoke of. Expansion is a per-slot
     // toggle and closes another slot's, so two boxes never shout at once.
@@ -373,36 +365,36 @@ export function initDetail(host) {
 
   // The slot must stay the cell's first child: the grid finds its slots so.
   function wrapCell(cell, caption) {
-    if (!caption) return el('div', { className: 'dt-cell' }, cell);
-    return el('div', { className: 'dt-cell cap' }, cell, el('span', { className: 'dt-cap', 'aria-hidden': 'true', textContent: caption }));
+    if (!caption) return h('div', { className: 'dt-cell' }, cell);
+    return h('div', { className: 'dt-cell cap' }, cell, h('span', { className: 'dt-cap', 'aria-hidden': 'true', textContent: caption }));
   }
 
   function gridZone(parts) {
-    return el('div', { className: 'dt-zone' }, parts.grid, parts.line);
+    return h('div', { className: 'dt-zone' }, parts.grid, parts.line);
   }
 
   // ---- sections ----
 
   function armour(d) {
-    const box = el('section', { className: 'dt-sec' }, el('h3', { textContent: 'Armour and held' }));
+    const box = h('section', { className: 'dt-sec' }, h('h3', { textContent: 'Armour and held' }));
     const slots = armourSlots(d);
-    if (!slots.some(Boolean)) box.append(el('p', { className: 'dt-none', textContent: 'no armour worn and nothing held' }));
+    if (!slots.some(Boolean)) box.append(h('p', { className: 'dt-none', textContent: 'no armour worn and nothing held' }));
     else box.append(gridZone(gridBox('armour', slots, 'Armour and held', 'dt-armourgrid', '', { names: ARMOUR_NAMES, captions: ARMOUR_CAPTIONS })));
     return box;
   }
 
   function carry(d) {
-    const box = el('section', { className: 'dt-sec' });
+    const box = h('section', { className: 'dt-sec' });
     const { main, hotbar } = inventoryRows(d.inventory || []);
     const saveState = d.save && d.save.state;
-    box.append(el('h3', { textContent: 'What the unit carries' }));
+    box.append(h('h3', { textContent: 'What the unit carries' }));
     // Crew units usually carry in the hotbar alone, so both rows decide.
     if (!main.some(Boolean) && !hotbar.some(Boolean)) {
-      box.append(el('p', { className: 'dt-none', textContent: saveState === 'known' ? 'nothing carried' : saveState === 'none' ? "nothing read yet: this unit's record is not saved" : 'nothing carried' }));
+      box.append(h('p', { className: 'dt-none', textContent: saveState === 'known' ? 'nothing carried' : saveState === 'none' ? "nothing read yet: this unit's record is not saved" : 'nothing carried' }));
       return box;
     }
     box.append(gridZone(gridBox('main', main, 'Main inventory', 'dt-main', 'empty')));
-    box.append(el('h4', { className: 'dt-sub', textContent: 'Hotbar' }));
+    box.append(h('h4', { className: 'dt-sub', textContent: 'Hotbar' }));
     box.append(gridZone(gridBox('hotbar', hotbar, 'Hotbar', 'dt-hotbar', 'empty')));
     return box;
   }
@@ -411,13 +403,13 @@ export function initDetail(host) {
   // so the live poll says nothing about it. The state of the save is the
   // state of the section, and an all-empty chest is its own honest note.
   function enderChest(d) {
-    const box = el('section', { className: 'dt-sec' });
+    const box = h('section', { className: 'dt-sec' });
     const st = chestState(d.enderChest);
-    const h = el('h3', { textContent: 'Ender chest' });
-    if (st.kind === 'filled') h.append(el('span', { className: 'dt-chestcount', textContent: ` ${st.filled} of ${st.total} filled` }));
-    box.append(h);
+    const heading = h('h3', { textContent: 'Ender chest' });
+    if (st.kind === 'filled') heading.append(h('span', { className: 'dt-chestcount', textContent: ` ${st.filled} of ${st.total} filled` }));
+    box.append(heading);
     if (st.kind === 'unsaved') {
-      box.append(el('p', { className: 'dt-none', textContent:
+      box.append(h('p', { className: 'dt-none', textContent:
         d.save && d.save.state === 'off'
           ? 'the ender chest is only known from the world save: world save not connected'
           : d.save && d.save.state === 'pending'
@@ -426,7 +418,7 @@ export function initDetail(host) {
       return box;
     }
     if (st.kind === 'empty') {
-      box.append(el('p', { className: 'dt-none', textContent: 'the chest is empty — crew units do not use theirs' }));
+      box.append(h('p', { className: 'dt-none', textContent: 'the chest is empty — crew units do not use theirs' }));
       return box;
     }
     box.append(gridZone(gridBox('chest', st.chest, 'Ender chest', 'dt-chest', i => `slot ${i + 1}: empty`)));
@@ -462,7 +454,7 @@ export function initDetail(host) {
         paintNote('No unit is picked.');
         return;
       }
-      root.replaceChildren(el('p', { className: 'dt-loading', textContent: `Reading ${unit}…` }));
+      root.replaceChildren(h('p', { className: 'dt-loading', textContent: `Reading ${unit}…` }));
       load();
       timer = setInterval(() => {
         if (document.visibilityState !== 'visible') return;

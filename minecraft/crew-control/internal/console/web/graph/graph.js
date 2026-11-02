@@ -1,3 +1,4 @@
+import { h } from '../kit/dom.js';
 // The interactive node graph: SVG, pan/zoom, keyboard and in-place state
 // updates. Layout lives in layout.js and stays pure; this file owns the DOM.
 // setData() rebuilds drawn nodes and edges only when the structure (ids and
@@ -32,15 +33,6 @@ function sEl(name, attrs = {}, ...kids) {
   return e;
 }
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-')) e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 function svgIcon(paths, fill) {
   const svg = sEl('svg', { width: 10, height: 10, class: 'dg-ico', viewBox: '0 0 12 12', 'aria-hidden': 'true' });
@@ -59,7 +51,7 @@ function svgIcon(paths, fill) {
 // only one. The caller supplies the state -> {word, tone, icon paths, fill}
 // list; the legend and every node chip draw through the same helper.
 function chipHtml(c) {
-  return el('span', { className: `dg-chip dg-${c.tone}` }, svgIcon(c.icon, c.fill), el('span', { className: 'dg-word', textContent: c.word }));
+  return h('span', { className: `dg-chip dg-${c.tone}` }, svgIcon(c.icon, c.fill), h('span', { className: 'dg-word', textContent: c.word }));
 }
 
 // onClose(id) reports whether it closed something: a key press nothing used
@@ -69,18 +61,18 @@ function chipHtml(c) {
 // Map of id -> {x, y} in grid units, which replaces the layered positions (the
 // map layout), and per-edge `kind` and `title`, drawn as a class and a tooltip.
 export function createDagGraph({ label, onSelect = () => {}, onClose = () => false, onLayout, critical: showCritical = true } = {}) {
-  const root = el('section', { className: 'dg cc-root' });
+  const root = h('section', { className: 'dg cc-root' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', label || 'Node graph');
 
   // ---- toolbar, legend and cycle note ----
-  const legend = el('div', { className: 'dg-legend', role: 'list', 'aria-label': 'State legend' });
-  const note = el('p', { className: 'dg-note', role: 'status', hidden: true });
-  const zoomIn = el('button', { type: 'button', textContent: '+', title: 'Zoom in', 'aria-label': 'Zoom in' });
-  const zoomOut = el('button', { type: 'button', textContent: '−', title: 'Zoom out', 'aria-label': 'Zoom out' });
-  const fitBtn = el('button', { type: 'button', textContent: 'Fit', title: 'Fit to screen', 'aria-label': 'Fit graph to screen' });
-  const tools = el('div', { className: 'dg-tools' }, el('div', { className: 'dg-zooms' }, zoomOut, zoomIn, fitBtn), legend,
-    el('span', { className: 'dg-key', textContent: 'thicker outline and edge: critical path', hidden: !showCritical }), note);
+  const legend = h('div', { className: 'dg-legend', role: 'list', 'aria-label': 'State legend' });
+  const note = h('p', { className: 'dg-note', role: 'status', hidden: true });
+  const zoomIn = h('button', { type: 'button', textContent: '+', title: 'Zoom in', 'aria-label': 'Zoom in' });
+  const zoomOut = h('button', { type: 'button', textContent: '−', title: 'Zoom out', 'aria-label': 'Zoom out' });
+  const fitBtn = h('button', { type: 'button', textContent: 'Fit', title: 'Fit to screen', 'aria-label': 'Fit graph to screen' });
+  const tools = h('div', { className: 'dg-tools' }, h('div', { className: 'dg-zooms' }, zoomOut, zoomIn, fitBtn), legend,
+    h('span', { className: 'dg-key', textContent: 'thicker outline and edge: critical path', hidden: !showCritical }), note);
 
   // ---- the svg viewport ----
   const svg = sEl('svg', { class: 'dg-canvas', 'aria-label': 'Graph canvas' }, sEl('defs', {},
@@ -96,8 +88,8 @@ export function createDagGraph({ label, onSelect = () => {}, onClose = () => fal
   const nodeLayer = sEl('g', { class: 'dg-nodes' });
   zoomLayer.append(edgeLayer, nodeLayer);
   svg.append(zoomLayer);
-  const side = el('aside', { className: 'dg-side', 'aria-label': 'Details', hidden: true });
-  root.append(tools, el('div', { className: 'dg-body' }, svg, side));
+  const side = h('aside', { className: 'dg-side', 'aria-label': 'Details', hidden: true });
+  root.append(tools, h('div', { className: 'dg-body' }, svg, side));
 
   // ---- pan and zoom ----
   const view = { x: 0, y: 0, k: 1, moved: false };
