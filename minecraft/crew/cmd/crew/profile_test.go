@@ -266,3 +266,19 @@ func TestOnlyALabUnitServesTacticsOnState(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryUnitServesItsCorrectionCountOnState(t *testing.T) {
+	tracker := belief.New(time.Now)
+	lf := life.New(life.Config{}, blocks.New(noNames{}, 4), tracker.Snapshot, nopLog{}, rand.New(rand.NewSource(1)))
+	rec := httptest.NewRecorder()
+	statusHandler(tracker, "dev", statusapi.Unit{}, nil, nil, "", statusOptions(lf, nil, false)...).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/state", nil))
+	var body struct {
+		Movement *struct {
+			Corrections *uint64 `json:"corrections"`
+		} `json:"movement"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Movement == nil || body.Movement.Corrections == nil || *body.Movement.Corrections != 0 {
+		t.Fatalf("movement = %+v (%v) in %s", body.Movement, err, rec.Body.String())
+	}
+}
