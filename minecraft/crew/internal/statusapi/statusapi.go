@@ -43,7 +43,17 @@ type options struct {
 	tactics   TacticsSource
 	sightings SightingSource
 	entities  func(func(belief.Entity))
+	nearby    NearbySource
 }
+
+// NearbySource counts the mobs and players around a position.
+type NearbySource interface {
+	Nearby(eye [3]float32) life.Nearby
+}
+
+// WithNearby reports how many hostile mobs and players are near the unit as
+// "threat" in /v1/state.
+func WithNearby(n NearbySource) Option { return func(o *options) { o.nearby = n } }
 
 // EntityView is one entity as a harness reads it back. Positions make it
 // unfit for a real lab, so WithEntities is wired only for a preview server.
@@ -123,6 +133,10 @@ type stateBody struct {
 	Tactics *Tactics `json:"tactics,omitempty"`
 	// Seen is absent for a unit that keeps no sightings.
 	Seen *life.Sightings `json:"seen,omitempty"`
+	// Threat counts the hostiles and players close by; absent until the unit
+	// knows where it is, because a placeholder position counts the wrong
+	// neighbours.
+	Threat *life.Nearby `json:"threat,omitempty"`
 	// Entities is absent unless the unit is a harness unit.
 	Entities []EntityView `json:"entities,omitempty"`
 }
@@ -181,6 +195,10 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Op
 			}
 		}
 		body := stateBody{Version: version, Unit: unit, State: src.Snapshot(), Tasks: view}
+		if o.nearby != nil && body.State.Spawned && body.State.PositionKnown {
+			n := o.nearby.Nearby(body.State.Position)
+			body.Threat = &n
+		}
 		if o.tactics != nil {
 			t := o.tactics.Tactics()
 			body.Tactics = &t
