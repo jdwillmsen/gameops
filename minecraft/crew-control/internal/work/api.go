@@ -53,9 +53,14 @@ type API struct {
 	// it is lost if the process dies right after the store write. A consumer
 	// must re-read the store rather than trust what it was handed. All
 	// hooks are set before serving and run on the request, so must not block.
-	OnSeen     func(unit string, s Seen)
-	OnBlocks   func(unit string, id uuid.UUID, b Blocks)
-	OnTerminal func(it Item)
+	OnSeen   func(unit string, s Seen)
+	OnBlocks func(unit string, id uuid.UUID, b Blocks)
+	// OnUnitEvent receives a unit's own account of something that happened to
+	// it (a failed kit visit, a lost session), as the raw body so this package
+	// need not know the event vocabulary. An error is answered as a bad
+	// request and is not retried by the unit.
+	OnTerminal  func(it Item)
+	OnUnitEvent func(unit string, body []byte) error
 	// Role reports the role a unit last claimed, or "" when it has not
 	// reported a known one. Nil reads every unit as unknown.
 	Role func(unit string) string
@@ -77,6 +82,7 @@ func Routes(mux *http.ServeMux, s Store, units roster.Roster, token string, noti
 	}
 	mux.HandleFunc("GET /v1/units/{id}/work", a.guard(a.poll))
 	mux.HandleFunc("POST /v1/units/{id}/events", a.guard(a.event))
+	mux.HandleFunc("POST /v1/units/{id}/unit-events", a.guard(a.unitEvent))
 	return a
 }
 
@@ -317,6 +323,28 @@ func (a *API) event(w http.ResponseWriter, r *http.Request, unit string) {
 		}
 	}
 	a.notify(unit)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) unitEvent(w http.ResponseWriter, r *http.Request, unit string) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxEventLen))
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "event too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "bad event", http.StatusBadRequest)
+		return
+	}
+	// A controller with nothing wired takes the event and drops it: the
+	// unit's report is best effort and must not be told to retry.
+	if a.OnUnitEvent != nil {
+		if err := a.OnUnitEvent(unit, body); err != nil {
+			http.Error(w, "bad event", http.StatusBadRequest)
+			return
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

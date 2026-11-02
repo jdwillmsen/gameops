@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -191,6 +192,7 @@ func main() {
 			// to a blueprint replace this without touching the routes.
 			api.OnBlocks = func(string, uuid.UUID, work.Blocks) {}
 			api.OnTerminal = chainWake(api.OnTerminal, &sched)
+			api.OnUnitEvent = unitEventSink(recorder, time.Now)
 			squadMount := squad.Routes(mux, squadStore, units, workToken)
 			squadMount.MountOperator(mux, squadGate{operators})
 
@@ -477,6 +479,25 @@ func exportAudit(log *logging.Logger) func(export.Audit) {
 	return func(a export.Audit) {
 		log.Info("event_window_exported", logging.Fields{"operator": a.Operator, "window_id": a.WindowID,
 			"unit": a.Unit, "job": a.Job, "from": a.From.Format(time.RFC3339), "to": a.To.Format(time.RFC3339), "lines": a.Lines})
+	}
+}
+
+// unitEventSink records an event a unit reported about itself. FromUnit does
+// the validation: a kind outside the closed list or a malformed session is
+// refused, an unknown reason code is stored as other.
+func unitEventSink(rec *events.Writer, now func() time.Time) func(string, []byte) error {
+	return func(unit string, body []byte) error {
+		var u events.UnitEvent
+		dec := json.NewDecoder(bytes.NewReader(body))
+		if err := dec.Decode(&u); err != nil {
+			return err
+		}
+		e, err := events.FromUnit(unit, u, now())
+		if err != nil {
+			return err
+		}
+		rec.Add(e, events.Hint{})
+		return nil
 	}
 }
 
