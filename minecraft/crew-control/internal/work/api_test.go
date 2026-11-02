@@ -176,6 +176,21 @@ func TestEventUpdatesItem(t *testing.T) {
 	}
 }
 
+// A unit that reports the reason code and session beside the state must not
+// be refused for them, or it would have to send every failure twice.
+func TestEventAcceptsReasonCodeAndSession(t *testing.T) {
+	r := newRig(t, NewMemory())
+	it := must(t, r.store, "crew-01", KindTask, tpl)
+	resp := r.do(t, "POST", "/v1/units/crew-01/events",
+		fmt.Sprintf(`{"id":%q,"state":"failed","progress":3,"reason":"no axe in inventory","reason_code":"missing_tool","session_id":"6a36f7ecb575"}`, it.ID), nil)
+	if resp.StatusCode != 204 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if got, _ := r.store.Recent(ctx, "crew-01", 1); got[0].State != Failed || got[0].Reason != "no axe in inventory" {
+		t.Fatalf("%+v", got[0])
+	}
+}
+
 func TestEventRefusals(t *testing.T) {
 	r := newRig(t, NewMemory())
 	it := must(t, r.store, "crew-01", KindTask, tpl)

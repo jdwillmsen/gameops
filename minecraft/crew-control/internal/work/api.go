@@ -208,6 +208,12 @@ type report struct {
 	State    string `json:"state"`
 	Progress int    `json:"progress"`
 	Reason   string `json:"reason"`
+	// ReasonCode and SessionID are what a current unit sends beside the
+	// reason. They are accepted so the report is not refused as an unknown
+	// field, which made the unit send every failure twice; the history gets
+	// both from the unit's state, where they cover tasks the queue never saw.
+	ReasonCode string `json:"reason_code"`
+	SessionID  string `json:"session_id"`
 	// Raw so a malformed observation can be dropped without failing the
 	// state report that carries it.
 	Seen   json.RawMessage `json:"seen"`
