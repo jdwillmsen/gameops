@@ -428,8 +428,8 @@ export function initOps(host) {
 
   // ---- command palette and help ----
 
-  // The open overlay as { close }: the palette and bulk dialog are plain
-  // elements, the help is a kit dialog that also closes itself on Escape.
+  // The open overlay as { close }: kit dialogs that close on Escape,
+  // click-outside or closeOverlay().
   let overlay = null;
   function closeOverlay() {
     if (!overlay) return false;
@@ -438,7 +438,6 @@ export function initOps(host) {
     o.close();
     return true;
   }
-  const plainOverlay = node => ({ close: () => node.remove() });
 
   function paletteItems() {
     const items = [];
@@ -510,17 +509,18 @@ export function initOps(host) {
     const run = it => { closeOverlay(); it.run(); };
     input.addEventListener('input', () => { at = 0; draw(); });
     input.addEventListener('keydown', ev => {
-      if (ev.key === 'Escape') { ev.preventDefault(); closeOverlay(); }
-      else if (ev.key === 'ArrowDown' || (ev.ctrlKey && ev.key === 'n')) { ev.preventDefault(); at = Math.min(at + 1, shown.length - 1); draw(); }
+      if (ev.key === 'ArrowDown' || (ev.ctrlKey && ev.key === 'n')) { ev.preventDefault(); at = Math.min(at + 1, shown.length - 1); draw(); }
       else if (ev.key === 'ArrowUp' || (ev.ctrlKey && ev.key === 'p')) { ev.preventDefault(); at = Math.max(at - 1, 0); draw(); }
       else if (ev.key === 'Enter' && shown[at]) { ev.preventDefault(); run(shown[at]); }
     });
-    const palette = el('div', { id: 'overlay' }, el('div', { className: 'palette' }, input, ul));
-    overlay = plainOverlay(palette);
-    palette.addEventListener('mousedown', ev => { if (ev.target === palette) closeOverlay(); });
-    document.body.append(palette);
+    const dialog = openDialog({
+      label: 'Command palette',
+      content: [input, ul],
+      focus: input,
+      onClose: () => { if (overlay === dialog) overlay = null; },
+    });
+    overlay = dialog;
     draw();
-    input.focus();
   }
 
   function openHelp() {
@@ -546,7 +546,7 @@ export function initOps(host) {
   function bulk(action) {
     if (!host.operator() || !picked.size) return;
     closeOverlay();
-    overlay = plainOverlay(openBulk({
+    overlay = openBulk({
       api: host.api,
       name: id => host.statuses.get(id)?.name || id,
       expired: () => {
@@ -558,7 +558,7 @@ export function initOps(host) {
         picked.clear();
         renderRoster();
       },
-    }, action, [...picked], closeOverlay));
+    }, action, [...picked], closeOverlay);
   }
 
   async function stopUnits(ids) {

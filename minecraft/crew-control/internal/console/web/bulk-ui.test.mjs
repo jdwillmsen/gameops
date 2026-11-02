@@ -84,3 +84,47 @@ test('a 401 closes the dialog and tells the caller the session ended', async () 
   assert.equal(expired, 1);
   assert.equal(closed, 1);
 });
+
+test('Escape closes the bulk dialog and returns focus to the opener', () => {
+  doc.body.replaceChildren();
+  const opener = doc.createElement('button');
+  doc.body.append(opener);
+  opener.focus();
+  let closed = 0;
+  const overlay = openBulk(host(), 'recall', ['a', 'b'], () => closed++);
+  assert.notEqual(doc.activeElement, opener);
+  const ev = doc.activeElement.dispatch('keydown', { key: 'Escape' });
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(closed, 1);
+  assert.equal(doc.body.contains(overlay), false);
+  assert.equal(doc.activeElement, opener);
+});
+
+test('Tab navigation is trapped inside the bulk dialog', async () => {
+  const { focusables } = await import('./kit/dialog.js');
+  const overlay = open('recall');
+  const card = overlay.children[0];
+  const items = focusables(card);
+  assert.ok(items.length >= 2);
+  const first = items[0];
+  const last = items[items.length - 1];
+  last.focus();
+  let ev = last.dispatch('keydown', { key: 'Tab' });
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(doc.activeElement, first);
+  ev = first.dispatch('keydown', { key: 'Tab', shiftKey: true });
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(doc.activeElement, last);
+});
+
+test('closing the dialog returns focus to the opener', () => {
+  doc.body.replaceChildren();
+  const opener = doc.createElement('button');
+  doc.body.append(opener);
+  opener.focus();
+  const overlay = openBulk(host(), 'recall', ['a', 'b'], () => {});
+  assert.notEqual(doc.activeElement, opener);
+  overlay.close();
+  assert.equal(doc.body.contains(overlay), false);
+  assert.equal(doc.activeElement, opener);
+});
