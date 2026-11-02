@@ -517,6 +517,16 @@ func TestBornEventMapsToHistoryRow(t *testing.T) {
 	}
 }
 
+func TestBornEventCarriesItsClosedAttributesInThePayload(t *testing.T) {
+	b := telemetry.Born{Event: telemetry.Event{Unit: "crew-01", At: time.Now(), Kind: "tool_worn", Level: "crit",
+		Text: "held worn: critical", Attrs: map[string]string{"slot": "held", "bucket": "critical"}}}
+	e, _ := bornEvent(b)
+	var p map[string]string
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p["slot"] != "held" || p["bucket"] != "critical" || p["text"] != "held worn: critical" {
+		t.Fatalf("payload: %s (%v)", e.Payload, err)
+	}
+}
+
 func TestUnitDetailRouteIsServedBeforeTheProxy(t *testing.T) {
 	// If the detail path ever reached the proxy it would be 404d there;
 	// the upstream counts to prove it never got that far.

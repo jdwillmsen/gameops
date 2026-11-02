@@ -19,6 +19,9 @@ type Config struct {
 	Failures int
 	// HungerBelow fires low_food at or under this hunger value.
 	HungerBelow float32
+	// ToolBelow fires tool_breaking when the held item has this percent of
+	// its durability left or less.
+	ToolBelow int
 	// SilentFor is how long a unit may be unreachable before unit_silent.
 	SilentFor time.Duration
 	// MuteMax caps a single mute.
@@ -26,13 +29,14 @@ type Config struct {
 }
 
 func Defaults() Config {
-	return Config{StuckFor: 0, Failures: 3, HungerBelow: 6, SilentFor: 2 * time.Minute, MuteMax: 24 * time.Hour}
+	return Config{StuckFor: 0, Failures: 3, HungerBelow: 6, ToolBelow: 10, SilentFor: 2 * time.Minute, MuteMax: 24 * time.Hour}
 }
 
 type wireConfig struct {
 	StuckFor    *string  `json:"stuck_for"`
 	Failures    *int     `json:"failures"`
 	HungerBelow *float32 `json:"hunger_below"`
+	ToolBelow   *int     `json:"tool_below"`
 	SilentFor   *string  `json:"silent_for"`
 	MuteMax     *string  `json:"mute_max"`
 }
@@ -82,6 +86,12 @@ func ParseConfig(raw string) (Config, error) {
 			return cfg, fmt.Errorf("CREW_ALERTS: hunger_below must be 0 to 20")
 		}
 		cfg.HungerBelow = *w.HungerBelow
+	}
+	if w.ToolBelow != nil {
+		if *w.ToolBelow < 0 || *w.ToolBelow > 100 {
+			return cfg, fmt.Errorf("CREW_ALERTS: tool_below must be 0 to 100")
+		}
+		cfg.ToolBelow = *w.ToolBelow
 	}
 	return cfg, nil
 }

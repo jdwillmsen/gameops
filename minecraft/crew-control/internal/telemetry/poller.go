@@ -52,6 +52,16 @@ type LiveItem struct {
 	Slot  int    `json:"slot"`
 	Name  string `json:"name"`
 	Count int    `json:"count"`
+	// DurabilityPct is nil for an item with no wear and from a unit that
+	// predates the field.
+	DurabilityPct *int `json:"durability_pct,omitempty"`
+}
+
+// LiveArmour is one worn piece, slot being helmet, chest, legs or boots.
+type LiveArmour struct {
+	Slot          string `json:"slot"`
+	Name          string `json:"name"`
+	DurabilityPct *int   `json:"durability_pct,omitempty"`
 }
 
 // LiveEffect is one status effect on the unit, as its state reported it.
@@ -73,6 +83,7 @@ type Live struct {
 	// Health and Hunger are nil until the unit reported them.
 	Health, Hunger *float32
 	Inventory      []LiveItem
+	Armour         []LiveArmour
 	Effects        []LiveEffect
 	// PlayerID is the id the unit reports for its player, which is the one
 	// its record in the world save is filed under; empty until it has one.
@@ -103,7 +114,10 @@ type stateResponse struct {
 		Yaw           float32    `json:"yaw"`
 		Dimension     int32      `json:"dimension"`
 
+		HeldSlot  int          `json:"held_slot"`
+		HeldKnown bool         `json:"held_known"`
 		Inventory []LiveItem   `json:"inventory"`
+		Armour    []LiveArmour `json:"armour"`
 		Effects   []LiveEffect `json:"effects"`
 		UniqueID  string       `json:"unique_id"`
 	} `json:"state"`
@@ -246,7 +260,7 @@ func (p *Poller) tick(ctx context.Context) {
 			p.lives[i] = Live{
 				ID: p.units[i].ID, Online: true, Dead: s.Dead, At: now,
 				Health: next.Health, Hunger: next.Hunger,
-				Inventory: s.Inventory, Effects: s.Effects, PlayerID: s.UniqueID,
+				Inventory: s.Inventory, Armour: s.Armour, Effects: s.Effects, PlayerID: s.UniqueID,
 			}
 		} else {
 			p.failures[i]++
@@ -382,6 +396,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 		o.pos, o.posKnown = [3]float32{pos.X, pos.Y, pos.Z}, true
 	}
 	o.recent = res.st.Tasks.Recent
+	o.wear = wearOf(res.st.State.HeldSlot, res.st.State.HeldKnown, res.st.State.Inventory, res.st.State.Armour)
 	for _, e := range p.tracks[i].observe(o, now) {
 		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i]})
 	}

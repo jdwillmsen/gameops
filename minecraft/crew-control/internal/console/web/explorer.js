@@ -3,7 +3,7 @@
 // hold) and on the server for operators (over the stored history), so the
 // two answer alike.
 
-export const KINDS = ['online', 'offline', 'died', 'respawned', 'task_started', 'task_done', 'task_failed', 'task_cancelled', 'task_ended', 'stuck', 'low_health', 'low_hunger'];
+export const KINDS = ['online', 'offline', 'died', 'respawned', 'task_started', 'task_done', 'task_failed', 'task_cancelled', 'task_ended', 'stuck', 'low_health', 'low_hunger', 'tool_worn'];
 
 // Every level has an icon and a word, so none rides on colour alone.
 export const SEVERITIES = [

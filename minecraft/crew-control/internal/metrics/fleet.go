@@ -68,6 +68,7 @@ type Fleet struct {
 	inState    *prometheus.CounterVec
 	health     *prometheus.GaugeVec
 	hunger     *prometheus.GaugeVec
+	toolPct    *prometheus.GaugeVec
 
 	mu   sync.Mutex
 	last time.Time
@@ -133,8 +134,12 @@ func New(unitIDs []string) *Fleet {
 		Name: "crew_fleet_unit_hunger",
 		Help: "Food level (0 to 20) each unit reported at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero.",
 	}, []string{"unit"})
+	f.toolPct = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "crew_fleet_unit_tool_durability_pct",
+		Help: "Durability left (0 to 100) on the item each unit held at the last poll. Absent while the unit is offline, holds nothing, holds an item that cannot wear out, or has not reported it, so a gap is never a zero. Armour wear is in the tool_worn events, not here.",
+	}, []string{"unit"})
 	f.reg.MustRegister(f.started, f.finished, f.failures, f.duration, f.lastDone,
-		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger)
+		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger, f.toolPct)
 
 	for _, s := range States {
 		f.fleetUnits.WithLabelValues(s)
@@ -215,6 +220,11 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 		count[u.State]++
 		setOrClear(f.health, u.ID, u.Health)
 		setOrClear(f.hunger, u.ID, u.Hunger)
+		if u.ToolDurability == nil {
+			f.toolPct.DeleteLabelValues(u.ID)
+		} else {
+			f.toolPct.WithLabelValues(u.ID).Set(float64(*u.ToolDurability))
+		}
 		for _, s := range States {
 			v := 0.0
 			if s == u.State {

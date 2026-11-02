@@ -17,6 +17,9 @@ type UnitState struct {
 	// Health and Hunger are nil while the unit is offline or has not reported
 	// them, so an absent reading is never exported as zero.
 	Health, Hunger *float32
+	// ToolDurability is the percent of wear left on the held item, nil when
+	// offline, nothing is held, or the held item cannot wear out.
+	ToolDurability *int
 }
 
 // stateOf orders the readings by what an operator needs to act on first: a
@@ -41,7 +44,7 @@ func (p *Poller) statesLocked() []UnitState {
 	out := make([]UnitState, len(p.units))
 	for i, u := range p.units {
 		st := p.statuses[i]
-		out[i] = UnitState{ID: u.ID, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger}
+		out[i] = UnitState{ID: u.ID, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger, ToolDurability: p.tracks[i].held}
 	}
 	return out
 }

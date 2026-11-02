@@ -225,6 +225,12 @@ func mergeInventory(live []telemetry.LiveItem, saved []playerdata.Item) []player
 			it.Damage, it.MaxDamage = s.Damage, s.MaxDamage
 			it.Custom, it.Enchants, it.Contents = s.Custom, s.Enchants, s.Contents
 		}
+		// The save is only as fresh as its last write; the unit's own wear
+		// reading is current, so it replaces the saved damage.
+		if max := playerdata.MaxDamage(l.Name); max > 0 && l.DurabilityPct != nil {
+			it.MaxDamage = max
+			it.Damage = max - (max**l.DurabilityPct+50)/100
+		}
 		out = append(out, it)
 	}
 	return out
