@@ -3,7 +3,7 @@
 // the focused camera; this file owns everything that scales with the fleet.
 import { MODES, wallSrc, badge, nextMode } from '/static/state.js';
 import {
-  alertsOf, worst, counts, taskLine, effectChips, sortUnits, step, nextAlerted, gridFor, pageOf, ALL, budgetLabel, budgetsFor,
+  alertsOf, worst, counts, taskLine, effectChips, underAttack, sortUnits, step, nextAlerted, gridFor, pageOf, ALL, budgetLabel, budgetsFor,
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
@@ -251,6 +251,7 @@ export function initOps(host) {
       if (!s) continue;
       const al = alertsOf(s);
       tile.classList.toggle('offline', !s.online);
+      tile.classList.toggle('attacked', underAttack(s));
       tile.classList.toggle('crit', worst(al) === 'crit');
       tile.classList.toggle('warn', worst(al) === 'warn');
       tile.querySelector('.label').textContent = `${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
