@@ -26,7 +26,7 @@ PACK = os.path.dirname(HERE)
 IDS = ("tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena")
 GROUPS = ("gameops:wild", "gameops:tamed", "gameops:sitting")
 ACTIVE_GOALS = tuple("minecraft:behavior." + g for g in (
-    "melee_attack", "follow_owner", "owner_hurt_by_target", "owner_hit_target"))
+    "melee_attack", "follow_owner", "owner_hurt_by_target", "owner_hurt_target"))
 CATS = ("tiger", "cheetah", "lion", "black_leopard")
 CAT_TEXTURES = (("tiger", "orange"), ("tiger", "white"), ("cheetah", "default"), ("lion", "male"),
                 ("lion", "female"), ("black_leopard", "default"))
@@ -36,6 +36,20 @@ EVENTS = ("gameops:on_tamed", "gameops:on_sit", "gameops:on_stand")
 
 
 class Generators(unittest.TestCase):
+    def test_every_animal_drops_loot_and_pays_experience_only_for_a_player_kill(self):
+        for s in SPECIES.values():
+            self.assertTrue(s.drops, s.id)
+            self.assertGreater(s.xp, 0, s.id)
+            doc = json.loads(generate.files()[f"behavior_pack/entities/{s.id}.json"])
+            comps = doc["minecraft:entity"]["components"]
+            self.assertEqual(comps["minecraft:loot"]["table"], f"loot_tables/entities/{s.id}.json")
+            self.assertIn("query.last_hit_by_player", comps["minecraft:experience_reward"]["on_death"])
+            table = json.loads(generate.files()[f"behavior_pack/loot_tables/entities/{s.id}.json"])
+            names = [e["name"] for pool in table["pools"] for e in pool["entries"]]
+            self.assertEqual(names, [f"minecraft:{item}" for item, _, _ in s.drops], s.id)
+            for _, lo, hi in s.drops:
+                self.assertTrue(0 <= lo <= hi, s.id)
+
     def test_species_table_has_six_animals(self):
         self.assertEqual(sorted(SPECIES), sorted(IDS))
         tiger = SPECIES["tiger"]
@@ -216,7 +230,7 @@ class Generators(unittest.TestCase):
             ent = build_behavior.entity_json(s)["minecraft:entity"]
             for comps in [ent["components"], *ent["component_groups"].values()]:
                 self.assertNotIn("minecraft:behavior.hurt_by_target", comps, s.id)
-                for goal in ("owner_hurt_by_target", "owner_hit_target"):
+                for goal in ("owner_hurt_by_target", "owner_hurt_target"):
                     for entry in comps.get("minecraft:behavior." + goal, {}).get("entity_types", []):
                         f = entry["filters"]
                         self.assertEqual((f["test"], f["operator"], f["value"]), ("is_family", "!=", "player"))

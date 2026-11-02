@@ -162,7 +162,7 @@
             }
           ]
         },
-        "minecraft:behavior.owner_hit_target": {
+        "minecraft:behavior.owner_hurt_target": {
           "priority": 2,
           "entity_types": [
             {
@@ -252,6 +252,12 @@
         "is_pushable_by_piston": true
       },
       "minecraft:nameable": {},
+      "minecraft:loot": {
+        "table": "loot_tables/entities/black_leopard.json"
+      },
+      "minecraft:experience_reward": {
+        "on_death": "query.last_hit_by_player ? 6 : 0"
+      },
       "minecraft:behavior.float": {
         "priority": 0
       },

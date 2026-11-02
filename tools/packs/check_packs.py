@@ -146,8 +146,8 @@ def entity_filter_items(node, rep=None, where=""):
 # "tools" is a script-only pack: it defines no mobs, so the entity rules do not apply and any entity is an error.
 POLICIES = ("arena", "wildlife", "tools")
 WILDLIFE_FAMILY = "gameops_wildlife"
-PLAYER_TARGET_GOALS = ("nearest_attackable_target", "owner_hurt_by_target", "owner_hit_target", "melee_attack")
-OWNER_GOALS = ("owner_hurt_by_target", "owner_hit_target")
+PLAYER_TARGET_GOALS = ("nearest_attackable_target", "owner_hurt_by_target", "owner_hurt_target", "melee_attack")
+OWNER_GOALS = ("owner_hurt_by_target", "owner_hurt_target")
 
 
 NEGATIVE_OPERATORS = ("!=", "not")
@@ -182,10 +182,11 @@ WILDLIFE_COMPONENTS = frozenset((
     "minecraft:attack", "minecraft:behavior.avoid_mob_type", "minecraft:behavior.float",
     "minecraft:behavior.follow_owner", "minecraft:behavior.leap_at_target", "minecraft:behavior.look_at_player",
     "minecraft:behavior.melee_attack", "minecraft:behavior.nearest_attackable_target",
-    "minecraft:behavior.owner_hit_target", "minecraft:behavior.owner_hurt_by_target",
+    "minecraft:behavior.owner_hurt_target", "minecraft:behavior.owner_hurt_by_target",
     "minecraft:behavior.random_look_around", "minecraft:behavior.random_stroll",
     "minecraft:behavior.stay_while_sitting", "minecraft:collision_box", "minecraft:follow_range",
-    "minecraft:health", "minecraft:is_tamed", "minecraft:jump.static", "minecraft:movement",
+    "minecraft:experience_reward", "minecraft:health", "minecraft:is_tamed", "minecraft:jump.static",
+    "minecraft:loot", "minecraft:movement",
     "minecraft:movement.basic", "minecraft:nameable", "minecraft:navigation.walk", "minecraft:persistent",
     "minecraft:physics", "minecraft:pushable", "minecraft:sittable", "minecraft:tameable",
     "minecraft:type_family", "minecraft:variant",

@@ -98,7 +98,7 @@ def entity_json(s: Species) -> dict:
         # Each OR'd entry carries its own player exclusion; an owner's attacker may be a player.
         "minecraft:behavior.owner_hurt_by_target": {
             "priority": 1, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
-        "minecraft:behavior.owner_hit_target": {
+        "minecraft:behavior.owner_hurt_target": {
             "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
     }
     active.update(targeting(s, tamed=True))
@@ -150,6 +150,8 @@ def entity_json(s: Species) -> dict:
                 "minecraft:physics": {},
                 "minecraft:pushable": {"is_pushable": True, "is_pushable_by_piston": True},
                 "minecraft:nameable": {},
+                "minecraft:loot": {"table": f"loot_tables/entities/{s.id}.json"},
+                "minecraft:experience_reward": {"on_death": f"query.last_hit_by_player ? {s.xp} : 0"},
                 "minecraft:behavior.float": {"priority": 0},
                 "minecraft:behavior.random_stroll": {"priority": 7, "speed_multiplier": 0.8},
                 "minecraft:behavior.look_at_player": {"priority": 8},

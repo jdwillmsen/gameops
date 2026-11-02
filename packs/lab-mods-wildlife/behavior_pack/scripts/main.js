@@ -161,12 +161,34 @@ function wildlifeData(entity) {
   };
 }
 
+// A burst of hearts and a chime so the player can see the taming worked. Cosmetic: a failure here must
+// never undo the taming, so every call is guarded on its own.
+function celebrateTaming(entity) {
+  const { x, y, z } = entity.location;
+  const top = y + (entity.getComponent("minecraft:collision_box")?.height ?? 1) + 0.3;
+  for (let i = 0; i < 6; i++) {
+    try {
+      entity.dimension.spawnParticle("minecraft:heart_particle", {
+        x: x + (Math.random() - 0.5) * 1.2, y: top + Math.random() * 0.4, z: z + (Math.random() - 0.5) * 1.2,
+      });
+    } catch {
+      break;
+    }
+  }
+  try {
+    entity.dimension.playSound("random.levelup", entity.location, { volume: 0.7, pitch: 1.3 });
+  } catch {
+    // No sound is not a problem.
+  }
+}
+
 // The tameable component still answers during the tame event, before the wild group is removed.
 world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
   try {
     const ownerId = event.entity.getComponent("minecraft:tameable")?.tamedToPlayerId;
     if (ownerId) event.entity.setDynamicProperty(OWNER_PROPERTY, ownerId);
     logEvent("info", "tamed", { type: event.entity.typeId, id: event.entity.id, owner: ownerId ?? null });
+    celebrateTaming(event.entity);
   } catch {
     // An entity that unloaded between the event and this callback has nothing to record.
   }
