@@ -46,6 +46,12 @@ func Outcome(kind, template string, took time.Duration) string {
 // knew about it.
 func Enrich(e *Event, h Hint) {
 	e.ReasonCode = h.ReasonCode
+	// The code is a closed list; a unit newer than this controller may send
+	// one it has not heard of, which is stored as other rather than as free
+	// text.
+	if e.ReasonCode != "" && !KnownReasonCode(e.ReasonCode) {
+		e.ReasonCode = "other"
+	}
 	e.Outcome = Outcome(e.Kind, h.Template, h.Took)
 	if h.Took > 0 {
 		ms := int(h.Took.Milliseconds())

@@ -116,27 +116,22 @@ func (p *Postgres) Append(ctx context.Context, ev []Event) error {
 		return wrap(err)
 	}
 	// Ids are assigned by the table, so a failure cannot name its cause
-	// before the batch is in. Insert and link in one transaction: a reader
-	// never sees a failure without the link it is about to get.
-	tx, err := p.pool.Begin(ctx)
-	if err != nil {
-		return wrap(err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	// before the batch is in. The batch commits first and the link follows as
+	// its own statement: a link that fails or times out must not turn a
+	// stored batch into a rejected one, which would divert every later batch
+	// to memory. The writer is single, so rows past floor are this batch's.
 	var floor int64
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(max(id), 0) FROM `+eventTable).Scan(&floor); err != nil {
+	if err := p.pool.QueryRow(ctx, `SELECT COALESCE(max(id), 0) FROM `+eventTable).Scan(&floor); err != nil {
 		return wrap(err)
 	}
-	if _, err := tx.CopyFrom(ctx, ident, cols, pgx.CopyFromRows(rows)); err != nil {
+	if _, err := p.pool.CopyFrom(ctx, ident, cols, pgx.CopyFromRows(rows)); err != nil {
 		return wrap(err)
 	}
-	// Only rows past floor are touched, so a row another writer inserted
-	// meanwhile is at worst linked by the same rule it would have been by
-	// its own writer.
-	if _, err := tx.Exec(ctx, linkCausesSQL, floor, causeKindList(), CauseWindow); err != nil {
-		return wrap(err)
-	}
-	return wrap(tx.Commit(ctx))
+	// The bound on c.at keeps the lookup inside the unit's index range for the
+	// window instead of walking its whole history. An unlinked failure only
+	// loses its explanation, so the error is not returned.
+	_, _ = p.pool.Exec(ctx, linkCausesSQL, floor, causeKindList(), CauseWindow)
+	return nil
 }
 
 // linkCausesSQL points each new failed task at the latest cause-kind event of
@@ -145,7 +140,7 @@ func (p *Postgres) Append(ctx context.Context, ev []Event) error {
 const linkCausesSQL = `UPDATE ` + eventTable + ` f SET cause_ref = (
 	SELECT c.id FROM ` + eventTable + ` c
 	WHERE c.unit = f.unit AND c.kind = ANY($2) AND c.id <> f.id
-	  AND c.at <= f.at AND f.at - c.at <= $3
+	  AND c.at <= f.at AND c.at >= f.at - $3::interval
 	ORDER BY c.at DESC, c.id DESC LIMIT 1)
 WHERE f.id > $1 AND f.kind = 'task_failed' AND f.cause_ref IS NULL`
 
