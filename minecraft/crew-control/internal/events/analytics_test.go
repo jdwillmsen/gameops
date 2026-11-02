@@ -214,3 +214,19 @@ func TestKnownReasonCodesIncludeTheWiderCatalogue(t *testing.T) {
 		t.Errorf("an unknown code stored as %q (%v)", e.ReasonCode, err)
 	}
 }
+
+func TestEnrichStoresAnUnknownReasonCodeAsOther(t *testing.T) {
+	var e Event
+	Enrich(&e, Hint{ReasonCode: "a code from a newer unit"})
+	if e.ReasonCode != "other" {
+		t.Fatalf("reason code %q, want other", e.ReasonCode)
+	}
+	Enrich(&e, Hint{ReasonCode: "no_path"})
+	if e.ReasonCode != "no_path" {
+		t.Fatalf("a known code was rewritten to %q", e.ReasonCode)
+	}
+	Enrich(&e, Hint{})
+	if e.ReasonCode != "" {
+		t.Fatalf("no code became %q", e.ReasonCode)
+	}
+}
