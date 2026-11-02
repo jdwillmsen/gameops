@@ -27,6 +27,10 @@ const (
 	ReasonInventoryDesync   = "inventory_desync"
 	ReasonChunkNotLoaded    = "chunk_not_loaded"
 	ReasonNoPath            = "no_path"
+	ReasonPlacementFailed   = "placement_failed"
+	ReasonNoProgress        = "no_progress"
+	ReasonUnitDied          = "unit_died"
+	ReasonUnsafeNearby      = "unsafe_nearby"
 	ReasonOther             = "other"
 )
 
@@ -36,7 +40,8 @@ var ReasonCodes = []string{
 	ReasonMissingTool, ReasonKitChunkNotLoaded, ReasonKitNoPath, ReasonKitChestTimeout,
 	ReasonKitVisitTimeout, ReasonSessionLost, ReasonDepositRejected, ReasonNoPickup,
 	ReasonNoReachableTarget, ReasonTrapClimbFailed, ReasonInventoryDesync,
-	ReasonChunkNotLoaded, ReasonNoPath, ReasonOther,
+	ReasonChunkNotLoaded, ReasonNoPath, ReasonPlacementFailed, ReasonNoProgress,
+	ReasonUnitDied, ReasonUnsafeNearby, ReasonOther,
 }
 
 // reasonRule is one row of the mapping. Rows are tried in order and the first
@@ -55,7 +60,11 @@ var reasonRules = []reasonRule{
 	{regexp.MustCompile(`server rejected the (deposit|withdrawal|source stack)`), ReasonDepositRejected},
 	{regexp.MustCompile(`inventory did not show`), ReasonInventoryDesync},
 	{regexp.MustCompile(`wire down|session ended|connection (lost|closed)`), ReasonSessionLost},
-	{regexp.MustCompile(`no standing spot|cannot reach|the entrance is outside|the plan reaches outside`), ReasonNoReachableTarget},
+	{regexp.MustCompile(`no standing spot|cannot reach|the entrance is outside|the plan reaches outside|^no reachable .+ (in the area|within \d+ blocks)$|^target not found$`), ReasonNoReachableTarget},
+	{regexp.MustCompile(`no solid neighbour to place against|did not place the block|the target is not air or replaceable|the target is out of reach`), ReasonPlacementFailed},
+	{regexp.MustCompile(`^unit died$`), ReasonUnitDied},
+	{regexp.MustCompile(`^a (hostile mob|player who is not crew) is nearby$`), ReasonUnsafeNearby},
+	{regexp.MustCompile(`block did not break|^no progress after \d+ replans$|jump did not land|never settled on the ground|unit did not come down|drifted off the pillar`), ReasonNoProgress},
 	{regexp.MustCompile(`chest did not open within \d+ ticks`), ReasonKitChestTimeout},
 	{regexp.MustCompile(`chunk is not loaded`), ReasonChunkNotLoaded},
 	{regexp.MustCompile(`\bno path\b|no walking path`), ReasonNoPath},
