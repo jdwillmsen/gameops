@@ -118,3 +118,47 @@ func TestPostgresBeforeAndAfterTheAnalyticMigration(t *testing.T) {
 		t.Errorf("kit failures across the migration: %+v", old)
 	}
 }
+
+// The poller never knows a stored id, so the store links a failed task to
+// its cause itself, whichever batch the cause arrived in.
+func TestPostgresLinksFailuresToTheirCause(t *testing.T) {
+	s := pgStore(t)
+	at := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	batch := []Event{
+		{Unit: "crew-11", At: at, Kind: "kit_failed", Severity: SevWarn},
+		{Unit: "crew-11", At: at.Add(time.Minute), Kind: "task_failed", Severity: SevCrit, Outcome: OutcomeFailed},
+		{Unit: "crew-11", At: at.Add(2 * time.Minute), Kind: "task_done", Severity: SevOK, Outcome: OutcomeOK},
+		{Unit: "crew-12", At: at.Add(time.Minute), Kind: "task_failed", Severity: SevCrit, Outcome: OutcomeFailed},
+	}
+	if err := s.Append(ctx, batch); err != nil {
+		t.Fatal(err)
+	}
+	later := []Event{
+		{Unit: "crew-11", At: at.Add(3 * time.Minute), Kind: "task_failed", Severity: SevCrit, Outcome: OutcomeFailed},
+		{Unit: "crew-11", At: at.Add(time.Hour), Kind: "task_failed", Severity: SevCrit, Outcome: OutcomeFailed},
+	}
+	if err := s.Append(ctx, later); err != nil {
+		t.Fatal(err)
+	}
+	kit := mustQuery(t, s, Query{Kind: "kit_failed"})[0]
+	var linked, unlinked []Event
+	for _, e := range mustQuery(t, s, Query{Asc: true}) {
+		switch {
+		case e.Kind != "task_failed" && e.CauseRef != nil:
+			t.Errorf("%s at %s must not be linked", e.Kind, e.At)
+		case e.Kind != "task_failed":
+		case e.CauseRef != nil:
+			linked = append(linked, e)
+		default:
+			unlinked = append(unlinked, e)
+		}
+	}
+	if len(linked) != 2 || len(unlinked) != 2 {
+		t.Fatalf("linked %d and unlinked %d failures, want 2 and 2", len(linked), len(unlinked))
+	}
+	for _, e := range linked {
+		if e.Unit != "crew-11" || *e.CauseRef != kit.ID {
+			t.Errorf("failure on %s at %s linked to %d, want crew-11 and %d", e.Unit, e.At, *e.CauseRef, kit.ID)
+		}
+	}
+}
