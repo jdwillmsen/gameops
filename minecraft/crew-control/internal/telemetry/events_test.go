@@ -270,3 +270,37 @@ func TestFinishedTaskEventsCarryTemplateAndDuration(t *testing.T) {
 		}
 	}
 }
+
+func TestPollerStampsEventsWithTheUnitsSessionAndVersion(t *testing.T) {
+	running := strings.Replace(stateKnownWithTask, `"version":"dev"`, `"version":"1.79.0","session_id":"6a36f7ecb575"`, 1)
+	failed := strings.Replace(running, `"current":{"id":"run"`, `"current":null,"gone":{"id":"run"`, 1)
+	failed = strings.Replace(failed, `"recent":[]`, `"recent":[{"id":"run","state":"failed","reason":"no axe in inventory","reason_code":"missing_tool"}]`, 1)
+	unit := newFakeUnit(t, running)
+	p := NewPoller(rosterFor(t, unit.server.URL), &http.Client{}, 20*time.Millisecond)
+	got := make(chan []Born, 64)
+	p.OnEvents = func(b []Born) { got <- b }
+	var ls lastStates
+	p.OnPoll = ls.set
+	run(t, p)
+	waitFor(t, "the baseline", func() bool { return len(ls.get()) == 1 })
+
+	unit.set(http.StatusOK, failed)
+	var ev Born
+	for end := time.Now().Add(3 * time.Second); ev.Kind == "" && time.Now().Before(end); {
+		select {
+		case b := <-got:
+			for _, e := range b {
+				if e.Kind == "task_failed" {
+					ev = e
+				}
+			}
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	if ev.Kind == "" {
+		t.Fatal("no task_failed event")
+	}
+	if ev.Session != "6a36f7ecb575" || ev.Version != "1.79.0" {
+		t.Fatalf("session %q version %q", ev.Session, ev.Version)
+	}
+}

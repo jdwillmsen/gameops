@@ -648,3 +648,17 @@ func sessionCookie(t *testing.T, sessionKey, credentialID []byte) *http.Cookie {
 	_, _ = mac.Write([]byte(body))
 	return &http.Cookie{Name: auth.SessionCookie, Value: body + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))}
 }
+
+func TestBornEventKeepsOnlyAPlausibleSessionAndVersion(t *testing.T) {
+	b := telemetry.Born{
+		Event:   telemetry.Event{Unit: "crew-01", At: time.Now(), Kind: "task_failed", Level: "crit"},
+		Session: "6a36f7ecb575", Version: "1.79.0",
+	}
+	if e, _ := bornEvent(b); e.SessionID != "6a36f7ecb575" || e.CrewVersion != "1.79.0" {
+		t.Fatalf("session %q version %q", e.SessionID, e.CrewVersion)
+	}
+	b.Session, b.Version = "not a session\n", "a version with spaces"
+	if e, _ := bornEvent(b); e.SessionID != "" || e.CrewVersion != "" {
+		t.Fatalf("unusable values stored: %q %q", e.SessionID, e.CrewVersion)
+	}
+}
