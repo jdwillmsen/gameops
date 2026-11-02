@@ -13,6 +13,23 @@ export const PEN_SPECIES = [
   { id: "hyena", food: "rotten_flesh", count: 4, cx: 24, cz: -66 },
 ];
 
+// Facts behind the guide cards and the pen signs. Source of truth is the wildlife pack's
+// assets-src/species.py; tests keep the taming foods in step with PEN_SPECIES.
+export const SPECIES = {
+  tiger: { name: "Tiger", hp: 60, dmg: 8, speed: 0.28, food: "raw beef", prey: "sheep, pig, cow", rivals: "none",
+    ability: "Charge", short: "Charge, then tires", sign: "Charge + tires", variants: "orange or white" },
+  cheetah: { name: "Cheetah", hp: 30, dmg: 5, speed: 0.45, food: "raw rabbit", prey: "rabbit, chicken", rivals: "hyena",
+    ability: "Sprint", short: "Sprint after a hit", sign: "Sprint on a hit", variants: "none" },
+  lion: { name: "Lion", hp: 50, dmg: 7, speed: 0.30, food: "raw mutton", prey: "sheep, pig, cow", rivals: "hyena",
+    ability: "Roar", short: "Roar: Strength aura", sign: "Roar: Strength", variants: "male (mane) or female" },
+  black_leopard: { name: "Black Leopard", hp: 40, dmg: 6, speed: 0.32, food: "raw chicken", prey: "rabbit, chicken", rivals: "hyena",
+    ability: "Ambush", short: "Pounce, night aura", sign: "Night pounce", variants: "none" },
+  brown_bear: { name: "Brown Bear", hp: 80, dmg: 9, speed: 0.25, food: "raw salmon", prey: "none", rivals: "none",
+    ability: "Guard", short: "Guard: Resistance", sign: "Guard: Resist", variants: "none" },
+  hyena: { name: "Hyena", hp: 30, dmg: 7, speed: 0.32, food: "rotten flesh", prey: "none", rivals: "lion, cheetah, black leopard",
+    ability: "Pack", short: "Stronger in a pack", sign: "Pack strength", variants: "regular or alpha (40 hp)" },
+};
+
 export const ARENA_MOBS = [
   { id: "training_dummy_brute", x: 42 },
   { id: "werewolf", x: 58 },
@@ -39,7 +56,7 @@ export const TELEPORTS = [
   { name: "Spawn plaza", x: 0, z: 0 },
   { name: "Wildlife preserve", x: 0, z: -29 },
   { name: "Safety lab", x: -36, z: 0 },
-  { name: "Boss arena", x: 38, z: 0 },
+  { name: "Boss arena (inside the dome)", x: 38, z: 0 },
   { name: "Supply room", x: 0, z: 19 },
 ];
 
@@ -88,7 +105,7 @@ export function resetAreas() {
   areas.push({
     id: "arena",
     name: "boss arena",
-    box: { x1: 33, x2: 81, z1: -25, z2: 25 },
+    box: { x1: 29, x2: 85, z1: -28, z2: 28 },
     types: ARENA_MOBS.map((m) => `gameops:${m.id}`),
     spawns: ARENA_MOBS.map((m) => ({ type: `gameops:${m.id}`, x: m.x + 0.5, z: -11.5, event: m.event })),
   });
@@ -117,4 +134,48 @@ export function inLab(loc, bounds = LAB_BOUNDS) {
 export function penCenter(id) {
   const p = PEN_SPECIES.find((x) => x.id === id);
   return p ? { x: p.cx + 0.5, y: STAND_Y, z: p.cz + 0.5 } : null;
+}
+
+// The arena dome is sealed, so a lit pad outside carries a player in and one inside carries them out.
+// `to` lies off the pad it leads to, or the player would be sent straight back.
+export const PADS = [
+  { name: "into the arena", x1: 24, x2: 26, z1: -1, z2: 1, to: { x: 38.5, y: STAND_Y, z: 0.5 } },
+  { name: "out of the arena", x1: 33, x2: 35, z1: -1, z2: 1, to: { x: 21.5, y: STAND_Y, z: 0.5 } },
+];
+
+export function padAt(loc) {
+  if (Math.abs(loc.y - STAND_Y) > 1.5) return null;
+  const x = Math.floor(loc.x);
+  const z = Math.floor(loc.z);
+  return PADS.find((p) => x >= p.x1 && x <= p.x2 && z >= p.z1 && z <= p.z2) ?? null;
+}
+
+// Standing signs the script writes on request (scriptevent gameops:signs). rot is the sign's facing:
+// 0 south, 4 west, 8 north, 12 east. Four lines of at most 15 characters each fit a sign face.
+export const SIGN_LINE_MAX = 15;
+
+export function signs() {
+  const out = [
+    { x: -3, z: 4, rot: 0, lines: ["PROVING", "GROUNDS", "Add-on test", "world"] },
+    { x: 3, z: 4, rot: 0, lines: ["HOW TO TEST", "Right-click a", "lectern or hold", "the Guide book"] },
+    { x: -4, z: -12, rot: 0, lines: ["NORTH", "Wildlife", "preserve", "6 species"] },
+    { x: 4, z: 12, rot: 8, lines: ["SOUTH", "Supply room", "food, gear,", "eggs, books"] },
+    { x: -12, z: 4, rot: 12, lines: ["WEST", "Safety lab", "two-player", "pet tests"] },
+    { x: 12, z: -4, rot: 4, lines: ["EAST", "Boss arena", "glass dome", "3 bosses"] },
+    { x: 23, z: -3, rot: 4, lines: ["BOSS ARENA", "Step on the", "lit pad to", "enter"] },
+    { x: 33, z: 3, rot: 4, lines: ["EXIT", "Lit pad leaves", "the dome", ""] },
+    { x: 36, z: 4, rot: 4, lines: ["TARGET TAG", "arena_warrior", "on = hunted", "Book: toggle"] },
+    { x: -38, z: -9, rot: 12, lines: ["SAFETY LAB", "Blue pad: A", "Red pad: B", "Cage:lion+hyena"] },
+    { x: -10, z: 27, rot: 8, lines: ["FOOD", "taming foods", "for all six", "animals"] },
+    { x: -8, z: 27, rot: 8, lines: ["GEAR", "diamond set", "bow, apples", "totem"] },
+    { x: 4, z: 27, rot: 8, lines: ["EGGS + BOOKS", "spawn eggs", "guide books", "creative only"] },
+  ];
+  for (const p of PEN_SPECIES) {
+    const f = SPECIES[p.id];
+    out.push({
+      x: p.cx - 3, z: p.cz + 9, rot: 0,
+      lines: [f.name.toUpperCase(), `HP ${f.hp} DMG ${f.dmg}`, `Eats ${f.food === "rotten flesh" ? "rot. flesh" : f.food.replace("raw ", "")}`, f.sign],
+    });
+  }
+  return out;
 }

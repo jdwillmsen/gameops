@@ -4,7 +4,9 @@ const B = "§l";
 const R = "§r";
 const Y = "§e";
 
-export const GUIDE_PAGES = [
+import { SPECIES } from "./logic.js";
+
+const BASE_PAGES = [
   {
     id: "overview",
     title: "How this server works",
@@ -124,3 +126,31 @@ export const STATION_NOTES = {
   arena: "Boss arena. The brute, werewolf and ground dragon stand on their pedestals and only hunt players with the arena_warrior tag. Turn the tag on from the main menu, fight, then turn it off. Reset puts all three back.",
   supply: "Supply room. Chests hold every taming food and a set of diamond gear, a bow and golden apples. Spawn eggs for the animals and mobs are in the egg chest.",
 };
+
+const MOBS = {
+  training_dummy_brute: ["Training dummy brute", "40 hp, melee attack 4.\nThe simplest target: a hostile that only hunts players carrying the arena_warrior tag.\nHitting it does not make it fight back."],
+  werewolf: ["Werewolf", "A hunched 3x3 block wolf-man.\n500 hp, 20 damage, speed 0.38.\nLeaps at its target, knocks back, immune to fire.\nHunts only the arena_warrior tag."],
+  ground_dragon: ["Ground dragon", "The arena boss, kept on the ground.\nHitbox 4x3, never despawns, immune to fire and knockback.\nBite (long reach), tail swipe that knocks back tagged targets, and a fireball you can dodge.\nHealth is picked when it spawns: 150, 300, 500 or 1000.\nHunts only the arena_warrior tag."],
+};
+
+function speciesCard(id, f) {
+  const lines = [
+    `${B}${f.name}${R}`,
+    "",
+    `Health ${f.hp}, attack ${f.dmg}, speed ${f.speed}`,
+    `${Y}Tames with${R} ${f.food}`,
+    `${Y}Ability${R} ${f.ability}: ${f.short}`,
+    `${Y}Hunts${R} ${f.prey}`,
+    `${Y}Fights on sight${R} ${f.rivals}`,
+    `${Y}Variants${R} ${f.variants}`,
+    "",
+    "Never attacks a player, wild or tamed.",
+  ];
+  return { id: `card_${id}`, title: `${f.name} card`, body: lines.join("\n") };
+}
+
+export const GUIDE_PAGES = [
+  ...BASE_PAGES,
+  ...Object.entries(SPECIES).map(([id, f]) => speciesCard(id, f)),
+  ...Object.entries(MOBS).map(([id, [title, body]]) => ({ id: `card_${id}`, title: `${title} card`, body: `${B}${title}${R}\n\n${body}` })),
+];
