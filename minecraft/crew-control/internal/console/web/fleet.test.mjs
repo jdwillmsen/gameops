@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { alertsOf, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, mergeEvents, filterEvents, ago, project, nearest, fuzzy, rankItems, worst, budgetsFor, budgetLabel, effectChips, underAttack } from './fleet.js';
+import { alertsOf, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, mergeEvents, filterEvents, ago, project, nearest, fuzzy, rankItems, worst, budgetsFor, budgetLabel, effectChips, worldChips, underAttack } from './fleet.js';
 
 const u = (id, extra = {}) => ({ id, name: id, online: true, dead: false, health: 20, hunger: 20, task: null, ...extra });
 
@@ -162,4 +162,12 @@ test('underAttack: only an online unit the server flagged', () => {
   assert.equal(underAttack(u('a', { under_attack: 'yes' })), false);
   assert.equal(underAttack(u('a', { online: false, under_attack: true })), false);
   assert.equal(underAttack(undefined), false);
+});
+
+test('worldChips: a closed phase and rain, nothing for an offline unit', () => {
+  assert.deepEqual(worldChips(u('a')), []);
+  assert.deepEqual(worldChips(u('a', { day_phase: 'night', raining: true })).map(c => c.name), ['night', 'rain']);
+  assert.deepEqual(worldChips(u('a', { day_phase: 'teatime' })), []);
+  assert.deepEqual(worldChips(u('a', { raining: 'yes' })), []);
+  assert.deepEqual(worldChips(u('a', { online: false, day_phase: 'day' })), []);
 });

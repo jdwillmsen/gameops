@@ -33,6 +33,17 @@ export function effectChips(s) {
   return chips.sort((a, b) => Number(b.harmful) - Number(a.harmful));
 }
 
+export const PHASES = ['dawn', 'day', 'dusk', 'night'];
+
+// The world chips of a tile: the time of day and rain, from the closed lists.
+export function worldChips(s) {
+  if (!s || !s.online) return [];
+  const out = [];
+  if (PHASES.includes(s.day_phase)) out.push({ name: s.day_phase, label: s.day_phase, harmful: false });
+  if (s.raining === true) out.push({ name: 'rain', label: 'rain', harmful: false });
+  return out;
+}
+
 // A dot on the tile while several hostile mobs are close to an online unit.
 export const underAttack = s => Boolean(s && s.online && s.under_attack === true);
 
