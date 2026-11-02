@@ -66,7 +66,7 @@ func newProxy(t *testing.T, unitURL string) *httptest.Server {
 func TestProxyAllowList(t *testing.T) {
 	files := []string{"ws", "mesher.js", "sky.js", "entities.js", "entities.png", "entities.json",
 		"atlas.png", "atlas.json", "items.png", "items.json", "stats",
-		"equip.js", "molang.js", "pack.png", "pack.json"}
+		"equip.js", "molang.js", "quality.js", "pack.png", "pack.json"}
 	paths := map[string]string{
 		"/units/crew-01/camera":   "/camera",
 		"/units/crew-01/v1/state": "/v1/state",
@@ -202,7 +202,7 @@ func TestProxyWebSocketSameOrigin(t *testing.T) {
 	}
 }
 
-func TestProxyForwardsOnlyCameraRadiusAndWire(t *testing.T) {
+func TestProxyForwardsOnlyCameraRadiusQualityAndWire(t *testing.T) {
 	cases := []struct{ path, wantQuery string }{
 		{"/units/crew-01/v1/camera/ws?r=2", "r=2"},
 		{"/units/crew-01/v1/camera/ws?r=2&x=1", "r=2"},
@@ -215,8 +215,17 @@ func TestProxyForwardsOnlyCameraRadiusAndWire(t *testing.T) {
 		{"/units/crew-01/v1/camera/ws?wire=abc", ""},
 		{"/units/crew-01/v1/camera/ws?wire=123", ""},
 		{"/units/crew-01/v1/camera/ws?wire=4&x=1&y=2", "wire=4"},
+		{"/units/crew-01/v1/camera/ws?q=low", "q=low"},
+		{"/units/crew-01/v1/camera/ws?q=med", "q=med"},
+		{"/units/crew-01/v1/camera/ws?q=high", "q=high"},
+		{"/units/crew-01/v1/camera/ws?q=ultra", ""},
+		{"/units/crew-01/v1/camera/ws?q=LOW", ""},
+		{"/units/crew-01/v1/camera/ws?q=", ""},
+		{"/units/crew-01/v1/camera/ws?q=low&x=1", "q=low"},
+		{"/units/crew-01/v1/camera/ws?q=med&r=2&wire=4", "q=med&r=2&wire=4"},
 		{"/units/crew-01/v1/camera/stats?wire=4", ""},
 		{"/units/crew-01/v1/camera/stats?r=2", ""},
+		{"/units/crew-01/v1/camera/stats?q=low", ""},
 		{"/units/crew-01/v1/state?r=2&x=1", ""},
 	}
 	unit := newFakeUnit(t, nil)

@@ -22,7 +22,7 @@ import (
 var cameraFiles = []string{
 	"ws", "mesher.js", "entities.js", "entities.png", "entities.json",
 	"atlas.png", "atlas.json", "items.png", "items.json", "sky.js", "stats",
-	"equip.js", "molang.js", "pack.png", "pack.json",
+	"equip.js", "molang.js", "quality.js", "pack.png", "pack.json",
 }
 
 // Handler serves only the allow-listed GET routes under /units/{id}/, where
@@ -110,15 +110,16 @@ func guard(r roster.Roster, next http.Handler) http.HandlerFunc {
 }
 
 var (
-	radiusPattern = regexp.MustCompile(`^[0-9]{1,3}$`)
-	wirePattern   = regexp.MustCompile(`^[0-9]{1,2}$`)
+	radiusPattern  = regexp.MustCompile(`^[0-9]{1,3}$`)
+	wirePattern    = regexp.MustCompile(`^[0-9]{1,2}$`)
+	qualityPattern = regexp.MustCompile(`^(low|med|high)$`)
 )
 
-// cameraQuery forwards only the view radius and the wire version the page
-// asks for, and only to the websocket: they are the query parameters the
-// camera reads, and anything else a visitor supplies must not reach a unit.
-// Without the wire version a unit answers every viewer with its oldest
-// format, however new the page.
+// cameraQuery forwards only the view radius, the render quality and the wire
+// version the page asks for, and only to the websocket: they are the query
+// parameters the camera reads, and anything else a visitor supplies must not
+// reach a unit. Without the wire version a unit answers every viewer with its
+// oldest format, however new the page.
 func cameraQuery(in *http.Request) string {
 	if !strings.HasSuffix(in.URL.Path, "/v1/camera/ws") {
 		return ""
@@ -126,6 +127,9 @@ func cameraQuery(in *http.Request) string {
 	q := url.Values{}
 	if r := in.URL.Query().Get("r"); radiusPattern.MatchString(r) {
 		q.Set("r", r)
+	}
+	if v := in.URL.Query().Get("q"); qualityPattern.MatchString(v) {
+		q.Set("q", v)
 	}
 	if w := in.URL.Query().Get("wire"); wirePattern.MatchString(w) {
 		q.Set("wire", w)
