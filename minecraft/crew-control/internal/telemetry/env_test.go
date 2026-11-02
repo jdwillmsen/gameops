@@ -23,22 +23,27 @@ func TestClosedEnvKeepsOnlyTheClosedVocabulary(t *testing.T) {
 	}
 }
 
-func TestDiedCarriesTheDayPhaseWhenKnown(t *testing.T) {
+func TestEveryEventCarriesTheDayPhaseWhenKnown(t *testing.T) {
 	var tr track
 	now := time.Unix(1000, 0)
 	tr.observe(observation{online: true}, now)
 	got := tr.observe(observation{online: true, dead: true, dayPhase: "dusk"}, now.Add(time.Second))
-	if len(got) != 1 || got[0].Kind != "died" || got[0].Attrs["day_phase"] != "dusk" {
+	if len(got) != 1 || got[0].Kind != "died" || got[0].DayPhase != "dusk" {
 		t.Fatalf("died = %+v", got)
+	}
+	got = tr.observe(observation{online: true, dayPhase: "night"}, now.Add(2*time.Second))
+	if len(got) != 1 || got[0].Kind != "respawned" || got[0].DayPhase != "night" {
+		t.Fatalf("respawned = %+v", got)
 	}
 
-	tr.observe(observation{online: true}, now.Add(2*time.Second))
-	got = tr.observe(observation{online: true, dead: true}, now.Add(3*time.Second))
-	if len(got) != 1 || got[0].Kind != "died" {
-		t.Fatalf("died = %+v", got)
+	tr.observe(observation{online: true}, now.Add(3*time.Second))
+	got = tr.observe(observation{online: true, dead: true}, now.Add(4*time.Second))
+	if len(got) != 1 || got[0].Kind != "died" || got[0].DayPhase != "" {
+		t.Fatalf("a death with no clock got a phase: %+v", got)
 	}
-	if _, set := got[0].Attrs["day_phase"]; set {
-		t.Errorf("a death with no clock got a phase: %v", got[0].Attrs)
+	raw, _ := json.Marshal(got[0])
+	if strings.Contains(string(raw), "day_phase") {
+		t.Errorf("an event with no phase still names one: %s", raw)
 	}
 }
 

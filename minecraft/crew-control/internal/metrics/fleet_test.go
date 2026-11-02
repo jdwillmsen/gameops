@@ -505,16 +505,16 @@ func TestToolDurabilityGaugeFollowsTheHeldItemAndVanishesWhenUnknown(t *testing.
 
 func TestDeathsAreCountedByTheDayPhaseTheyHappenedIn(t *testing.T) {
 	f := New(roster3)
-	death := func(attrs map[string]any) telemetry.Born {
-		return telemetry.Born{Event: telemetry.Event{Unit: roster3[0], Kind: "died", At: time.Unix(1_700_000_000, 0), Attrs: attrs}}
+	death := func(phase string) telemetry.Born {
+		return telemetry.Born{Event: telemetry.Event{Unit: roster3[0], Kind: "died", At: time.Unix(1_700_000_000, 0), DayPhase: phase}}
 	}
 	f.Observe([]telemetry.Born{
-		death(map[string]any{"day_phase": "night"}),
-		death(map[string]any{"day_phase": "night"}),
-		death(map[string]any{"day_phase": "day"}),
-		death(nil),
-		death(map[string]any{"day_phase": "<script>"}),
-		{Event: telemetry.Event{Unit: "crew-99", Kind: "died", Attrs: map[string]any{"day_phase": "dawn"}}},
+		death("night"),
+		death("night"),
+		death("day"),
+		death(""),
+		death("<script>"),
+		{Event: telemetry.Event{Unit: "crew-99", Kind: "died", DayPhase: "dawn"}},
 	})
 	const name = "crew_fleet_deaths_by_day_phase_total"
 	for phase, want := range map[string]float64{"night": 2, "day": 1, "unknown": 2, "dawn": 0, "dusk": 0} {
