@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // yawTolerance is how far a unit's facing may be from the teleport's before
@@ -13,6 +14,12 @@ const yawTolerance = 10.0
 // moveTolerance is how far a unit may have walked between the teleport and
 // the reading for its facing to still be the teleport's doing.
 const moveTolerance = 0.5
+
+// tpSamples readings, tpSampleEvery apart, watch for the teleport's facing.
+const (
+	tpSamples     = 8
+	tpSampleEvery = 200 * time.Millisecond
+)
 
 // checkTP asks whether `tp "Name" x y z yaw pitch`, the form the duel runner
 // places units with, is accepted by Bedrock and turns the unit. The unit is
@@ -39,30 +46,31 @@ func checkTP(ctx context.Context, e *Env) Result {
 		return fail(check, "the server refused the tp with a facing: "+strings.TrimSpace(reply), evidence)
 	}
 
-	after, err := e.playerPose(unit)
-	if err != nil {
-		return inconclusive(check, "cannot read "+unit+"'s position after the tp: "+err.Error(), evidence)
+	// A live warrior re-aims on its own within half a second (its defend
+	// logic turns it toward whatever it watches), so the teleport's facing is
+	// only visible in the first readings. Read quickly and pass on any hit;
+	// one late reading says what the unit did next, not what the command did.
+	var seen []float64
+	var last pose
+	for i := 0; i < tpSamples; i++ {
+		p, err := e.playerPose(unit)
+		if err != nil {
+			return inconclusive(check, "cannot read "+unit+"'s position after the tp: "+err.Error(), evidence)
+		}
+		last = p
+		seen = append(seen, p.Yaw)
+		if yawDiff(p.Yaw, yaw) <= yawTolerance {
+			evidence["yaw_after"], evidence["yaw_samples"] = p.Yaw, seen
+			return pass(check, "tp with a facing was accepted and turned "+unit, evidence)
+		}
+		if err := e.pause(ctx, tpSampleEvery); err != nil {
+			return e.cut(check, "reading the unit's facing", err)
+		}
 	}
-	if yawDiff(after.Yaw, yaw) <= yawTolerance {
-		evidence["yaw_after"] = after.Yaw
-		return pass(check, "tp with a facing was accepted and turned "+unit, evidence)
-	}
-	// The unit may still have been turning on its own; look again once it
-	// has had time to settle before calling the facing lost.
-	if err := e.pause(ctx, e.Opts.Settle); err != nil {
-		return e.cut(check, "waiting for the unit to settle", err)
-	}
-	later, err := e.playerPose(unit)
-	if err != nil {
-		return inconclusive(check, "cannot read "+unit+"'s position after settling: "+err.Error(), evidence)
-	}
-	evidence["yaw_after"], evidence["yaw_settled"] = after.Yaw, later.Yaw
-	switch {
-	case yawDiff(later.Yaw, yaw) <= yawTolerance:
-		return pass(check, "tp with a facing was accepted and turned "+unit+" once it settled", evidence)
-	case later.dist(before) > moveTolerance:
-		evidence["moved"] = later.dist(before)
+	evidence["yaw_after"], evidence["yaw_samples"] = seen[0], seen
+	if last.dist(before) > moveTolerance {
+		evidence["moved"] = last.dist(before)
 		return inconclusive(check, unit+" moved after the tp, so its facing says nothing about the command", evidence)
 	}
-	return fail(check, fmt.Sprintf("the tp was accepted but %s still faces %.0f, not %.0f", unit, later.Yaw, yaw), evidence)
+	return fail(check, fmt.Sprintf("the tp was accepted but %s never faced %.0f in %d readings (last %.0f)", unit, yaw, tpSamples, last.Yaw), evidence)
 }
