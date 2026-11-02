@@ -67,7 +67,28 @@ func TestTPFailsWhenAcceptedButTheUnitKeepsItsFacing(t *testing.T) {
 	l := newLab()
 	l.tp = "ignore"
 	r, _ := runOne(testEnv(l, nil), "tp")
-	want(t, r, Fail, "still faces")
+	want(t, r, Fail, "never faced")
+}
+
+// A live warrior re-aims on its own within half a second, so the facing the
+// teleport gave it can show in one reading only.
+func TestTPPassesWhenTheFacingShowsOnlyBrieflyBeforeTheUnitReAims(t *testing.T) {
+	l := newLab()
+	l.tp = "ignore"
+	reads := 0
+	l.onCmd = func(c string) {
+		if strings.HasPrefix(c, "querytarget @a") {
+			reads++
+			switch reads {
+			case 4:
+				l.units["Rusty"].Yaw = 90
+			case 5:
+				l.units["Rusty"].Yaw = 0
+			}
+		}
+	}
+	r, _ := runOne(testEnv(l, nil), "tp")
+	want(t, r, Pass, "turned Rusty")
 }
 
 func TestTPIsInconclusiveWhenTheUnitWalkedOff(t *testing.T) {
