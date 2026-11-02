@@ -115,6 +115,27 @@
               "max_dist": 16
             }
           ]
+        },
+        "minecraft:breedable": {
+          "require_tame": true,
+          "inherit_tamed": false,
+          "breed_items": [
+            "salmon"
+          ],
+          "breeds_with": [
+            {
+              "mate_type": "gameops:brown_bear",
+              "baby_type": "gameops:brown_bear",
+              "breed_event": {
+                "event": "minecraft:entity_born",
+                "target": "baby"
+              }
+            }
+          ]
+        },
+        "minecraft:behavior.breed": {
+          "priority": 5,
+          "speed_multiplier": 1.0
         }
       },
       "gameops:sitting": {
@@ -271,7 +292,8 @@
       "minecraft:entity_born": {
         "add": {
           "component_groups": [
-            "gameops:baby"
+            "gameops:baby",
+            "gameops:wild"
           ]
         }
       },

@@ -90,6 +90,34 @@ export function pruneStale(states, tick, graceTicks) {
   return kept;
 }
 
+// Cubs per birth (min, max); kept equal to Species.litter in assets-src/species.py by a generator test.
+export const LITTERS = {
+  "gameops:tiger": [1, 2], "gameops:cheetah": [2, 3], "gameops:lion": [1, 3],
+  "gameops:black_leopard": [1, 2], "gameops:brown_bear": [1, 1], "gameops:hyena": [2, 4],
+};
+export const PARENT_RANGE = 8;
+
+// rand is a [0,1) source; an unknown type has no litter beyond the one cub the game already spawned.
+export function litterSize(type, rand) {
+  const [lo, hi] = LITTERS[type] ?? [1, 1];
+  return lo + Math.min(hi - lo, Math.floor(rand * (hi - lo + 1)));
+}
+
+// The newborn's parent is the nearest tamed adult of the same kind that has a stored owner.
+export function pickParent(cub, candidates, range = PARENT_RANGE) {
+  let best = null;
+  let bestD = range * range;
+  for (const c of candidates) {
+    if (c.id === cub.id || c.type !== cub.type || c.baby || !c.tamed || !c.owner) continue;
+    const d = (c.pos.x - cub.pos.x) ** 2 + (c.pos.y - cub.pos.y) ** 2 + (c.pos.z - cub.pos.z) ** 2;
+    if (d <= bestD) {
+      best = c;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
 export const CENSUS_SPECIES = ["tiger", "cheetah", "lion", "black_leopard", "brown_bear", "hyena"];
 
 // Fixed species order so a smoke test can parse the line without caring which types exist in the world.

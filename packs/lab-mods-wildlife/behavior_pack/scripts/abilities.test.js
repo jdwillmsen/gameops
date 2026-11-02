@@ -4,6 +4,7 @@ import {
   sprintPhase, packDamageMultiplier, isNight, inRoarRange, pruneStale,
   auraDue, auraRecipients, auraAmplifier, nightOnly, packStrengthAmplifier, packSize, formatCensus, formatEffects,
   EVENT_PREFIX, formatEvent, levelAllows, eventDue, MAX_LISTED_TARGETS,
+  LITTERS, litterSize, pickParent,
 } from "./abilities.js";
 
 test("sprintPhase goes ready to active to tired to ready", () => {
@@ -225,4 +226,27 @@ test("eventDue rate-limits per key and starts a fresh window afterwards", () => 
   assert.equal(eventDue(r.state, "a", 699, 600).due, false);
   assert.equal(eventDue(r.state, "b", 101, 600).due, true);
   assert.equal(eventDue(r.state, "a", 700, 600).due, true);
+});
+
+test("litterSize stays inside each species range and reaches both ends", () => {
+  for (const [type, [lo, hi]] of Object.entries(LITTERS)) {
+    assert.equal(litterSize(type, 0), lo, type);
+    assert.equal(litterSize(type, 0.999999), hi, type);
+    for (let r = 0; r < 1; r += 0.05) {
+      const n = litterSize(type, r);
+      assert.ok(n >= lo && n <= hi, `${type} ${n}`);
+    }
+  }
+  assert.equal(litterSize("gameops:unknown", 0.9), 1);
+});
+
+test("pickParent takes the nearest tamed owned adult of the same kind", () => {
+  const cub = { id: "c", type: "gameops:lion", pos: { x: 0, y: 0, z: 0 } };
+  const adult = (id, x, over = {}) => ({ id, type: "gameops:lion", pos: { x, y: 0, z: 0 }, tamed: true, owner: "p", baby: false, ...over });
+  const got = pickParent(cub, [
+    adult("far", 6), adult("near", 2), adult("wild", 1, { tamed: false }), adult("noOwner", 1, { owner: null }),
+    adult("sibling", 1, { baby: true }), adult("tiger", 1, { type: "gameops:tiger" }), adult("self", 0, { id: "c" }),
+  ]);
+  assert.equal(got.id, "near");
+  assert.equal(pickParent(cub, [adult("away", 20)]), null);
 });

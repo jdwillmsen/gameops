@@ -175,6 +175,27 @@
             }
           ]
         },
+        "minecraft:breedable": {
+          "require_tame": true,
+          "inherit_tamed": false,
+          "breed_items": [
+            "rabbit"
+          ],
+          "breeds_with": [
+            {
+              "mate_type": "gameops:cheetah",
+              "baby_type": "gameops:cheetah",
+              "breed_event": {
+                "event": "minecraft:entity_born",
+                "target": "baby"
+              }
+            }
+          ]
+        },
+        "minecraft:behavior.breed": {
+          "priority": 5,
+          "speed_multiplier": 1.0
+        },
         "minecraft:behavior.nearest_attackable_target": {
           "priority": 2,
           "must_see": true,
@@ -372,7 +393,8 @@
       "minecraft:entity_born": {
         "add": {
           "component_groups": [
-            "gameops:baby"
+            "gameops:baby",
+            "gameops:wild"
           ]
         }
       },

@@ -82,10 +82,36 @@ class Generators(unittest.TestCase):
             self.assertEqual(baby["minecraft:ageable"]["feed_items"], [s.tame_item])
             ev = doc["events"]
             self.assertEqual(ev["gameops:as_baby"]["add"]["component_groups"], ["gameops:baby"])
-            self.assertEqual(ev["minecraft:entity_born"]["add"]["component_groups"], ["gameops:baby"])
+            self.assertEqual(ev["minecraft:entity_born"]["add"]["component_groups"], ["gameops:baby", "gameops:wild"])
             self.assertEqual(ev["gameops:grow_up"]["remove"]["component_groups"], ["gameops:baby"])
             client = json.loads(self.load(f"resource_pack/entity/{s.id}.entity.json"))["minecraft:client_entity"]["description"]
             self.assertIn("query.is_baby", client["scripts"]["scale"])
+
+    def test_only_tamed_standing_adults_breed_on_their_taming_food(self):
+        for s in SPECIES.values():
+            doc = json.loads(self.load(f"behavior_pack/entities/{s.id}.json"))["minecraft:entity"]
+            groups = doc["component_groups"]
+            breed = groups["gameops:tamed_active"]["minecraft:breedable"]
+            self.assertTrue(breed["require_tame"], s.id)
+            self.assertFalse(breed["inherit_tamed"], s.id)
+            self.assertEqual(breed["breed_items"], [s.tame_item], s.id)
+            pair = breed["breeds_with"][0]
+            self.assertEqual((pair["mate_type"], pair["baby_type"]), (f"gameops:{s.id}",) * 2)
+            self.assertEqual(pair["breed_event"], {"event": "minecraft:entity_born", "target": "baby"})
+            self.assertIn("minecraft:behavior.breed", groups["gameops:tamed_active"])
+            for name in ("gameops:wild", "gameops:baby", "gameops:sitting"):
+                self.assertNotIn("minecraft:breedable", groups[name], f"{s.id} {name}")
+            self.assertNotIn("minecraft:breedable", doc["components"], s.id)
+
+    def test_litter_sizes_match_the_script_table(self):
+        expected = {"tiger": (1, 2), "cheetah": (2, 3), "lion": (1, 3), "black_leopard": (1, 2),
+                    "brown_bear": (1, 1), "hyena": (2, 4)}
+        self.assertEqual({k: v.litter for k, v in SPECIES.items()}, expected)
+        with open(os.path.join(generate.PACK, "behavior_pack/scripts/abilities.js")) as f:
+            js = f.read()
+        table = re.search(r"export const LITTERS = \{(.*?)\};", js, re.S).group(1)
+        parsed = {m[0]: (int(m[1]), int(m[2])) for m in re.findall(r'"gameops:(\w+)": \[(\d+), (\d+)\]', table)}
+        self.assertEqual(parsed, expected)
 
     def test_species_table_has_six_animals(self):
         self.assertEqual(sorted(SPECIES), sorted(IDS))

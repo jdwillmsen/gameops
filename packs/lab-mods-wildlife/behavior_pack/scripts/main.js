@@ -2,7 +2,7 @@ import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
   packStrengthAmplifier, packSize, formatCensus, formatEffects, CENSUS_SPECIES,
-  formatEvent, levelAllows, eventDue,
+  formatEvent, levelAllows, eventDue, litterSize, pickParent, PARENT_RANGE,
 } from "./abilities.js";
 
 // "off" | "info" | "debug". info logs one line per taming, sit, stand, burst, ability and hit, and an
@@ -193,6 +193,67 @@ world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
     // An entity that unloaded between the event and this callback has nothing to record.
   }
 }, { eventTypes: ["gameops:on_tamed"] });
+
+function isBaby(entity) {
+  return entity.hasComponent("minecraft:is_baby");
+}
+
+function breedingData(entity) {
+  return { ...wildlifeData(entity), type: entity.typeId, baby: isBaby(entity) };
+}
+
+function ownerPlayer(ownerId) {
+  return world.getAllPlayers().find((p) => p.id === ownerId);
+}
+
+// Tames through the tameable component, the only way to give a cub the same native owner as its parent.
+function tameCub(cub, player) {
+  try {
+    if (cub.isValid && cub.getComponent("minecraft:tameable")) cub.getComponent("minecraft:tameable").tame(player);
+  } catch {
+    // A cub that unloaded before the next tick stays wild; its parents can still be fed to try again.
+  }
+}
+
+// The game spawns one cub per breeding; the rest of the litter is added here as extra cubs beside it.
+// Deferred a tick because the newborn's groups are not applied when the trigger fires.
+world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
+  const cub = event.entity;
+  system.run(() => {
+    try {
+      if (!cub.isValid) return;
+      const parent = pickParent(breedingData(cub), cub.dimension
+        .getEntities({ location: cub.location, maxDistance: PARENT_RANGE, type: cub.typeId }).map(breedingData));
+      const player = parent && ownerPlayer(parent.owner);
+      if (!parent || !player) {
+        logEvent("info", "born", { type: cub.typeId, id: cub.id, owner: null, litter: 1 });
+        return;
+      }
+      const size = litterSize(cub.typeId, Math.random());
+      tameCub(cub, player);
+      for (let i = 1; i < size; i++) {
+        const extra = cub.dimension.spawnEntity(cub.typeId, cub.location);
+        extra.triggerEvent("gameops:as_baby");
+        system.run(() => tameCub(extra, player));
+      }
+      logEvent("info", "born", { type: cub.typeId, id: cub.id, owner: parent.owner, litter: size });
+    } catch {
+      // A failed birth hook must not affect the cub that already exists.
+    }
+  });
+}, { eventTypes: ["minecraft:entity_born"] });
+
+// A cub is a third of the adult's health; without this the grown animal keeps the cub's current health.
+world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
+  const animal = event.entity;
+  system.run(() => {
+    try {
+      if (animal.isValid) animal.getComponent("minecraft:health")?.resetToMaxValue();
+    } catch {
+      // An animal that unloaded has nothing to heal.
+    }
+  });
+}, { eventTypes: ["gameops:grow_up"] });
 
 for (const [eventId, ev] of [["gameops:on_sit", "sit"], ["gameops:on_stand", "stand"]]) {
   world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
