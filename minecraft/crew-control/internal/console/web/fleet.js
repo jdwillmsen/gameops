@@ -33,6 +33,9 @@ export function effectChips(s) {
   return chips.sort((a, b) => Number(b.harmful) - Number(a.harmful));
 }
 
+// A dot on the tile while several hostile mobs are close to an online unit.
+export const underAttack = s => Boolean(s && s.online && s.under_attack === true);
+
 export const worst = alerts => (alerts.some(a => a.level === 'crit') ? 'crit' : alerts.length ? 'warn' : '');
 
 export function counts(list) {

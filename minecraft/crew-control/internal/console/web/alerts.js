@@ -9,6 +9,7 @@ export const RULE_LABELS = {
   unit_silent: 'Unit silent',
   tool_breaking: 'Tool nearly worn out',
   harmful_effect: 'Harmful effect',
+  under_attack: 'Under attack',
 };
 
 export const MUTE_CHOICES = [['15m', '15 min'], ['1h', '1 hour'], ['8h', '8 hours']];
