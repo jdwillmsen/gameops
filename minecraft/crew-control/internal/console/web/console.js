@@ -13,6 +13,7 @@ import { initLedgerGraph } from '/static/graph/ledger-ui.js';
 import { initTimeline } from '/static/timeline-ui.js';
 import { initDirector } from '/static/director-ui.js';
 import { openStream } from '/static/kit/stream.js';
+import { createKeys } from '/static/kit/keys.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -247,6 +248,13 @@ $('timeline-toggle').addEventListener('click', toggleTimeline);
 $('heat-toggle').addEventListener('click', toggleHeat);
 $('replay-toggle').addEventListener('click', toggleReplay);
 
+// The graph views keep Esc for their own layers, but only when the ops shell
+// has no overlay open; ops still answers the overlay first.
+const viewEscapes = createKeys();
+for (const [view, ui] of [['jobs', () => jobGraph], ['ledger', () => ledgerGraph], ['timeline', () => timeline]]) {
+  viewEscapes.escape(ev => state.view === view && !document.getElementById('overlay') && ui().key(ev));
+}
+
 function onKey(ev) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'k') { ops.key(ev); return; }
   if (isTyping(ev.target)) return;
@@ -274,11 +282,7 @@ function onKey(ev) {
   else if (ev.key === 'S') setSquadOpen(!squadOpen);
   else if (ev.key === 'A') alertsUI.toggle();
   else if (ev.key === 'D') director.toggle();
-  // The jobs view keeps Esc for its own layers, but only when the ops shell
-  // has no overlay open; ops still answers the overlay first.
-  else if (ev.key === 'Escape' && state.view === 'jobs' && !document.getElementById('overlay') && jobGraph.key(ev)) return;
-  else if (ev.key === 'Escape' && state.view === 'ledger' && !document.getElementById('overlay') && ledgerGraph.key(ev)) return;
-  else if (ev.key === 'Escape' && state.view === 'timeline' && !document.getElementById('overlay') && timeline.key(ev)) return;
+  else if (ev.key === 'Escape' && viewEscapes.handle(ev)) return;
   else ops.key(ev);
 }
 addEventListener('keydown', onKey);

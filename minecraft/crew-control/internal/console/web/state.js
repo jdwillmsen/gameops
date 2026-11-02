@@ -115,11 +115,7 @@ export function signinParams(hash) {
   return { invite: q.get('invite') || '', operator: q.get('operator') || '' };
 }
 
-// The console's shortcut keys are plain letters and digits, so they must not
-// fire while an operator types into the panel.
-export function isTyping(t) {
-  return !!t && (['INPUT', 'SELECT', 'TEXTAREA'].includes(t.tagName) || t.isContentEditable === true);
-}
+export { isTyping } from './kit/keys.js';
 
 // Goal rows are (item, qty) pairs; the server sums nothing, so a repeated item
 // is a typo to surface rather than a total to guess.

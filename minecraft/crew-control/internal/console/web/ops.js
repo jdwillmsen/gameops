@@ -10,6 +10,8 @@ import { createFeedView, perFrame, timeText } from '/static/feedview.js';
 import { statusRole } from '/static/squad.js';
 import { openBulk } from '/static/bulk-ui.js';
 import { createGovernor, lowerBudget } from '/static/governor.js';
+import { openDialog } from '/static/kit/dialog.js';
+import { createToasts } from '/static/kit/toast.js';
 
 const $ = id => document.getElementById(id);
 
@@ -321,13 +323,9 @@ export function initOps(host) {
     renderFeedSoon();
   }
 
+  const toasts = createToasts($('toasts'));
   function toast(e) {
-    const box = $('toasts');
-    const t = el('button', { type: 'button', className: `toast ${e.level}` }, el('b', { textContent: e.name || e.unit }), ' ', e.text);
-    t.addEventListener('click', () => { t.remove(); if (e.unit) host.focus(e.unit); });
-    box.append(t);
-    while (box.children.length > 4) box.firstChild.remove();
-    setTimeout(() => t.remove(), e.level === 'crit' ? 10000 : 6000);
+    toasts.show({ level: e.level, title: e.name || e.unit, text: e.text, onClick: () => { if (e.unit) host.focus(e.unit); } });
   }
 
   $('feed-level').addEventListener('change', ev => { prefs.level = ev.target.value; save(); renderFeed(); });
@@ -410,13 +408,17 @@ export function initOps(host) {
 
   // ---- command palette and help ----
 
-  let paletteEl = null;
+  // The open overlay as { close }: the palette and bulk dialog are plain
+  // elements, the help is a kit dialog that also closes itself on Escape.
+  let overlay = null;
   function closeOverlay() {
-    if (!paletteEl) return false;
-    paletteEl.remove();
-    paletteEl = null;
+    if (!overlay) return false;
+    const o = overlay;
+    overlay = null;
+    o.close();
     return true;
   }
+  const plainOverlay = node => ({ close: () => node.remove() });
 
   function paletteItems() {
     const items = [];
@@ -490,9 +492,10 @@ export function initOps(host) {
       else if (ev.key === 'ArrowUp' || (ev.ctrlKey && ev.key === 'p')) { ev.preventDefault(); at = Math.max(at - 1, 0); draw(); }
       else if (ev.key === 'Enter' && shown[at]) { ev.preventDefault(); run(shown[at]); }
     });
-    paletteEl = el('div', { id: 'overlay' }, el('div', { className: 'palette' }, input, ul));
-    paletteEl.addEventListener('mousedown', ev => { if (ev.target === paletteEl) closeOverlay(); });
-    document.body.append(paletteEl);
+    const palette = el('div', { id: 'overlay' }, el('div', { className: 'palette' }, input, ul));
+    overlay = plainOverlay(palette);
+    palette.addEventListener('mousedown', ev => { if (ev.target === palette) closeOverlay(); });
+    document.body.append(palette);
     draw();
     input.focus();
   }
@@ -501,10 +504,12 @@ export function initOps(host) {
     closeOverlay();
     const dl = el('dl', {});
     for (const [k, d] of KEYS) dl.append(el('dt', {}, el('kbd', { textContent: k })), el('dd', { textContent: d }));
-    const card = el('div', { className: 'palette help', role: 'dialog' }, el('h2', { textContent: 'Keyboard' }), dl);
-    paletteEl = el('div', { id: 'overlay' }, card);
-    paletteEl.addEventListener('mousedown', ev => { if (ev.target === paletteEl) closeOverlay(); });
-    document.body.append(paletteEl);
+    const dialog = openDialog({
+      label: 'Keyboard', class: 'help',
+      content: [el('h2', { textContent: 'Keyboard' }), dl],
+      onClose: () => { if (overlay === dialog) overlay = null; },
+    });
+    overlay = dialog;
   }
 
   function jumpAlert() {
@@ -518,7 +523,7 @@ export function initOps(host) {
   function bulk(action) {
     if (!host.operator() || !picked.size) return;
     closeOverlay();
-    paletteEl = openBulk({
+    overlay = plainOverlay(openBulk({
       api: host.api,
       name: id => host.statuses.get(id)?.name || id,
       expired: () => {
@@ -530,7 +535,7 @@ export function initOps(host) {
         picked.clear();
         renderRoster();
       },
-    }, action, [...picked], closeOverlay);
+    }, action, [...picked], closeOverlay));
   }
 
   async function stopUnits(ids) {
