@@ -83,7 +83,7 @@ function resetArea(player, area) {
   for (const type of area.types) {
     for (const e of dim.getEntities({ type })) {
       const { x, z } = e.location;
-      if (x >= area.box.x1 && x <= area.box.x2 && z >= area.box.z1 && z <= area.box.z2) {
+      if (inLab(e.location) && x >= area.box.x1 && x <= area.box.x2 && z >= area.box.z1 && z <= area.box.z2) {
         e.remove();
         removed++;
       }
@@ -207,6 +207,8 @@ world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
   ev.cancel = true;
   const player = ev.player;
   lastLectern.set(player.id, system.currentTick);
+  // Holding the button repeats the event; one menu per click.
+  if (!ev.isFirstEvent) return;
   system.run(() => {
     stationMenu(player, station).catch((e) => console.warn(`gameops:tools menu failed ${e}`));
   });
