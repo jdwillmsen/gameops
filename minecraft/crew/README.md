@@ -532,6 +532,10 @@ task record, and on the report to the controller; a controller that rejects
 unknown fields gets the report again without it. `kit_failed` carries the same
 field. `session_id` (random per connection) is on `task_finished`,
 `kit_failed`, `died`, `respawned`, `session_error` and `session_ended`.
+`kit_failed` and `session_error` are also posted to the controller's
+`/v1/units/{id}/unit-events`, best effort (a few retries, then dropped; a
+controller without the route is not retried), so the history can link a later
+failed task to them. `/v1/state` carries `session_id` for the same reason.
 
 | Code | Meaning | Example reason | Raised by |
 | --- | --- | --- | --- |
