@@ -144,7 +144,7 @@ export const PADS = [
 ];
 
 export function padAt(loc) {
-  if (Math.abs(loc.y - STAND_Y) > 1.5) return null;
+  if (Math.abs(loc.y - STAND_Y) > 1.5 || !inLab(loc)) return null;
   const x = Math.floor(loc.x);
   const z = Math.floor(loc.z);
   return PADS.find((p) => x >= p.x1 && x <= p.x2 && z >= p.z1 && z <= p.z2) ?? null;
@@ -156,15 +156,15 @@ export const SIGN_LINE_MAX = 15;
 
 export function signs() {
   const out = [
-    { x: -3, z: 4, rot: 0, lines: ["PROVING", "GROUNDS", "Add-on test", "world"] },
-    { x: 3, z: 4, rot: 0, lines: ["HOW TO TEST", "Right-click a", "lectern or hold", "the Guide book"] },
+    { x: -3, z: 4, rot: 8, lines: ["PROVING", "GROUNDS", "Add-on test", "world"] },
+    { x: 3, z: 4, rot: 8, lines: ["HOW TO TEST", "Right-click a", "lectern or hold", "the Guide book"] },
     { x: -4, z: -12, rot: 0, lines: ["NORTH", "Wildlife", "preserve", "6 species"] },
     { x: 4, z: 12, rot: 8, lines: ["SOUTH", "Supply room", "food, gear,", "eggs, books"] },
     { x: -12, z: 4, rot: 12, lines: ["WEST", "Safety lab", "two-player", "pet tests"] },
     { x: 12, z: -4, rot: 4, lines: ["EAST", "Boss arena", "glass dome", "3 bosses"] },
     { x: 23, z: -3, rot: 4, lines: ["BOSS ARENA", "Step on the", "lit pad to", "enter"] },
-    { x: 33, z: 3, rot: 4, lines: ["EXIT", "Lit pad leaves", "the dome", ""] },
-    { x: 36, z: 4, rot: 4, lines: ["TARGET TAG", "arena_warrior", "on = hunted", "Book: toggle"] },
+    { x: 33, z: 3, rot: 12, lines: ["EXIT", "Lit pad leaves", "the dome", ""] },
+    { x: 36, z: 4, rot: 12, lines: ["TARGET TAG", "arena_warrior", "on = hunted", "Book: toggle"] },
     { x: -38, z: -9, rot: 12, lines: ["SAFETY LAB", "Blue pad: A", "Red pad: B", "Cage:lion+hyena"] },
     { x: -10, z: 27, rot: 8, lines: ["FOOD", "taming foods", "for all six", "animals"] },
     { x: -8, z: 27, rot: 8, lines: ["GEAR", "diamond set", "bow, apples", "totem"] },
