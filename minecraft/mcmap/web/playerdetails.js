@@ -558,7 +558,11 @@
 
   // A heading's worth of figures: the biggest first, and how many were left
   // off the end.
-  function tally(rows, nameOf) {
+  // Which lists the reader has opened, so a redraw of changed figures keeps
+  // them open; a different player starts with none.
+  const expanded = new Set();
+
+  function tally(rows, nameOf, key) {
     const list = el('ul', 'tally');
     const rowOf = ([name, n]) => {
       const row = el('li');
@@ -571,18 +575,20 @@
     // line of text; the figure is the control so a keyboard can reach it.
     const left = rows.length - LIST_ROWS;
     const extra = rows.slice(LIST_ROWS).map(rowOf);
-    const toggle = button(`and ${fmt(left)} more`, () => {
-      const open = toggle.getAttribute('aria-expanded') !== 'true';
+    const set = (open) => {
       toggle.setAttribute('aria-expanded', String(open));
       toggle.textContent = open ? 'show fewer' : `and ${fmt(left)} more`;
-      if (open) for (const r of extra) list.insertBefore(r, more);
+      if (open) for (const r of extra) list.insertBefore(r, rest);
       else for (const r of extra) r.remove();
       list.classList.toggle('long', open);
-    }, 'ghost more');
-    toggle.setAttribute('aria-expanded', 'false');
-    const more = el('li', 'rest');
-    more.append(toggle);
-    list.append(more);
+      if (open) expanded.add(key);
+      else expanded.delete(key);
+    };
+    const toggle = button('', () => set(toggle.getAttribute('aria-expanded') !== 'true'), 'ghost tally-toggle');
+    const rest = el('li', 'rest');
+    rest.append(toggle);
+    list.append(rest);
+    set(expanded.has(key));
     return list;
   }
 
@@ -605,15 +611,15 @@
     const combat = el('div', 'tiles');
     combat.append(tile(fmt(total(kills)), 'mobs killed'), tile(fmt(total(deaths)), 'deaths'));
     out.push(combat);
-    if (kills.length > 0) out.push(el('h4', '', 'Mobs killed'), tally(kills, (k) => names.tidy(k)));
-    if (deaths.length > 0) out.push(el('h4', '', 'Deaths by cause'), tally(deaths, causeName));
+    if (kills.length > 0) out.push(el('h4', '', 'Mobs killed'), tally(kills, (k) => names.tidy(k), 'kills'));
+    if (deaths.length > 0) out.push(el('h4', '', 'Deaths by cause'), tally(deaths, causeName, 'deaths'));
 
     out.push(el('h3', '', 'Building'), el('p', 'note', `${when}. The lists name the kinds most often broken and placed, so they can add up to less than the totals.`));
     const building = el('div', 'tiles');
     building.append(tile(fmt(num(counters.broken) || 0), 'blocks broken'), tile(fmt(num(counters.placed) || 0), 'blocks placed'));
     out.push(building);
-    if (broken.length > 0) out.push(el('h4', '', 'Broken'), tally(broken, (k) => names.tidy(k)));
-    if (placed.length > 0) out.push(el('h4', '', 'Placed'), tally(placed, (k) => names.tidy(k)));
+    if (broken.length > 0) out.push(el('h4', '', 'Broken'), tally(broken, (k) => names.tidy(k), 'broken'));
+    if (placed.length > 0) out.push(el('h4', '', 'Placed'), tally(placed, (k) => names.tidy(k), 'placed'));
 
     out.push(el('h3', '', 'Sessions'), el('p', 'note', `${when}. Time online is added as it passes, so a server restart loses at most a few seconds.`));
     const sessions = el('div', 'tiles');
@@ -693,6 +699,7 @@
     subject = { id: who.id, name: text(who.name) };
     last = null;
     drawn = '';
+    expanded.clear();
     pickedPos = '';
     inside = null;
     clearInterval(timer);
