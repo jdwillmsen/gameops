@@ -59,6 +59,10 @@ func checkTP(ctx context.Context, e *Env) Result {
 		}
 		last = p
 		seen = append(seen, p.Yaw)
+		if p.dist(before) > moveTolerance {
+			evidence["moved"], evidence["yaw_samples"] = p.dist(before), seen
+			return inconclusive(check, unit+" moved after the tp, so its facing says nothing about the command", evidence)
+		}
 		if yawDiff(p.Yaw, yaw) <= yawTolerance {
 			evidence["yaw_after"], evidence["yaw_samples"] = p.Yaw, seen
 			return pass(check, "tp with a facing was accepted and turned "+unit, evidence)
@@ -68,9 +72,5 @@ func checkTP(ctx context.Context, e *Env) Result {
 		}
 	}
 	evidence["yaw_after"], evidence["yaw_samples"] = seen[0], seen
-	if last.dist(before) > moveTolerance {
-		evidence["moved"] = last.dist(before)
-		return inconclusive(check, unit+" moved after the tp, so its facing says nothing about the command", evidence)
-	}
 	return fail(check, fmt.Sprintf("the tp was accepted but %s never faced %.0f in %d readings (last %.0f)", unit, yaw, tpSamples, last.Yaw), evidence)
 }

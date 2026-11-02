@@ -107,6 +107,23 @@ func TestTPIsInconclusiveWhenTheUnitWalkedOff(t *testing.T) {
 	want(t, r, Inconclusive, "moved after the tp")
 }
 
+func TestTPIsInconclusiveWhenTheUnitWalkedOffAndHappensToFaceTheTeleportYaw(t *testing.T) {
+	l := newLab()
+	l.tp = "ignore"
+	reads := 0
+	l.onCmd = func(c string) {
+		if strings.HasPrefix(c, "querytarget @a") {
+			reads++
+			if reads == 3 {
+				l.units["Rusty"].X += 5
+				l.units["Rusty"].Yaw = 90
+			}
+		}
+	}
+	r, _ := runOne(testEnv(l, nil), "tp")
+	want(t, r, Inconclusive, "moved after the tp")
+}
+
 func TestTPIsInconclusiveWhenTheUnitIsNotInTheWorld(t *testing.T) {
 	l := newLab()
 	delete(l.units, "Rusty")
