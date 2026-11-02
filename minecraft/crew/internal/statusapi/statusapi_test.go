@@ -10,6 +10,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
@@ -120,6 +121,20 @@ func TestStateReportsNoTasksWithoutARunner(t *testing.T) {
 	rec := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/v1/state")
 	if got := strings.TrimSpace(rec.Body.String()); !strings.Contains(got, `"tasks":{"current":null,"recent":[]}`) {
 		t.Errorf("body = %s", got)
+	}
+}
+
+func TestStateCarriesTheCurrentSession(t *testing.T) {
+	sid := sessionid.Begin()
+	rec := get(t, Handler(fixed{}, "dev", Unit{ID: "crew-02", Name: "Basalt"}, nil), "/v1/state")
+	var body struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.SessionID != sid {
+		t.Errorf("session_id = %q, want %q", body.SessionID, sid)
 	}
 }
 
