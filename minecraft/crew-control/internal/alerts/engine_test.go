@@ -416,9 +416,13 @@ func toolState(id, state string, pct *int) []telemetry.UnitState {
 	return []telemetry.UnitState{{ID: id, State: state, ToolDurability: pct}}
 }
 
+func heldTool(id, item string, pct *int) []telemetry.UnitState {
+	return []telemetry.UnitState{{ID: id, State: "idle", ToolDurability: pct, ToolItem: item}}
+}
+
 func pctOf(n int) *int { return &n }
 
-func TestToolBreakingFiresAtTheThresholdAndClearsOnRepairOrUnknown(t *testing.T) {
+func TestToolBreakingFiresAtTheThresholdAndClearsOnRepair(t *testing.T) {
 	e := NewEngine(Defaults(), t0)
 	poll := func(sec int, online bool, pct *int) {
 		e.Poll(t0.Add(time.Duration(sec)*time.Second), []telemetry.Status{st("a", online, nil, t0)}, toolState("a", "idle", pct))
@@ -440,12 +444,49 @@ func TestToolBreakingFiresAtTheThresholdAndClearsOnRepairOrUnknown(t *testing.T)
 		t.Fatal("a repair did not resolve")
 	}
 	poll(3, true, pctOf(0))
-	poll(4, true, nil)
-	if find(e, "tool_breaking.a").State != StateResolved {
-		t.Fatal("an unknown reading must not keep it firing")
-	}
 	poll(5, true, pctOf(0))
 	poll(6, false, pctOf(0))
+	if find(e, "tool_breaking.a").State != StateResolved {
+		t.Fatal("an offline unit must not fire")
+	}
+}
+
+func TestToolBreakingSurvivesASwapAndOnlyThatToolsRepairResolvesIt(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	n := 0
+	poll := func(online bool, item string, pct *int) {
+		n++
+		e.Poll(t0.Add(time.Duration(n)*time.Second), []telemetry.Status{st("a", online, nil, t0)}, heldTool("a", item, pct))
+	}
+	firing := func(step string) {
+		t.Helper()
+		if a := find(e, "tool_breaking.a"); a == nil || a.State != StateFiring {
+			t.Fatalf("%s: %+v", step, a)
+		}
+	}
+	poll(true, "iron_pickaxe", pctOf(5))
+	firing("worn pickaxe")
+	since := find(e, "tool_breaking.a").Since
+
+	poll(true, "iron_sword", pctOf(90))
+	firing("swapped to a fine sword")
+	poll(true, "", nil)
+	firing("empty hand")
+	poll(true, "iron_axe", pctOf(3))
+	firing("swapped to another worn tool")
+	poll(true, "iron_pickaxe", pctOf(5))
+	firing("back to the pickaxe")
+	if !find(e, "tool_breaking.a").Since.Equal(since) {
+		t.Fatal("a swap re-fired the alert")
+	}
+
+	poll(true, "iron_pickaxe", pctOf(100))
+	if find(e, "tool_breaking.a").State != StateResolved {
+		t.Fatal("repairing the same tool did not resolve")
+	}
+	poll(true, "iron_pickaxe", pctOf(5))
+	firing("worn again after repair")
+	poll(false, "", nil)
 	if find(e, "tool_breaking.a").State != StateResolved {
 		t.Fatal("an offline unit must not fire")
 	}

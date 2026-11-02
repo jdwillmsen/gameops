@@ -24,8 +24,9 @@ var wearSlots = [...]string{"held", "helmet", "chest", "legs", "boots"}
 
 const heldWear = 0
 
-// bucketOf is 0 when the piece is fine or its wear unknown, else 1 for low
-// and 2 for critical, so a worse bucket is a larger number.
+// bucketOf is 0 when the piece is fine, else 1 for low and 2 for critical, so
+// a worse bucket is a larger number. An unknown reading is not a bucket and
+// is skipped by the caller.
 func bucketOf(pct *int) int {
 	switch {
 	case pct == nil:
@@ -45,14 +46,17 @@ func bucketName(b int) string {
 	return BucketLow
 }
 
-// wearOf picks out what a unit holds and wears that can wear out. The held
-// slot is looked up in the inventory only when the unit knows which it holds.
-func wearOf(held int, heldKnown bool, inv []LiveItem, armour []LiveArmour) [len(wearSlots)]*int {
+// wearOf picks out what a unit holds and wears that can wear out, with the
+// item names beside the readings. The held slot is looked up in the inventory
+// only when the unit knows which it holds. A piece with no reading has nil
+// wear but may still have a name.
+func wearOf(held int, heldKnown bool, inv []LiveItem, armour []LiveArmour) ([len(wearSlots)]*int, [len(wearSlots)]string) {
 	var out [len(wearSlots)]*int
+	var items [len(wearSlots)]string
 	if heldKnown {
 		for _, it := range inv {
 			if it.Slot == held {
-				out[heldWear] = it.DurabilityPct
+				out[heldWear], items[heldWear] = it.DurabilityPct, it.Name
 				break
 			}
 		}
@@ -60,22 +64,28 @@ func wearOf(held int, heldKnown bool, inv []LiveItem, armour []LiveArmour) [len(
 	for _, a := range armour {
 		for i, name := range wearSlots {
 			if i != heldWear && name == a.Slot {
-				out[i] = a.DurabilityPct
+				out[i], items[i] = a.DurabilityPct, a.Name
 			}
 		}
 	}
-	return out
+	return out, items
 }
 
-// observeWear returns a tool_worn event for each slot whose bucket got worse.
-// A repaired or swapped piece that is fine again re-arms its slot, and the
-// first reading of a session sets a baseline, so a unit that starts with a
-// worn tool is not announced.
-func (t *track) observeWear(wear [len(wearSlots)]*int, now time.Time) []Event {
+// observeWear returns a tool_worn event for each slot whose item got worse.
+// Wear is remembered per item, not per slot: a swap to another tool, or to an
+// empty hand, says nothing about the tool put away, so swapping back to it
+// is not news. Only repairing that same item re-arms it. The first reading
+// of a session sets a baseline, so a unit that starts with a worn tool is not
+// announced. Items sharing a name share a memory, which at worst hides a
+// second worn copy of a tool already announced.
+func (t *track) observeWear(wear [len(wearSlots)]*int, items [len(wearSlots)]string, now time.Time) []Event {
 	var out []Event
 	for i, pct := range wear {
+		if pct == nil {
+			continue
+		}
 		b := bucketOf(pct)
-		if b > t.wear[i] {
+		if b > t.wear[i][items[i]] {
 			level := "warn"
 			if b >= 2 {
 				level = "crit"
@@ -86,7 +96,20 @@ func (t *track) observeWear(wear [len(wearSlots)]*int, now time.Time) []Event {
 				Attrs: map[string]any{"slot": wearSlots[i], "bucket": bucketName(b)},
 			})
 		}
-		t.wear[i] = b
+		t.rememberWear(i, items[i], b)
 	}
 	return out
+}
+
+// rememberWear records an item's bucket, forgetting items that are fine so
+// the map holds only worn ones.
+func (t *track) rememberWear(slot int, item string, b int) {
+	if b == 0 {
+		delete(t.wear[slot], item)
+		return
+	}
+	if t.wear[slot] == nil {
+		t.wear[slot] = map[string]int{}
+	}
+	t.wear[slot][item] = b
 }

@@ -73,6 +73,47 @@ func TestToolWornIsAnnouncedOncePerWorseBucket(t *testing.T) {
 	}
 }
 
+func heldObs(item string, p *int) observation {
+	var o observation
+	o.online = true
+	o.wear[heldWear], o.wearItem[heldWear] = p, item
+	return o
+}
+
+func TestSwappingToolsNeitherReannouncesNorRearms(t *testing.T) {
+	var tr track
+	now := time.Unix(1000, 0)
+	obs := func(item string, p *int) []Event {
+		now = now.Add(time.Second)
+		return tr.observe(heldObs(item, p), now)
+	}
+	obs("iron_pickaxe", pct(90))
+	if got := obs("iron_pickaxe", pct(20)); len(got) != 1 {
+		t.Fatalf("worn pickaxe: %v", kinds(got))
+	}
+	// A fine sword, then an empty hand, then the worn pickaxe again.
+	for _, step := range []struct {
+		item string
+		p    *int
+	}{{"iron_sword", pct(80)}, {"", nil}, {"cobblestone", nil}, {"iron_pickaxe", pct(20)}, {"iron_sword", pct(80)}, {"iron_pickaxe", pct(20)}} {
+		if got := obs(step.item, step.p); len(got) != 0 {
+			t.Fatalf("%s %v announced %v", step.item, pctVal(step.p), kinds(got))
+		}
+	}
+	// A second worn tool is news once, and is not forgotten by swapping.
+	if got := obs("iron_axe", pct(20)); len(got) != 1 {
+		t.Fatalf("a different worn tool: %v", kinds(got))
+	}
+	if got := obs("iron_pickaxe", pct(20)); len(got) != 0 {
+		t.Fatalf("back to the first: %v", kinds(got))
+	}
+	// Repairing that same item is what re-arms it.
+	obs("iron_pickaxe", pct(100))
+	if got := obs("iron_pickaxe", pct(20)); len(got) != 1 {
+		t.Fatalf("worn again after repair: %v", kinds(got))
+	}
+}
+
 func TestToolWornTextCarriesNoPercentage(t *testing.T) {
 	var tr track
 	now := time.Unix(1000, 0)
@@ -116,19 +157,22 @@ func TestWearOfPicksHeldItemAndArmourSlots(t *testing.T) {
 	inv := []LiveItem{{Slot: 0, Name: "cobblestone", Count: 3}, {Slot: 4, Name: "iron_pickaxe", Count: 1, DurabilityPct: pct(31)}}
 	armour := []LiveArmour{{Slot: "helmet", Name: "iron_helmet", DurabilityPct: pct(80)}, {Slot: "boots", Name: "iron_boots"}, {Slot: "held", Name: "x", DurabilityPct: pct(1)}}
 
-	got := wearOf(4, true, inv, armour)
+	got, names := wearOf(4, true, inv, armour)
 	if pctVal(got[heldWear]) != 31 || pctVal(got[1]) != 80 || got[4] != nil {
 		t.Errorf("wear = held %v helmet %v boots %v", pctVal(got[0]), pctVal(got[1]), pctVal(got[4]))
 	}
-	if got := wearOf(0, true, inv, nil); got[heldWear] != nil {
-		t.Errorf("an item that cannot wear out reads as %v", pctVal(got[heldWear]))
+	if names[heldWear] != "iron_pickaxe" || names[1] != "iron_helmet" || names[4] != "iron_boots" {
+		t.Errorf("names = %v", names)
 	}
-	if got := wearOf(4, false, inv, nil); got[heldWear] != nil {
-		t.Errorf("an unknown held slot read as %v", pctVal(got[heldWear]))
+	if got, names := wearOf(0, true, inv, nil); got[heldWear] != nil || names[heldWear] != "cobblestone" {
+		t.Errorf("an item that cannot wear out reads as %v (%s)", pctVal(got[heldWear]), names[heldWear])
+	}
+	if got, names := wearOf(4, false, inv, nil); got[heldWear] != nil || names[heldWear] != "" {
+		t.Errorf("an unknown held slot read as %v (%s)", pctVal(got[heldWear]), names[heldWear])
 	}
 	// A unit cannot name its way into the held slot through the armour list.
-	if got := wearOf(9, true, nil, armour); got[heldWear] != nil {
-		t.Errorf("armour entry named held: %v", pctVal(got[heldWear]))
+	if got, names := wearOf(9, true, nil, armour); got[heldWear] != nil || names[heldWear] != "" {
+		t.Errorf("armour entry named held: %v (%s)", pctVal(got[heldWear]), names[heldWear])
 	}
 }
 

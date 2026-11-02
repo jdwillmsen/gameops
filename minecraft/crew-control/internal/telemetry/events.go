@@ -80,8 +80,9 @@ type track struct {
 	anchor      [3]float32
 	anchorKnown bool
 	stuck       bool
-	// wear is each watched slot's bucket, see bucketOf.
-	wear [len(wearSlots)]int
+	// wear is, per watched slot, the bucket of each worn item seen there,
+	// see bucketOf; fine items are absent.
+	wear [len(wearSlots)]map[string]int
 	// effects are the unit's status effects at the last poll, by id.
 	effects       map[int]heldEffect
 	effectsSeeded bool
@@ -92,8 +93,10 @@ type track struct {
 	fightPrev *FightTotals
 	fight     *openFight
 	// held is the durability left on the held item at the last poll, nil
-	// when unknown; the gauge and the tool_breaking alert read it.
-	held *int
+	// when unknown, and heldItem is its name; the gauge and the
+	// tool_breaking alert read them.
+	held     *int
+	heldItem string
 }
 
 type recentTask struct {
@@ -127,6 +130,7 @@ type observation struct {
 	posKnown    bool
 	recent      []recentTask
 	wear        [len(wearSlots)]*int
+	wearItem    [len(wearSlots)]string
 	effects     []LiveEffect
 	// threat is nil from a unit that predates the field or does not yet know
 	// where it is, which is not the same as nothing nearby.
@@ -150,14 +154,16 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	defer func() {
 		t.seeded = true
 		t.online, t.dead = o.online, o.dead
-		t.held = nil
+		t.held, t.heldItem = nil, ""
 		if o.online {
-			t.held = o.wear[heldWear]
+			t.held, t.heldItem = o.wear[heldWear], o.wearItem[heldWear]
 		}
 	}()
 	if !t.seeded {
 		for i, w := range o.wear {
-			t.wear[i] = bucketOf(w)
+			if w != nil {
+				t.rememberWear(i, o.wearItem[i], bucketOf(w))
+			}
 		}
 		t.observeEffects(o.effects, now)
 		t.underAttack = o.threat != nil && o.threat.Hostiles >= threatHigh
@@ -174,7 +180,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		} else {
 			add("offline", "crit", "went offline")
 			t.taskID, t.template, t.stuck, t.lowHP, t.lowFood = "", "", false, false, false
-			t.wear = [len(wearSlots)]int{}
+			t.wear = [len(wearSlots)]map[string]int{}
 			t.effects, t.effectsSeeded = nil, false
 			t.underAttack = false
 			out = append(out, t.observeFight(nil, now)...)
@@ -204,7 +210,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		add("low_hunger", "warn", fmt.Sprintf("hunger low (%d)", int(*o.hunger)))
 	}
 	t.lowFood = hungry
-	out = append(out, t.observeWear(o.wear, now)...)
+	out = append(out, t.observeWear(o.wear, o.wearItem, now)...)
 	out = append(out, t.observeEffects(o.effects, now)...)
 	out = append(out, t.observeThreat(o.threat, now)...)
 	out = append(out, t.observeFight(o.fight, now)...)

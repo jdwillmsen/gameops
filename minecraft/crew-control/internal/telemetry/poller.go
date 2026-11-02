@@ -435,7 +435,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	if t := res.st.Threat; t != nil {
 		o.threat = &Threat{Hostiles: min(max(t.Hostiles, 0), maxThreatCount), Players: min(max(t.Players, 0), maxThreatCount)}
 	}
-	o.wear = wearOf(res.st.State.HeldSlot, res.st.State.HeldKnown, res.st.State.Inventory, res.st.State.Armour)
+	o.wear, o.wearItem = wearOf(res.st.State.HeldSlot, res.st.State.HeldKnown, res.st.State.Inventory, res.st.State.Armour)
 	for _, e := range p.tracks[i].observe(o, now) {
 		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i]})
 	}
