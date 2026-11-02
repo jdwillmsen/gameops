@@ -48,8 +48,8 @@ const PhaseUnknown = "unknown"
 var DayPhases = []string{"dawn", "day", "dusk", "night"}
 
 // phaseLabel keeps the label inside the closed list whatever the event held.
-func phaseLabel(v any) string {
-	if s, ok := v.(string); ok && slices.Contains(DayPhases, s) {
+func phaseLabel(s string) string {
+	if slices.Contains(DayPhases, s) {
 		return s
 	}
 	return PhaseUnknown
@@ -232,7 +232,7 @@ func (f *Fleet) Observe(batch []telemetry.Born) {
 			f.finished.WithLabelValues(b.Unit, tpl, OutcomeUnknown).Inc()
 		case "died":
 			f.deaths.WithLabelValues(b.Unit).Inc()
-			f.deathsAt.WithLabelValues(phaseLabel(b.Attrs["day_phase"])).Inc()
+			f.deathsAt.WithLabelValues(phaseLabel(b.DayPhase)).Inc()
 		case "stuck":
 			f.stuck.WithLabelValues(b.Unit).Inc()
 		}

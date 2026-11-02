@@ -492,6 +492,9 @@ func bornEvent(b telemetry.Born) (events.Event, events.Hint) {
 	if b.Took > 0 {
 		payload["duration_ms"] = b.Took.Milliseconds()
 	}
+	if b.DayPhase != "" {
+		payload["day_phase"] = b.DayPhase
+	}
 	for k, v := range b.Attrs {
 		payload[k] = v
 	}

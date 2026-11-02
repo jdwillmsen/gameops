@@ -35,6 +35,10 @@ type Event struct {
 	// the queue's id, which the history store keys on; the text alone cannot
 	// carry it.
 	Task string `json:"task,omitempty"`
+	// DayPhase is the unit's closed day phase at the poll that raised the
+	// event, empty when it had no clock. Day phase is public, so it rides the
+	// feed: the dashboard charts deaths by it and the replay shades by it.
+	DayPhase string `json:"day_phase,omitempty"`
 	// Template and Took describe a task event for the history store only: the
 	// public feed has no use for them. Took is how long the unit's own record
 	// says the task ran, zero when it is not known.
@@ -144,9 +148,18 @@ type observation struct {
 	dayPhase string
 }
 
-// observe advances t to o and returns what changed. It is pure so the rules
-// are testable without a poller.
+// observe advances t to o and returns what changed, each event stamped with
+// the phase of day it happened in. It is pure so the rules are testable
+// without a poller.
 func (t *track) observe(o observation, now time.Time) []Event {
+	out := t.advance(o, now)
+	for i := range out {
+		out[i].DayPhase = o.dayPhase
+	}
+	return out
+}
+
+func (t *track) advance(o observation, now time.Time) []Event {
 	var out []Event
 	add := func(kind, level, text string) {
 		out = append(out, Event{At: now, Kind: kind, Level: level, Text: text})
@@ -192,9 +205,6 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	switch {
 	case !t.dead && o.dead:
 		add("died", "crit", "died")
-		if o.dayPhase != "" {
-			out[len(out)-1].Attrs = map[string]any{"day_phase": o.dayPhase}
-		}
 	case t.dead && !o.dead:
 		add("respawned", "info", "respawned")
 	}
