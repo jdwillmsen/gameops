@@ -18,6 +18,8 @@ MELEE = {"priority": 4, "speed_multiplier": 1.2, "track_target": True}
 LEAP = {"priority": 3, "must_be_on_ground": True, "yd": 0.45, "target_dist": 0.5}
 # Script cannot read the sittable state, so the sit events mirror it into an entity property.
 SITTING_PROPERTY = "gameops:sitting"
+# Drives the collar bone in the render controller, so it needs to reach clients.
+TAMED_PROPERTY = "gameops:tamed"
 
 
 def family_test(family: str) -> dict:
@@ -148,7 +150,10 @@ def entity_json(s: Species) -> dict:
                 "is_spawnable": True,
                 "is_summonable": True,
                 "is_experimental": False,
-                "properties": {SITTING_PROPERTY: {"type": "bool", "default": False}},
+                "properties": {
+                    SITTING_PROPERTY: {"type": "bool", "default": False},
+                    TAMED_PROPERTY: {"type": "bool", "default": False, "client_sync": True},
+                },
             },
             "component_groups": groups,
             "components": {
@@ -174,7 +179,8 @@ def entity_json(s: Species) -> dict:
             "events": {
                 "minecraft:entity_spawned": {"sequence": spawn},
                 "gameops:on_tamed": event(add=["gameops:tamed", "gameops:tamed_active"],
-                                          remove=["gameops:wild"]),
+                                          remove=["gameops:wild"],
+                                          props={TAMED_PROPERTY: True}),
                 "gameops:on_sit": event(add=["gameops:sitting"], remove=["gameops:tamed_active"],
                                       props={SITTING_PROPERTY: True}),
                 "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"],

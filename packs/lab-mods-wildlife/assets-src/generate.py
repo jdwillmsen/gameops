@@ -49,10 +49,11 @@ def client_entity(s: Species) -> dict:
 
 def render_controller(s: Species) -> dict:
     ctl = {"geometry": "Geometry.default", "materials": [{"*": "Material.default"}]}
+    ctl["part_visibility"] = [{"*": True}, {"collar": f"query.property('{build_behavior.TAMED_PROPERTY}')"}]
     if s.id == "lion":
         # The female shares the male's geometry, so her mane bone is hidden rather than absent.
         male = f"query.variant == {s.variants.index('male')}"
-        ctl["part_visibility"] = [{"*": True}, {"mane": male}, {"mane_chest": male}]
+        ctl["part_visibility"] += [{"mane": male}, {"mane_chest": male}]
     if s.variants:
         ctl["arrays"] = {"textures": {"Array.skins": [f"Texture.{v}" for v in s.variants]}}
         ctl["textures"] = ["Array.skins[query.variant]"]

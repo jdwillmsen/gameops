@@ -10,6 +10,11 @@
         "gameops:sitting": {
           "type": "bool",
           "default": false
+        },
+        "gameops:tamed": {
+          "type": "bool",
+          "default": false,
+          "client_sync": true
         }
       }
     },
@@ -211,6 +216,9 @@
         ]
       },
       "gameops:on_tamed": {
+        "set_property": {
+          "gameops:tamed": true
+        },
         "add": {
           "component_groups": [
             "gameops:tamed",

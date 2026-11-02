@@ -442,6 +442,20 @@ def hyena(p: Px, pal: dict):
     return mark if blob(p, pal, 2) else (pal["shade"] if speckle(p, 4, 9) else base)
 
 
+COLLAR = {"band": (176, 38, 38), "edge": (122, 24, 28), "buckle": (232, 196, 72)}
+
+
+def collar(p: Px):
+    """A red leather band with darker stitched edges and a brass buckle on each flank and under the throat."""
+    if p.face in ("front", "back") or p.row in (0, p.rows - 1) and p.face in ("right", "left"):
+        return COLLAR["edge"]
+    if p.face in ("left", "right") and p.col == p.cols // 2 and p.row in (p.rows // 2, p.rows // 2 - 1):
+        return COLLAR["buckle"]
+    if p.under and abs(p.col - p.cols // 2) <= 1 and p.row == p.rows // 2:
+        return COLLAR["buckle"]
+    return COLLAR["band"]
+
+
 SKINS = {"tiger": tiger, "cheetah": cheetah, "lion": lion, "black_leopard": black_leopard,
          "brown_bear": brown_bear, "hyena": hyena}
 
@@ -456,7 +470,7 @@ def paint(s: Species, variant: str) -> bytes:
                 for col in range(cols):
                     x, y, z = point(col, row)
                     px = Px(part.name, face, x, y, z, col, row, cols, rows, part.origin, part.size)
-                    r, g, b = skin(px, pal)
+                    r, g, b = collar(px) if part.name == rig_common.COLLAR else skin(px, pal)
                     i = ((fy + row) * SIZE + fx + col) * 4
                     pixels[i:i + 4] = bytes((r, g, b, 255))
     return png(pixels)

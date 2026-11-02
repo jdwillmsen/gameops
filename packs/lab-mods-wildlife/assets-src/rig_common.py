@@ -13,11 +13,41 @@ class Part:
     uv: tuple
 
 
+COLLAR = "collar"
+
+
+def collar_shape(chest_origin, chest_size, z: float) -> tuple:
+    """A two-pixel band around the front of the chest, just proud of it, starting `z` pixels behind its front."""
+    (ox, oy, oz), (w, h, _) = chest_origin, chest_size
+    return (COLLAR, COLLAR, (ox - 0.5, oy - 0.5, oz + z), (w + 1, h + 1, 2))
+
+
+def _free_slot(taken, rw, rh):
+    for y in range(TEXTURE - rh + 1):
+        for x in range(TEXTURE - rw + 1):
+            if not any(x < tx1 and tx0 < x + rw and y < ty1 and ty0 < y + rh for tx0, ty0, tx1, ty1 in taken):
+                return x, y
+    raise ValueError("collar does not fit the texture")
+
+
 def pack(shapes, label="parts") -> list:
     """Cubes with box-UV origins packed into rows of the texture, tallest first.
 
-    shapes: (bone, name, origin, size) tuples.
+    shapes: (bone, name, origin, size) tuples. The collar is placed last in free space, so adding it
+    leaves every other cube's UV where it was.
     """
+    collar = [s for s in shapes if s[1] == COLLAR]
+    parts = _pack([s for s in shapes if s[1] != COLLAR], label)
+    for bone, name, origin, (w, h, d) in collar:
+        rw, rh = 2 * d + 2 * w, d + h
+        taken = [(p.uv[0], p.uv[1], p.uv[0] + 2 * p.size[2] + 2 * p.size[0], p.uv[1] + p.size[2] + p.size[1])
+                 for p in parts]
+        x, y = _free_slot(taken, rw, rh)
+        parts.append(Part(bone, name, origin, (w, h, d), (x, y)))
+    return parts
+
+
+def _pack(shapes, label) -> list:
     rects = [(2 * d + 2 * w, d + h) for _, _, _, (w, h, d) in shapes]
     order = sorted(range(len(shapes)), key=lambda i: (-rects[i][1], i))
     uvs = {}
