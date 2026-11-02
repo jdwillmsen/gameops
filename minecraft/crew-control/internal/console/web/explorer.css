@@ -9,8 +9,8 @@ body.view-events #dock { display: none; }
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  background: #111;
-  color: #ddd;
+  background: var(--bg);
+  color: var(--text);
   font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   min-height: 0;
 }

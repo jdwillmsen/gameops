@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The dashboard screen: a filter row, a grid of panels and an edit mode.
 // Layout rules live in dash.js, data in dash-data.js and the panel types in
 // dash-panels.js; this file wires them to the page. Data is collected whether
@@ -17,14 +18,9 @@ const ROW_PX = 130;
 const CHROME_PX = 96;
 const REFRESH_MS = 1000;
 
-function el(tag, props = {}, ...kids) {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-}
 
 const btn = (text, label, onClick, extra = {}) => {
-  const b = el('button', { type: 'button', className: 'cc-btn', textContent: text, ...extra });
+  const b = h('button', { type: 'button', className: 'cc-btn', textContent: text, ...extra });
   if (label) b.setAttribute('aria-label', label);
   b.addEventListener('click', onClick);
   return b;
@@ -45,7 +41,7 @@ export function initDashboard(host = {}) {
   let unitSig = '';
   const cells = new Map();
 
-  const root = el('section', { className: 'cc-root db' });
+  const root = h('section', { className: 'cc-root db' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', 'Dashboard');
 
@@ -59,16 +55,16 @@ export function initDashboard(host = {}) {
     });
     return { b, w };
   });
-  const winGroup = el('div', { className: 'db-group', role: 'group' }, ...winBtns.map(x => x.b));
+  const winGroup = h('div', { className: 'db-group', role: 'group' }, ...winBtns.map(x => x.b));
   winGroup.setAttribute('aria-label', 'Time window');
-  const unitSel = el('select', { className: 'db-sel' });
+  const unitSel = h('select', { className: 'db-sel' });
   unitSel.setAttribute('aria-label', 'Unit');
   unitSel.addEventListener('change', () => {
     unit = unitSel.value;
     refresh(true);
   });
 
-  const layoutSel = el('select', { className: 'db-sel' });
+  const layoutSel = h('select', { className: 'db-sel' });
   layoutSel.setAttribute('aria-label', 'Layout');
   layoutSel.addEventListener('change', () => {
     const v = layoutSel.value;
@@ -79,14 +75,14 @@ export function initDashboard(host = {}) {
   const editBtn = btn('Edit layout', '', () => setEditing(!editing));
   editBtn.setAttribute('aria-pressed', 'false');
 
-  const bar = el('div', { className: 'db-bar' }, winGroup, unitSel, el('span', { className: 'db-spacer' }), layoutSel, editBtn);
+  const bar = h('div', { className: 'db-bar' }, winGroup, unitSel, h('span', { className: 'db-spacer' }), layoutSel, editBtn);
 
   // ---- edit row ----
 
-  const addSel = el('select', { className: 'db-sel' });
+  const addSel = h('select', { className: 'db-sel' });
   addSel.setAttribute('aria-label', 'Panel to add');
-  for (const [type, def] of Object.entries(PANELS)) addSel.append(el('option', { value: type, textContent: def.title }));
-  const nameIn = el('input', { type: 'text', placeholder: 'Layout name', maxLength: NAME_MAX, className: 'db-name', autocomplete: 'off' });
+  for (const [type, def] of Object.entries(PANELS)) addSel.append(h('option', { value: type, textContent: def.title }));
+  const nameIn = h('input', { type: 'text', placeholder: 'Layout name', maxLength: NAME_MAX, className: 'db-name', autocomplete: 'off' });
   nameIn.setAttribute('aria-label', 'Layout name');
   const delBtn = btn('Delete saved', 'Delete the selected saved layout', () => {
     const name = layoutSel.value;
@@ -96,14 +92,14 @@ export function initDashboard(host = {}) {
     say(`Deleted layout ${name}`);
     syncLayoutSel();
   });
-  const editRow = el('div', { className: 'db-bar db-edit', hidden: true },
+  const editRow = h('div', { className: 'db-bar db-edit', hidden: true },
     addSel,
     btn('Add panel', '', () => {
       if (layout.panels.length >= MAX_PANELS) return say(`At most ${MAX_PANELS} panels`);
       const def = PANELS[addSel.value];
       setLayout(addPanel(layout, addSel.value, def.size), `${def.title} added`);
     }),
-    el('span', { className: 'db-spacer' }),
+    h('span', { className: 'db-spacer' }),
     nameIn,
     btn('Save as', 'Save the layout under this name', () => {
       const r = saveNamed(store, nameIn.value, layout);
@@ -117,11 +113,11 @@ export function initDashboard(host = {}) {
     delBtn,
     btn('Reset', 'Reset to the default layout', () => setLayout(defaultLayout(), 'Default layout restored')));
 
-  const live = el('p', { className: 'cc-sr', role: 'status' });
-  const note = el('p', { className: 'db-note' });
-  const grid = el('div', { className: 'db-grid', role: 'list' });
+  const live = h('p', { className: 'cc-sr', role: 'status' });
+  const note = h('p', { className: 'db-note' });
+  const grid = h('div', { className: 'db-grid', role: 'list' });
   grid.setAttribute('aria-label', 'Panels');
-  const empty = el('p', { className: 'db-empty', hidden: true, textContent: 'No panels. Use Edit layout to add one.' });
+  const empty = h('p', { className: 'db-empty', hidden: true, textContent: 'No panels. Use Edit layout to add one.' });
   root.append(bar, editRow, live, grid, empty, note);
 
   function say(text) {
@@ -162,13 +158,13 @@ export function initDashboard(host = {}) {
   const same = (a, b) => JSON.stringify(a.panels) === JSON.stringify(b.panels);
 
   function syncLayoutSel() {
-    const opts = [el('option', { value: '\0default', textContent: 'Default' })];
+    const opts = [h('option', { value: '\0default', textContent: 'Default' })];
     let active = same(layout, defaultLayout()) ? '\0default' : '';
     for (const name of Object.keys(store.saved)) {
-      opts.push(el('option', { value: name, textContent: name }));
+      opts.push(h('option', { value: name, textContent: name }));
       if (!active && same(layout, store.saved[name])) active = name;
     }
-    if (!active) opts.push(el('option', { value: '', textContent: 'Unsaved changes' }));
+    if (!active) opts.push(h('option', { value: '', textContent: 'Unsaved changes' }));
     layoutSel.replaceChildren(...opts);
     layoutSel.value = active;
     delBtn.disabled = !(active in store.saved);
@@ -180,7 +176,7 @@ export function initDashboard(host = {}) {
     const sig = JSON.stringify(ids);
     if (sig === unitSig) return;
     unitSig = sig;
-    unitSel.replaceChildren(el('option', { value: '', textContent: 'All units' }), ...ids.map(([id, name]) => el('option', { value: id, textContent: name })));
+    unitSel.replaceChildren(h('option', { value: '', textContent: 'All units' }), ...ids.map(([id, name]) => h('option', { value: id, textContent: name })));
     if (!ids.some(([id]) => id === unit)) unit = '';
     unitSel.value = unit;
   }
@@ -191,11 +187,11 @@ export function initDashboard(host = {}) {
 
   function buildCell(p) {
     const def = PANELS[p.type];
-    const cell = el('div', { className: 'db-cell', draggable: editing });
+    const cell = h('div', { className: 'db-cell', draggable: editing });
     cell.setAttribute('role', 'listitem');
     cell.dataset.id = p.id;
-    const body = el('div', { className: 'db-body' });
-    const tools = el('div', { className: 'db-tools', hidden: !editing });
+    const body = h('div', { className: 'db-body' });
+    const tools = h('div', { className: 'db-tools', hidden: !editing });
     tools.setAttribute('role', 'group');
     tools.setAttribute('aria-label', `${def.title} layout`);
     const act = (text, label, fn) => tools.append(btn(text, `${label}: ${def.title}`, () => { fn(); keepFocus(p.id, label); }));
@@ -236,7 +232,7 @@ export function initDashboard(host = {}) {
       inst = def.create(body, { height });
     } catch (err) {
       inst = { update() {}, destroy() {} };
-      body.append(el('p', { className: 'db-empty', textContent: `${def.title} could not load.` }));
+      body.append(h('p', { className: 'db-empty', textContent: `${def.title} could not load.` }));
       console.error(err);
     }
     return { cell, body, tools, inst, p: { ...p }, sig: '' };

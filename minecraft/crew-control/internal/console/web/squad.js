@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The squad panel is a view: it shows the public snapshot and can open a
 // member's camera. Orders are issued from the operator panel, never here.
 import { openStream } from './kit/stream.js';
@@ -25,11 +26,6 @@ export function orderLine(order) {
 export function initSquads(host) {
   const $ = id => document.getElementById(id);
 
-  const el = (tag, props = {}, ...kids) => {
-    const e = Object.assign(document.createElement(tag), props);
-    e.append(...kids);
-    return e;
-  };
 
   let open = false;
   let data = { squads: [], battalions: [] };
@@ -47,9 +43,9 @@ export function initSquads(host) {
 
   function meter(value, max, kind) {
     const known = typeof value === 'number';
-    const b = el('span', { className: `meter ${kind}` + (known && value <= 6 ? ' low' : '') });
+    const b = h('span', { className: `meter ${kind}` + (known && value <= 6 ? ' low' : '') });
     b.title = known ? `${Math.round(value)} / ${max}` : 'unknown';
-    b.append(el('i'));
+    b.append(h('i'));
     b.firstChild.style.width = (known ? Math.max(0, Math.min(100, (value / max) * 100)) : 0) + '%';
     return b;
   }
@@ -57,43 +53,43 @@ export function initSquads(host) {
   function memberRow(sq, m) {
     const dead = m.alive === false;
     const last = lastCallout(sq.callouts, m.unit);
-    const row = el('button', {
+    const row = h('button', {
       type: 'button',
       className: 'sq-member' + (dead ? ' dead' : ''),
       title: `Focus ${nameOf(m.unit)}`,
     });
-    if (sq.leader === m.unit) row.append(el('span', { className: 'crown', textContent: '♛', title: 'Leader' }));
+    if (sq.leader === m.unit) row.append(h('span', { className: 'crown', textContent: '♛', title: 'Leader' }));
     row.append(
-      el('span', { className: 'sq-name', textContent: nameOf(m.unit) }),
-      el('span', { className: 'role ' + m.role, textContent: roleLabel(m.role) }),
-      el('span', { className: 'sq-hp' }, meter(m.hp, 20, 'hp')),
-      el('span', { className: 'sq-food', textContent: `food ${m.food ?? '-'}` }),
-      el('span', { className: 'sq-weapon', textContent: m.weapon || 'no weapon' }),
-      el('span', { className: 'sq-callout' + (last ? ' on' : ''), textContent: last ? last.kind : 'no callout' }),
+      h('span', { className: 'sq-name', textContent: nameOf(m.unit) }),
+      h('span', { className: 'role ' + m.role, textContent: roleLabel(m.role) }),
+      h('span', { className: 'sq-hp' }, meter(m.hp, 20, 'hp')),
+      h('span', { className: 'sq-food', textContent: `food ${m.food ?? '-'}` }),
+      h('span', { className: 'sq-weapon', textContent: m.weapon || 'no weapon' }),
+      h('span', { className: 'sq-callout' + (last ? ' on' : ''), textContent: last ? last.kind : 'no callout' }),
     );
     row.addEventListener('click', () => host.focus(m.unit));
     return row;
   }
 
   function squadBox(sq) {
-    const box = el('section', { className: 'sq' });
-    const head = el('h3', {}, el('span', { textContent: sq.name || sq.id }));
-    if (sq.battalion) head.append(el('span', { className: 'sq-bn', textContent: sq.battalion }));
+    const box = h('section', { className: 'sq' });
+    const head = h('h3', {}, h('span', { textContent: sq.name || sq.id }));
+    if (sq.battalion) head.append(h('span', { className: 'sq-bn', textContent: sq.battalion }));
     box.append(head);
-    box.append(el('div', { className: 'sq-order' },
-      el('span', { textContent: 'Order ' }), el('b', { textContent: orderLine(sq.order) })));
+    box.append(h('div', { className: 'sq-order' },
+      h('span', { textContent: 'Order ' }), h('b', { textContent: orderLine(sq.order) })));
 
-    const members = el('div', { className: 'sq-members' });
+    const members = h('div', { className: 'sq-members' });
     for (const m of sq.members || []) members.append(memberRow(sq, m));
     box.append(members);
 
     const calls = sq.callouts || [];
     if (calls.length) {
-      const log = el('ul', { className: 'sq-log' }, ...calls.slice(0, 8).map(c => el('li', {},
-        el('time', { textContent: clock(c.at) }),
-        el('b', { textContent: nameOf(c.from) }),
-        el('span', { textContent: c.kind }))));
-      box.append(el('h4', { textContent: 'Callouts' }), log);
+      const log = h('ul', { className: 'sq-log' }, ...calls.slice(0, 8).map(c => h('li', {},
+        h('time', { textContent: clock(c.at) }),
+        h('b', { textContent: nameOf(c.from) }),
+        h('span', { textContent: c.kind }))));
+      box.append(h('h4', { textContent: 'Callouts' }), log);
     }
     return box;
   }
@@ -103,8 +99,8 @@ export function initSquads(host) {
     $('squad-toggle').setAttribute('aria-pressed', String(open));
     aside.hidden = !open;
     if (!open) return;
-    const out = [el('h2', { textContent: 'Squads' })];
-    if (!data.squads.length) out.push(el('p', { className: 'empty', textContent: 'no squads yet' }));
+    const out = [h('h2', { textContent: 'Squads' })];
+    if (!data.squads.length) out.push(h('p', { className: 'empty', textContent: 'no squads yet' }));
     for (const sq of data.squads) out.push(squadBox(sq));
     aside.replaceChildren(...out);
   }

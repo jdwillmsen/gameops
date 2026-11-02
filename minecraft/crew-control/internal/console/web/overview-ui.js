@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The fleet overview screen: every unit in one sortable, filterable,
 // keyboard-driven table with a summary strip. overview.js holds the logic;
 // this file only paints it. Rows are built once and patched in place, so a
@@ -13,12 +14,6 @@ import {
 } from './overview.js';
 
 const SVG = 'http://www.w3.org/2000/svg';
-
-function el(tag, props = {}, ...kids) {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-}
 
 function icon(paths, fill = false) {
   const svg = document.createElementNS(SVG, 'svg');
@@ -49,7 +44,7 @@ const STATE_VIEW = {
 
 function stateChip(state) {
   const v = STATE_VIEW[state];
-  return el('span', { className: `cc-status cc-status-${v.tone} ov-chip` }, icon(v.paths, v.fill), el('span', { textContent: STATE_LABEL[state] }));
+  return h('span', { className: `cc-status cc-status-${v.tone} ov-chip` }, icon(v.paths, v.fill), h('span', { textContent: STATE_LABEL[state] }));
 }
 
 const KIND_ICON = {
@@ -98,16 +93,16 @@ export function initOverview(host) {
   const measure = (name, start) => { if (perf) performance.measure(name, { start, end: performance.now() }); };
   const prefs = { sort: initial.sort, dir: initial.dir, filter: initial.filter };
 
-  const root = el('section', { className: 'cc-root ov' });
+  const root = h('section', { className: 'cc-root ov' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', 'Fleet overview');
 
   // ---- summary strip ----
 
-  const tilesBox = el('div', { className: 'ov-tiles', role: 'group' });
+  const tilesBox = h('div', { className: 'ov-tiles', role: 'group' });
   tilesBox.setAttribute('aria-label', 'Fleet summary');
   const tiles = TILES.map(def => {
-    const box = el('div', { className: 'ov-tile' });
+    const box = h('div', { className: 'ov-tile' });
     tilesBox.append(box);
     const tile = new StatTile(box, { label: def.label, value: '-', trend: def.trend ? { values: [], labels: [] } : undefined, status: def.status ? 'good' : undefined, statusLabel: 'None', format: n => String(n), trendFormat: n => (n == null ? 'unknown' : String(Math.round(n))) });
     if (tile.spark) {
@@ -121,14 +116,14 @@ export function initOverview(host) {
 
   // ---- toolbar ----
 
-  const q = el('input', { type: 'search', placeholder: 'Filter (/)', autocomplete: 'off', spellcheck: false, value: prefs.filter.q });
+  const q = h('input', { type: 'search', placeholder: 'Filter (/)', autocomplete: 'off', spellcheck: false, value: prefs.filter.q });
   q.setAttribute('aria-label', 'Filter units');
   const chips = new Map();
-  const chipBox = el('div', { className: 'ov-chips', role: 'group' });
+  const chipBox = h('div', { className: 'ov-chips', role: 'group' });
   chipBox.setAttribute('aria-label', 'Filter by state');
   for (const s of CHIP_ORDER) {
-    const count = el('span', { className: 'ov-count-n', textContent: '0' });
-    const b = el('button', { type: 'button', className: 'ov-fchip' }, icon(STATE_VIEW[s].paths, STATE_VIEW[s].fill), el('span', { textContent: STATE_LABEL[s] }), count);
+    const count = h('span', { className: 'ov-count-n', textContent: '0' });
+    const b = h('button', { type: 'button', className: 'ov-fchip' }, icon(STATE_VIEW[s].paths, STATE_VIEW[s].fill), h('span', { textContent: STATE_LABEL[s] }), count);
     b.dataset.state = s;
     b.addEventListener('click', () => {
       const f = prefs.filter;
@@ -140,7 +135,7 @@ export function initOverview(host) {
   }
 
   const select = (label, onPick) => {
-    const s = el('select');
+    const s = h('select');
     s.setAttribute('aria-label', label);
     s.addEventListener('change', () => onPick(s.value));
     return s;
@@ -149,37 +144,37 @@ export function initOverview(host) {
   const hpSel = select('Health at most', v => { prefs.filter.hp = Number(v); changed(); });
   const foodSel = select('Hunger at most', v => { prefs.filter.food = Number(v); changed(); });
   for (const [sel, name] of [[hpSel, 'Health'], [foodSel, 'Hunger']]) {
-    sel.replaceChildren(...LEVELS.map(n => el('option', { value: String(n), textContent: `${name}: ${LEVEL_LABEL[n]}` })));
+    sel.replaceChildren(...LEVELS.map(n => h('option', { value: String(n), textContent: `${name}: ${LEVEL_LABEL[n]}` })));
   }
   const sortSel = select('Sort by', v => setSort(v, true));
   sortSel.className = 'ov-sortsel';
-  sortSel.replaceChildren(...SORTS.map(k => el('option', { value: k, textContent: `Sort: ${SORT_LABEL[k]}` })));
-  const dirBtn = el('button', { type: 'button', className: 'ov-dir' });
+  sortSel.replaceChildren(...SORTS.map(k => h('option', { value: k, textContent: `Sort: ${SORT_LABEL[k]}` })));
+  const dirBtn = h('button', { type: 'button', className: 'ov-dir' });
   dirBtn.addEventListener('click', () => { prefs.dir = prefs.dir === 'asc' ? 'desc' : 'asc'; changed(true); });
-  const moreBtn = el('button', { type: 'button', className: 'ov-more', textContent: 'Filters' });
+  const moreBtn = h('button', { type: 'button', className: 'ov-more', textContent: 'Filters' });
   moreBtn.setAttribute('aria-expanded', 'false');
-  const more = el('div', { className: 'ov-selects' }, kindSel, hpSel, foodSel);
+  const more = h('div', { className: 'ov-selects' }, kindSel, hpSel, foodSel);
   moreBtn.addEventListener('click', () => {
     const open = !more.classList.contains('open');
     more.classList.toggle('open', open);
     moreBtn.setAttribute('aria-expanded', String(open));
   });
-  const clear = el('button', { type: 'button', className: 'ov-clear', textContent: 'Clear' });
+  const clear = h('button', { type: 'button', className: 'ov-clear', textContent: 'Clear' });
   clear.addEventListener('click', clearFilters);
-  const shownText = el('span');
-  const windowText = el('span', { className: 'ov-window' });
-  const count = el('span', { className: 'ov-count', role: 'status' }, shownText, windowText);
-  const bar = el('div', { className: 'ov-bar' },
-    el('div', { className: 'ov-bar-top' }, q, sortSel, dirBtn, moreBtn),
+  const shownText = h('span');
+  const windowText = h('span', { className: 'ov-window' });
+  const count = h('span', { className: 'ov-count', role: 'status' }, shownText, windowText);
+  const bar = h('div', { className: 'ov-bar' },
+    h('div', { className: 'ov-bar-top' }, q, sortSel, dirBtn, moreBtn),
     chipBox, more,
-    el('div', { className: 'ov-bar-end' }, count, clear));
+    h('div', { className: 'ov-bar-end' }, count, clear));
 
   // ---- table ----
 
   const COLS = [
     ['unit', '#'], ['name', 'Unit'], ['state', 'State'], ['since', 'In state'], ['health', 'Health'], ['hunger', 'Hunger'], ['task', 'Task'], [null, 'Health, 3 min'], ['pos', 'Position'],
   ];
-  const head = el('div', { className: 'ov-head', role: 'row' });
+  const head = h('div', { className: 'ov-head', role: 'row' });
   const heads = new Map();
   for (const [key, label] of COLS) {
     if (key && key !== 'pos') {
@@ -188,15 +183,15 @@ export function initOverview(host) {
       });
       heads.set(key, cell);
       head.append(cell);
-    } else head.append(el('div', { className: `ov-h ov-h-${key || 'trend'}`, role: 'columnheader', textContent: label }));
+    } else head.append(h('div', { className: `ov-h ov-h-${key || 'trend'}`, role: 'columnheader', textContent: label }));
   }
-  const body = el('div', { className: 'ov-body', role: 'rowgroup' });
-  const empty = el('p', { className: 'ov-empty', hidden: true });
-  const grid = el('div', { className: 'ov-grid', role: 'grid' }, head, body);
+  const body = h('div', { className: 'ov-body', role: 'rowgroup' });
+  const empty = h('p', { className: 'ov-empty', hidden: true });
+  const grid = h('div', { className: 'ov-grid', role: 'grid' }, head, body);
   grid.setAttribute('aria-label', 'Crew units');
-  const wrap = el('div', { className: 'ov-wrap' }, grid, empty);
-  const emptyText = el('span');
-  const emptyClear = el('button', { type: 'button', textContent: 'Clear filters' });
+  const wrap = h('div', { className: 'ov-wrap' }, grid, empty);
+  const emptyText = h('span');
+  const emptyClear = h('button', { type: 'button', textContent: 'Clear filters' });
   emptyClear.addEventListener('click', clearFilters);
   empty.append(emptyText, ' ', emptyClear);
 
@@ -209,27 +204,27 @@ export function initOverview(host) {
   let roving = '';
 
   function meter(kind) {
-    const fill = el('i');
-    const track = el('span', { className: 'ov-track' }, fill);
-    const val = el('span', { className: 'ov-val' });
+    const fill = h('i');
+    const track = h('span', { className: 'ov-track' }, fill);
+    const val = h('span', { className: 'ov-val' });
     const warn = icon(WARN);
     warn.classList.add('ov-low');
-    return { cell: el('div', { className: `ov-c ov-c-${kind} ov-meter ${kind}`, role: 'gridcell' }, track, val, warn), fill, val };
+    return { cell: h('div', { className: `ov-c ov-c-${kind} ov-meter ${kind}`, role: 'gridcell' }, track, val, warn), fill, val };
   }
 
   function buildRow(r) {
-    const num = el('div', { className: 'ov-c ov-c-unit', role: 'gridcell' });
-    const name = el('div', { className: 'ov-c ov-c-name', role: 'gridcell' });
-    const chipHost = el('div', { className: 'ov-c ov-c-state', role: 'gridcell' });
-    const sinceCell = el('div', { className: 'ov-c ov-c-since', role: 'gridcell' });
+    const num = h('div', { className: 'ov-c ov-c-unit', role: 'gridcell' });
+    const name = h('div', { className: 'ov-c ov-c-name', role: 'gridcell' });
+    const chipHost = h('div', { className: 'ov-c ov-c-state', role: 'gridcell' });
+    const sinceCell = h('div', { className: 'ov-c ov-c-since', role: 'gridcell' });
     const hp = meter('hp');
     const food = meter('food');
-    const taskIconHost = el('span', { className: 'ov-ti' });
-    const taskText = el('span', { className: 'ov-tt' });
-    const taskCell = el('div', { className: 'ov-c ov-c-task', role: 'gridcell' }, taskIconHost, taskText);
-    const trendHost = el('div', { className: 'ov-c ov-c-trend', role: 'gridcell' });
-    const posCell = el('div', { className: 'ov-c ov-c-pos', role: 'gridcell' });
-    const row = el('div', { className: 'ov-row', role: 'row', tabIndex: -1 }, num, name, chipHost, sinceCell, hp.cell, food.cell, taskCell, trendHost, posCell);
+    const taskIconHost = h('span', { className: 'ov-ti' });
+    const taskText = h('span', { className: 'ov-tt' });
+    const taskCell = h('div', { className: 'ov-c ov-c-task', role: 'gridcell' }, taskIconHost, taskText);
+    const trendHost = h('div', { className: 'ov-c ov-c-trend', role: 'gridcell' });
+    const posCell = h('div', { className: 'ov-c ov-c-pos', role: 'gridcell' });
+    const row = h('div', { className: 'ov-row', role: 'row', tabIndex: -1 }, num, name, chipHost, sinceCell, hp.cell, food.cell, taskCell, trendHost, posCell);
     row.dataset.unit = r.id;
     const spark = new Sparkline(trendHost, { height: 22, pad: 3, table: false, domain: [0, MAX_HEALTH], name: 'Health', format: n => (n == null ? 'unknown' : String(Math.round(n))) });
     spark.svg.setAttribute('tabindex', '-1');
@@ -259,7 +254,7 @@ export function initOverview(host) {
     put(e, 'num', r.index, v => { e.num.textContent = String(v); });
     put(e, 'name', `${r.name}|${r.role}`, () => {
       const tag = statusRole({ role: r.role });
-      e.name.replaceChildren(r.name, ...(tag ? [' ', el('span', { className: 'role ' + r.role, textContent: tag })] : []));
+      e.name.replaceChildren(r.name, ...(tag ? [' ', h('span', { className: 'role ' + r.role, textContent: tag })] : []));
     });
     // A focused row is read by its label, so it carries the whole story.
     put(e, 'label', `${r.name}, ${STATE_LABEL[r.state].toLowerCase()}, health ${r.health === null ? 'unknown' : `${Math.round(r.health)} of ${MAX_HEALTH}`}, hunger ${r.hunger === null ? 'unknown' : `${Math.round(r.hunger)} of ${MAX_HEALTH}`}, ${r.taskText}`, v => e.row.setAttribute('aria-label', v));
@@ -420,7 +415,7 @@ export function initOverview(host) {
     const sig = kinds.join('|');
     if (sig !== kindSig) {
       kindSig = sig;
-      kindSel.replaceChildren(el('option', { value: '', textContent: 'Task: any' }), el('option', { value: 'none', textContent: 'Task: none' }), ...kinds.filter(k => k !== 'none').map(k => el('option', { value: k, textContent: `Task: ${k}` })));
+      kindSel.replaceChildren(h('option', { value: '', textContent: 'Task: any' }), h('option', { value: 'none', textContent: 'Task: none' }), ...kinds.filter(k => k !== 'none').map(k => h('option', { value: k, textContent: `Task: ${k}` })));
     }
     kindSel.value = prefs.filter.kind;
     hpSel.value = String(prefs.filter.hp);

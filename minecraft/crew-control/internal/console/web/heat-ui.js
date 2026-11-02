@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The heatmap view: a top-down lab map with a density layer over it. Where
 // units stand is operator-only, so signed out this paints a sign-in state
 // and never asks for a grid. heat.js holds the logic; this file paints.
@@ -7,19 +8,10 @@ import {
 
 const POLL_MS = 10_000;
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 // host: { statuses, order(), operator(), api(method, path, body, extra) }
 export function initHeat(host) {
-  const root = el('section', { className: 'hm' });
+  const root = h('section', { className: 'hm' });
   root.setAttribute('aria-label', 'Heatmap');
   let mounted = false;
   let timer = 0;
@@ -39,23 +31,23 @@ export function initHeat(host) {
   };
 
   function select(label, name, options, value) {
-    const s = el('select', { name, 'aria-label': label });
-    for (const [v, text] of options) s.append(el('option', { value: v, textContent: text }));
+    const s = h('select', { name, 'aria-label': label });
+    for (const [v, text] of options) s.append(h('option', { value: v, textContent: text }));
     s.value = value;
     s.addEventListener('change', () => { sel = { ...sel, [name]: s.value }; load(); });
     return s;
   }
 
   function showState(...kids) {
-    root.replaceChildren(el('div', { className: 'hm-state' }, ...kids));
+    root.replaceChildren(h('div', { className: 'hm-state' }, ...kids));
     canvas = null;
     ui = null;
   }
 
   function paintAuth() {
     showState(
-      el('h2', { textContent: 'Sign in to see the heatmap' }),
-      el('p', {}, 'Where units stand is operator-only. ', el('a', { href: '/signin', textContent: 'Sign in' }), '.'));
+      h('h2', { textContent: 'Sign in to see the heatmap' }),
+      h('p', {}, 'Where units stand is operator-only. ', h('a', { href: '/signin', textContent: 'Sign in' }), '.'));
   }
 
   async function load() {
@@ -71,7 +63,7 @@ export function initHeat(host) {
     if (r.status === 401) { paintAuth(); return; }
     if (!r.ok || !r.data) {
       if (grid) { root.classList.add('stale'); return; }
-      showState(el('h2', { textContent: 'Could not read the heatmap.' }), el('p', { textContent: (r.data && r.data.error) || `Failed (${r.status}).` }));
+      showState(h('h2', { textContent: 'Could not read the heatmap.' }), h('p', { textContent: (r.data && r.data.error) || `Failed (${r.status}).` }));
       return;
     }
     root.classList.remove('stale');
@@ -86,17 +78,17 @@ export function initHeat(host) {
     const layerSel = select('Layer', 'layer', LAYERS.map(l => [l.id, l.label]), sel.layer);
     const windowSel = select('Window', 'window', WINDOWS.map(w => [w, `last ${w}`]), sel.window);
     const unitSel = select('Unit', 'unit', [['', 'Whole fleet']], sel.unit);
-    canvas = el('canvas', { className: 'hm-map', width: 960, height: 640, tabIndex: 0 });
+    canvas = h('canvas', { className: 'hm-map', width: 960, height: 640, tabIndex: 0 });
     canvas.setAttribute('role', 'img');
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerleave', () => { readout.textContent = ''; });
-    readout = el('p', { className: 'hm-readout', 'aria-live': 'off' });
+    readout = h('p', { className: 'hm-readout', 'aria-live': 'off' });
     ui = {
       unitSel, unitKey: '',
-      title: el('h2'), sum: el('p', { className: 'hm-sum' }),
-      bar: el('div', { className: 'hm-bar' }, layerSel, windowSel, unitSel),
-      legend: el('div', { className: 'hm-legend', role: 'group', 'aria-label': 'Legend, samples per cell' }),
-      topHead: el('h3', { textContent: 'Busiest cells' }), list: el('ol', { className: 'hm-top' }),
+      title: h('h2'), sum: h('p', { className: 'hm-sum' }),
+      bar: h('div', { className: 'hm-bar' }, layerSel, windowSel, unitSel),
+      legend: h('div', { className: 'hm-legend', role: 'group', 'aria-label': 'Legend, samples per cell' }),
+      topHead: h('h3', { textContent: 'Busiest cells' }), list: h('ol', { className: 'hm-top' }),
     };
     root.replaceChildren(ui.title, ui.sum, ui.bar, canvas, readout, ui.legend, ui.topHead, ui.list);
   }
@@ -107,24 +99,24 @@ export function initHeat(host) {
     const key = JSON.stringify(units);
     if (key !== ui.unitKey) {
       ui.unitKey = key;
-      ui.unitSel.replaceChildren(...[['', 'Whole fleet'], ...units].map(([v, text]) => el('option', { value: v, textContent: text })));
+      ui.unitSel.replaceChildren(...[['', 'Whole fleet'], ...units].map(([v, text]) => h('option', { value: v, textContent: text })));
       ui.unitSel.value = sel.unit;
     }
     ui.title.textContent = `${layerOf(sel.layer).label} heatmap`;
     ui.sum.textContent = `${layerOf(sel.layer).hint}. ${summary(grid)}`;
     canvas.setAttribute('aria-label', `${layerOf(sel.layer).label} density over the lab map. ${summary(grid)}`);
 
-    const legend = [el('span', { textContent: 'fewer' })];
+    const legend = [h('span', { textContent: 'fewer' })];
     for (const s of legendSteps(grid.max)) {
-      const sw = el('span', { className: 'hm-sw' }, el('i', { textContent: '' }), el('b', { textContent: String(s.from) }));
+      const sw = h('span', { className: 'hm-sw' }, h('i', { textContent: '' }), h('b', { textContent: String(s.from) }));
       sw.firstChild.style.background = `var(--hm-${s.level})`;
       legend.push(sw);
     }
-    legend.push(el('span', { textContent: 'more' }));
+    legend.push(h('span', { textContent: 'more' }));
     ui.legend.replaceChildren(...legend);
 
     ui.list.replaceChildren(...hottest(grid).map(([cx, cz, n]) =>
-      el('li', { textContent: `x ${cx * grid.cell}..${cx * grid.cell + grid.cell - 1}, z ${cz * grid.cell}..${cz * grid.cell + grid.cell - 1}: ${n}` })));
+      h('li', { textContent: `x ${cx * grid.cell}..${cx * grid.cell + grid.cell - 1}, z ${cz * grid.cell}..${cz * grid.cell + grid.cell - 1}: ${n}` })));
     ui.topHead.hidden = ui.list.hidden = !grid.cells.length;
     draw();
   }
@@ -184,7 +176,7 @@ export function initHeat(host) {
       mounted = true;
       grid = null;
       into.append(root);
-      showState(el('p', { textContent: 'Reading the heatmap...' }));
+      showState(h('p', { textContent: 'Reading the heatmap...' }));
       load();
       timer = setInterval(() => { if (document.visibilityState === 'visible') load(); }, POLL_MS);
       addEventListener('resize', onResize);

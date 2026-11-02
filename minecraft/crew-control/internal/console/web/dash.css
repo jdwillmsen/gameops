@@ -6,8 +6,8 @@
   flex-direction: column;
   gap: 8px;
   padding: 8px 10px;
-  background: #111;
-  color: #ddd;
+  background: var(--bg);
+  color: var(--text);
   font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
   overflow-y: auto;
 }
