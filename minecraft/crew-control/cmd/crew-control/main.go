@@ -492,6 +492,9 @@ func bornEvent(b telemetry.Born) (events.Event, events.Hint) {
 	if b.Took > 0 {
 		payload["duration_ms"] = b.Took.Milliseconds()
 	}
+	for k, v := range b.Attrs {
+		payload[k] = v
+	}
 	e := events.Event{Unit: b.Unit, At: b.At, Kind: b.Kind, Severity: b.Level}
 	if id, err := uuid.Parse(b.Task); err == nil {
 		e.TaskID = &id

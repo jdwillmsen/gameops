@@ -470,3 +470,33 @@ func TestVitalsGaugesFollowReadingsAndVanishWhenUnknown(t *testing.T) {
 		t.Fatal("health still exported after the unit stopped reporting it")
 	}
 }
+
+func TestToolDurabilityGaugeFollowsTheHeldItemAndVanishesWhenUnknown(t *testing.T) {
+	f := New(roster3)
+	worn, fresh := 7, 0
+	at := time.Unix(1_700_000_000, 0)
+	f.ObservePoll(at, []telemetry.UnitState{
+		{ID: roster3[0], State: "working", ToolDurability: &worn},
+		{ID: roster3[1], State: "idle", ToolDurability: &fresh},
+		{ID: roster3[2], State: "idle"},
+		{ID: "crew-99", State: "idle", ToolDurability: &worn},
+	})
+	const name = "crew_fleet_unit_tool_durability_pct"
+	if got := value(t, f, name, map[string]string{"unit": roster3[0]}); got != 7 {
+		t.Fatalf("durability = %v, want 7", got)
+	}
+	fam := families(t, f)
+	if find(fam[name], map[string]string{"unit": roster3[1]}) == nil {
+		t.Fatal("a tool with nothing left is a reading and must stay exported")
+	}
+	for _, u := range []string{roster3[2], "crew-99"} {
+		if find(fam[name], map[string]string{"unit": u}) != nil {
+			t.Fatalf("series for %s, which holds nothing wearable or is off the roster", u)
+		}
+	}
+
+	f.ObservePoll(at.Add(time.Second), []telemetry.UnitState{{ID: roster3[0], State: "working"}})
+	if mf := families(t, f)[name]; mf != nil && find(mf, map[string]string{"unit": roster3[0]}) != nil {
+		t.Fatal("durability still exported after the unit put the tool away")
+	}
+}

@@ -616,3 +616,27 @@ func TestDetailAnswersTheEnderChestSlotForSlotFromTheWorld(t *testing.T) {
 		t.Errorf("answer is %d bytes", rec.Body.Len())
 	}
 }
+
+func TestTheUnitsOwnWearReadingReplacesTheSavedDamage(t *testing.T) {
+	left, whole := 50, 100
+	saved := []playerdata.Item{{Slot: 0, Name: "iron_pickaxe", Count: 1, Damage: 10, MaxDamage: 250}}
+	live := []telemetry.LiveItem{
+		{Slot: 0, Name: "iron_pickaxe", Count: 1, DurabilityPct: &left},
+		{Slot: 1, Name: "diamond_sword", Count: 1, DurabilityPct: &whole},
+		{Slot: 2, Name: "cobblestone", Count: 8, DurabilityPct: &left},
+		{Slot: 3, Name: "iron_axe", Count: 1},
+	}
+	got := mergeInventory(live, saved)
+	if got[0].Damage != 125 || got[0].MaxDamage != 250 {
+		t.Errorf("pickaxe damage %d of %d, want 125 of 250", got[0].Damage, got[0].MaxDamage)
+	}
+	if got[1].Damage != 0 || got[1].MaxDamage != 1561 {
+		t.Errorf("a full sword is damage %d of %d, want 0 of 1561", got[1].Damage, got[1].MaxDamage)
+	}
+	if got[2].MaxDamage != 0 || got[2].Damage != 0 {
+		t.Errorf("an item that cannot wear out got %d of %d", got[2].Damage, got[2].MaxDamage)
+	}
+	if got[3].MaxDamage != 0 {
+		t.Errorf("an item with no reading was given %d", got[3].MaxDamage)
+	}
+}

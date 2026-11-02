@@ -7,6 +7,7 @@ export const RULE_LABELS = {
   task_failures: 'Repeated task failures',
   low_food: 'Low food',
   unit_silent: 'Unit silent',
+  tool_breaking: 'Tool nearly worn out',
 };
 
 export const MUTE_CHOICES = [['15m', '15 min'], ['1h', '1 hour'], ['8h', '8 hours']];

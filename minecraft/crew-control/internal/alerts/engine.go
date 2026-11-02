@@ -20,6 +20,7 @@ const (
 	RuleFailures = "task_failures"
 	RuleLowFood  = "low_food"
 	RuleSilent   = "unit_silent"
+	RuleToolWorn = "tool_breaking"
 )
 
 const (
@@ -108,8 +109,10 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state := make(map[string]string, len(states))
+	tool := make(map[string]*int, len(states))
 	for _, s := range states {
 		state[s.ID] = s.State
+		tool[s.ID] = s.ToolDurability
 	}
 	changed := false
 	set := func(rule string, s telemetry.Status, bad bool, sev, text string) {
@@ -140,6 +143,13 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 			food = int(*s.Hunger)
 		}
 		set(RuleLowFood, s, low, SevWarn, "hunger low ("+strconv.Itoa(food)+")")
+
+		worn := s.Online && tool[s.ID] != nil && *tool[s.ID] <= e.cfg.ToolBelow
+		pct := 0
+		if tool[s.ID] != nil {
+			pct = *tool[s.ID]
+		}
+		set(RuleToolWorn, s, worn, SevWarn, "held tool nearly worn out ("+strconv.Itoa(pct)+"% left)")
 
 		seen := s.Seen
 		if seen.IsZero() {
@@ -268,7 +278,7 @@ func (e *Engine) Mute(id string, d time.Duration, now time.Time) bool {
 	return true
 }
 
-var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true}
+var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true, RuleToolWorn: true}
 
 // SnoozeRule mutes every alert of one rule until now+d, now and as they
 // fire; d <= 0 lifts it. It reports false for a rule that does not exist, so

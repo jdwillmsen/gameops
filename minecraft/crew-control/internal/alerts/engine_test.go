@@ -411,3 +411,61 @@ func TestSnoozeRuleRoute(t *testing.T) {
 		t.Fatal("list does not report the snooze")
 	}
 }
+
+func toolState(id, state string, pct *int) []telemetry.UnitState {
+	return []telemetry.UnitState{{ID: id, State: state, ToolDurability: pct}}
+}
+
+func pctOf(n int) *int { return &n }
+
+func TestToolBreakingFiresAtTheThresholdAndClearsOnRepairOrUnknown(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	poll := func(sec int, online bool, pct *int) {
+		e.Poll(t0.Add(time.Duration(sec)*time.Second), []telemetry.Status{st("a", online, nil, t0)}, toolState("a", "idle", pct))
+	}
+	poll(0, true, pctOf(11))
+	if find(e, "tool_breaking.a") != nil {
+		t.Fatal("fired above the threshold")
+	}
+	poll(1, true, pctOf(10))
+	a := find(e, "tool_breaking.a")
+	if a == nil || a.State != StateFiring || a.Severity != SevWarn || a.Rule != RuleToolWorn {
+		t.Fatalf("did not fire at the threshold: %+v", a)
+	}
+	poll(2, true, pctOf(100))
+	if find(e, "tool_breaking.a").State != StateResolved {
+		t.Fatal("a repair did not resolve")
+	}
+	poll(3, true, pctOf(0))
+	poll(4, true, nil)
+	if find(e, "tool_breaking.a").State != StateResolved {
+		t.Fatal("an unknown reading must not keep it firing")
+	}
+	poll(5, true, pctOf(0))
+	poll(6, false, pctOf(0))
+	if find(e, "tool_breaking.a").State != StateResolved {
+		t.Fatal("an offline unit must not fire")
+	}
+}
+
+func TestToolBelowIsConfigurable(t *testing.T) {
+	c, err := ParseConfig(`{"tool_below":25}`)
+	if err != nil || c.ToolBelow != 25 {
+		t.Fatalf("got %+v %v", c, err)
+	}
+	if Defaults().ToolBelow != 10 {
+		t.Fatalf("default = %d", Defaults().ToolBelow)
+	}
+	for _, bad := range []string{`{"tool_below":-1}`, `{"tool_below":101}`} {
+		if _, err := ParseConfig(bad); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
+func TestToolBreakingCanBeSnoozedAsAType(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	if !e.SnoozeRule(RuleToolWorn, time.Hour, t0) {
+		t.Fatal("tool_breaking is not a known rule")
+	}
+}

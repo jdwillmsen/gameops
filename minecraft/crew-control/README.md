@@ -93,6 +93,7 @@ whatever is still wrong fires again on the first poll.
 | `task_failures` | crit | `failures` tasks failed in a row | a task finishes done |
 | `low_food` | warn | hunger is known and at or under `hunger_below` | hunger is above it, or unknown |
 | `unit_silent` | warn | the unit has been unreachable for `silent_for` | the unit answers a poll |
+| `tool_breaking` | warn | the held item has `tool_below` percent of its durability left or less | the item is repaired or put away, or its wear is unknown |
 
 `CREW_ALERTS` sets the thresholds; every key is optional:
 
@@ -101,6 +102,7 @@ whatever is still wrong fires again on the first poll.
 | `stuck_for` | `0s` | extra time in the stuck state before alerting; `0s` alerts on the poll that flags it |
 | `failures` | `3` | consecutive failed tasks, at least 1 |
 | `hunger_below` | `6` | hunger value, 0 to 20 |
+| `tool_below` | `10` | durability percent left on the held item, 0 to 100 |
 | `silent_for` | `2m` | unreachable time, at least `1s` |
 | `mute_max` | `24h` | longest single mute, at least `1m` |
 
@@ -695,7 +697,12 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`. A task event's payload has the feed's `text`, the
+`low_health`, `low_hunger`, `tool_worn`. A `tool_worn` event is raised when the
+held item or a worn armour piece first falls to 25% durability left (`low`) and
+again at 10% (`critical`); its payload has the `slot` (held, helmet, chest,
+legs, boots) and `bucket`, never the percentage. A piece that is repaired
+re-arms its slot, and a tool already worn when crew-control starts is not
+announced. A task event's payload has the feed's `text`, the
 task's `template` and, once finished, `duration_ms`. Task ids that are not
 queue UUIDs (units run their own rotation) go to `payload.task`, not `task_id`.
 
@@ -882,6 +889,7 @@ the units' own.
 | `crew_fleet_unit_state_seconds_total` | counter | `unit`, `state` | Time each unit has spent in each state |
 | `crew_fleet_unit_health` | gauge | `unit` | Health points (0 to 20) at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero |
 | `crew_fleet_unit_hunger` | gauge | `unit` | Food level (0 to 20) at the last poll, absent on the same terms |
+| `crew_fleet_unit_tool_durability_pct` | gauge | `unit` | Durability left (0 to 100) on the item the unit held at the last poll. Absent while offline, empty-handed, holding an item that cannot wear out, or from a unit that predates the field. Armour wear is in the `tool_worn` events |
 | `crew_event_store_degraded` | gauge | none | 1 while event history is held in memory because Postgres is unreachable or not yet reached |
 | `crew_event_store_diverted_events_total` | counter | none | Events written to memory instead of Postgres |
 | `crew_event_store_replayed_events_total` | counter | none | Diverted events written back after Postgres returned |

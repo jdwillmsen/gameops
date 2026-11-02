@@ -26,7 +26,7 @@ type Event struct {
 	Name string    `json:"name"`
 	// Kind is one of online, offline, died, respawned, task_started,
 	// task_done, task_failed, task_cancelled, task_ended (outcome unknown),
-	// stuck, low_health, low_hunger.
+	// stuck, low_health, low_hunger, tool_worn.
 	Kind string `json:"kind"`
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
@@ -46,6 +46,10 @@ type Event struct {
 	// ReasonCode is the unit's closed code for Reason, empty from a unit that
 	// predates it. History keys on it; the public feed does not show it.
 	ReasonCode string `json:"-"`
+	// Attrs are closed-vocabulary details of an event for the history store's
+	// payload only, such as the slot and bucket of tool_worn. Every value is
+	// from a fixed list, never the unit's free text.
+	Attrs map[string]string `json:"-"`
 }
 
 // Position is where a unit stands. It is only ever sent to signed-in streams.
@@ -76,6 +80,11 @@ type track struct {
 	anchor      [3]float32
 	anchorKnown bool
 	stuck       bool
+	// wear is each watched slot's bucket, see bucketOf.
+	wear [len(wearSlots)]int
+	// held is the durability left on the held item at the last poll, nil
+	// when unknown; the gauge and the tool_breaking alert read it.
+	held *int
 }
 
 type recentTask struct {
@@ -108,6 +117,7 @@ type observation struct {
 	pos         [3]float32
 	posKnown    bool
 	recent      []recentTask
+	wear        [len(wearSlots)]*int
 }
 
 // observe advances t to o and returns what changed. It is pure so the rules
@@ -123,8 +133,15 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	defer func() {
 		t.seeded = true
 		t.online, t.dead = o.online, o.dead
+		t.held = nil
+		if o.online {
+			t.held = o.wear[heldWear]
+		}
 	}()
 	if !t.seeded {
+		for i, w := range o.wear {
+			t.wear[i] = bucketOf(w)
+		}
 		t.taskID, t.template, t.progress, t.progressAt = o.curID, o.curTemplate, o.curProgress, now
 		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		t.lowHP = o.health != nil && *o.health <= lowHealth
@@ -137,6 +154,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		} else {
 			add("offline", "crit", "went offline")
 			t.taskID, t.template, t.stuck, t.lowHP, t.lowFood = "", "", false, false, false
+			t.wear = [len(wearSlots)]int{}
 			return out
 		}
 	}
@@ -160,6 +178,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		add("low_hunger", "warn", fmt.Sprintf("hunger low (%d)", int(*o.hunger)))
 	}
 	t.lowFood = hungry
+	out = append(out, t.observeWear(o.wear, now)...)
 
 	if o.curID != t.taskID {
 		if t.taskID != "" {
