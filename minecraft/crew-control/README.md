@@ -915,6 +915,36 @@ JSON-safe model; `create(host, { height })` builds the chart and returns
 model changed. Add a type to `PANELS` and it appears in the Add menu; layouts
 naming a type that no longer exists drop it on load.
 
+### Worlds compared
+
+The **Worlds compared** panel (Add menu; it is not in the default layout, since
+one lab has nothing to compare) sets each world beside the others, from the
+units stream and the event feed alone, so it is public and works signed out. A
+chart shows done per unit-hour by task type, one series per world (the
+categorical registry, eight series and then "Other"), and its **Table** button
+lists the same numbers. Below it a table has a row per world: units online
+(`2 of 3`, beside every rate), done per unit-hour, failure rate, deaths and
+stalls per unit-hour, median task time and mean health, then a row for the
+median of the worlds. Each value carries its difference from that median as a
+signed number and a word, `above`, `near` (within 10% of the median) or
+`below`, never colour alone. With one world there is no median to differ from,
+so no differences are shown.
+
+Rates are per connected unit-hour: the dashboard samples how many units each
+world has online every 5 s and divides by the unit-hours in the window, so a
+bigger world is not a busier one. A world with under about a minute of watched
+unit-time shows `-` for a rate rather than a noisy one. Like every dashboard
+panel, the window is what this page has watched. A unit with no `world` is in
+`lab`, and a world or task type outside the closed lists (a slug shape for the
+world, the twelve templates) is shown as `other`. The panel shows loading
+(no snapshot yet), empty and error states in the kit's wording, and a live
+region announces the unit counts and where each world's done rate sits, never
+the rate itself, which moves every second. There is no signed-out state because
+nothing in it needs a session. The logic is `world-compare.js`, tested by
+`world-compare.test.mjs`. The same comparison, over the stored hour and per
+task type, raises insight R6 (see the rule table above); an R6 insight shows as
+`World <slug>` in the insight strip.
+
 ## Fleet metrics
 
 `GET /metrics` answers in Prometheus text on the same port as everything else,
@@ -1063,6 +1093,7 @@ are in `insight.DefaultConfig`.
 | R2 throughput drop | An EWMA chart (lambda 0.2, k 3) on useful completions per minute falls below the unit's own median of the 20 minutes before the last 5. Sigma is 1.4826 x MAD, at least 0.5; fewer than 10 minutes of history gives no verdict | Catches a working unit slowing against itself. Baselines are per unit: a fleet-wide baseline flagged the haulers for being fast |
 | R3 long task | A running task has outlasted its template's `median + 3.5 x sigma`, sigma being MAD / 0.6745 floored at 5% of the median and at 1 s; needs 10 finished runs | The floor matters: a 0.2 s haul with zero MAD would otherwise flag a third of hauls |
 | R4 common mode | At least half the working units raised R2 within 2 minutes and at least 5 `session_error` events fell in that window | A server restart slows everyone at once. It raises one fleet insight and suppresses the per-unit R2s it explains |
+| R6 world diverges | Over the last hour, per task type: a world's completions per connected unit-hour sit outside the median of the other worlds by more than half of it and by at least 1 per unit-hour. Needs 1 unit-hour in the world and in each other world, at least 5 completions of that task type in each other world, and at least two other worlds, else it stays silent | Worlds differ in task mix, so a rate over every task type would flag the mix; one task type at a time compares like with like, and a median of at least two others cannot be moved by one odd world. Connected time comes from `online` and `offline` events, a unit with none counting as connected throughout. The sentence names the task types and the direction and carries no number; the rates, the median and the unit-hours are in the signed-in `attrs` |
 
 Only completed, non-idle tasks count as throughput. Persisting insights in
 Postgres and a thresholds-from-chart-config path are not built yet.

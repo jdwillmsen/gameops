@@ -134,3 +134,20 @@ func TestEventsCarryTheWorldAndTheDimensionTheUnitWasIn(t *testing.T) {
 		t.Errorf("an event with no known position named a dimension: %s", raw)
 	}
 }
+
+func TestTaskEventsOnTheFeedNameTheirTemplateAndTheDurationStaysOut(t *testing.T) {
+	raw, _ := json.Marshal(Event{Kind: "task_done", Level: "ok", Text: "finished haul", Template: "haul", Took: 3 * time.Second, Reason: "x", ReasonCode: "y"})
+	for _, want := range []string{`"template":"haul"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("feed event lacks %s: %s", want, raw)
+		}
+	}
+	for _, leak := range []string{"Took", "took", "reason", "Reason", "3000000000"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("feed event carries %q: %s", leak, raw)
+		}
+	}
+	if raw, _ := json.Marshal(Event{Kind: "online"}); strings.Contains(string(raw), "template") {
+		t.Errorf("an event with no template names one: %s", raw)
+	}
+}

@@ -7,11 +7,12 @@ import (
 
 func TestDashboardAssetsAreServedAndLinked(t *testing.T) {
 	for p, want := range map[string]string{
-		"/static/dash.js":        "javascript",
-		"/static/dash-data.js":   "javascript",
-		"/static/dash-panels.js": "javascript",
-		"/static/dash-ui.js":     "javascript",
-		"/static/dash.css":       "text/css",
+		"/static/dash.js":          "javascript",
+		"/static/dash-data.js":     "javascript",
+		"/static/world-compare.js": "javascript",
+		"/static/dash-panels.js":   "javascript",
+		"/static/dash-ui.js":       "javascript",
+		"/static/dash.css":         "text/css",
 	} {
 		rec := serve(t, p)
 		if rec.Code != 200 || rec.Body.Len() == 0 {

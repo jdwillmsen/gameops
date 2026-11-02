@@ -13,7 +13,9 @@ import { StatTile, statusChip } from './charts/spark.js';
 import { createRegistry } from './charts/series.js';
 import { alertsOf, ago } from './fleet.js';
 import { STATE_LABEL } from './overview.js';
-import { healthShare, windowSamples, throughput, outcomes, taskDurations, durationHistogram, deathsByPhase, median, stateOf } from './dash-data.js';
+import { healthShare, windowSamples, throughput, outcomes, taskDurations, durationHistogram, deathsByPhase, median, stateOf, inFilter } from './dash-data.js';
+import { compareWorlds, METRICS } from './world-compare.js';
+import { stateView } from './kit/states.js';
 
 const MAX_BARS = 12;
 const pct = v => `${Math.round(v)}%`;
@@ -240,6 +242,73 @@ export const PANELS = {
             h('td', { textContent: r.task || '-' }))));
         },
         destroy: () => root.remove(),
+      };
+    },
+  },
+
+  'world-compare': {
+    title: 'Worlds compared',
+    about: 'Each world against the median of the worlds, by unit-hour so a bigger world is not a busier one: tasks done, failure rate, deaths and stalls, median task time and mean health, with the units online beside every rate. Built from public data only, so it works signed out. Needs a little watched time before a rate appears.',
+    size: { w: 12, h: 4 },
+    query: ({ data, units, filter }) => {
+      try {
+        return compareWorlds({ units, feed: data.feed(), samples: data.samples(), durations: taskDurations(data.feed(), filter), filter, inFilter });
+      } catch (err) {
+        console.error(err);
+        return { state: 'error', message: 'Could not compare the worlds.', worlds: [] };
+      }
+    },
+    create: (host, { height }) => {
+      const stateBox = el('div', { className: 'db-state' });
+      const chartHost = el('div', { className: 'db-chart' });
+      const none = el('p', { className: 'db-empty', textContent: 'No tasks finished in this window yet.', hidden: true });
+      const table = el('table', {});
+      const scroll = el('div', { className: 'db-scroll', tabIndex: 0 }, table);
+      scroll.setAttribute('role', 'region');
+      scroll.setAttribute('aria-label', 'Worlds compared, table');
+      const live = el('p', { className: 'cc-sr', textContent: '' });
+      live.setAttribute('role', 'status');
+      const content = el('div', { className: 'db-worlds-body', hidden: true }, chartHost, none, scroll);
+      const root = el('figure', { className: 'cc-root cc-panel db-table db-worlds' },
+        el('header', { className: 'cc-head' }, el('div', { className: 'cc-titles' }, el('h3', { className: 'cc-title', textContent: 'Worlds compared' }))),
+        stateBox, content, live);
+      host.append(root);
+      const chart = new BarChart(chartHost, { title: 'Done per unit-hour', subtitle: 'by task type, one series per world', registry: createRegistry(), height: Math.max(130, Math.round(height * 0.45)), valueFormat: v => v.toFixed(1) });
+
+      const head = () => el('thead', {}, el('tr', {}, el('th', { scope: 'col', textContent: 'World' }), el('th', { scope: 'col', className: 'cc-num', textContent: 'Units online' }),
+        ...METRICS.map(m => el('th', { scope: 'col', className: 'cc-num', textContent: m.label }))));
+      const valueCell = c => el('td', { className: 'cc-num' }, el('span', { textContent: c.text }),
+        c.delta ? el('span', { className: `db-delta db-${c.delta.word}`, textContent: ` ${c.delta.text} ${c.delta.word}` }) : '');
+      let last = '';
+      return {
+        update: m => {
+          if (m.state !== 'ready') {
+            content.hidden = true;
+            const view = m.state === 'loading' ? stateView('loading') : m.state === 'error' ? stateView('error', { message: m.message }) : stateView('empty', { message: 'No units are reporting yet.' });
+            stateBox.replaceChildren(view);
+            live.textContent = '';
+            last = '';
+            return;
+          }
+          stateBox.replaceChildren();
+          content.hidden = false;
+          none.hidden = m.chart.categories.length > 0;
+          chartHost.style.display = m.chart.categories.length ? '' : 'none';
+          if (m.chart.categories.length) chart.update(m.chart);
+          table.replaceChildren(
+            el('caption', { className: 'cc-sr', textContent: 'Worlds compared: each value with its difference from the median of the worlds' }),
+            head(),
+            el('tbody', {},
+              ...m.worlds.map(w => el('tr', {}, el('th', { scope: 'row', textContent: w.world }), el('td', { className: 'cc-num', textContent: `${w.online} of ${w.total}` }), ...w.cells.map(valueCell))),
+              el('tr', { className: 'db-median' }, el('th', { scope: 'row', textContent: 'Median of worlds' }), el('td', { className: 'cc-num', textContent: '' }),
+                ...m.medianRow.map(c => el('td', { className: 'cc-num', textContent: c.text })))));
+          // Clearing first makes an unchanged sentence stay quiet and a new one announce.
+          if (m.announce !== last) {
+            live.textContent = m.announce;
+            last = m.announce;
+          }
+        },
+        destroy: () => { chart.destroy(); root.remove(); },
       };
     },
   },

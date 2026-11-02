@@ -19,6 +19,9 @@ const (
 	RuleThroughput  = "R2"
 	RuleLongTask    = "R3"
 	RuleCommonMode  = "R4"
+	// RuleWorldDiverges is R6: one world's rate on a task type sits outside
+	// the band the other worlds set.
+	RuleWorldDiverges = "R6"
 
 	SevWarn = "warn"
 	SevCrit = "crit"
@@ -54,6 +57,18 @@ type Config struct {
 	CommonShare  float64
 	CommonWindow time.Duration
 	CommonErrors int
+
+	// R6: over R6Window, a world's completions per unit-hour of one template
+	// are compared with the median of the other worlds' rates. Both sides
+	// need R6MinUnitHours of exposure, each other world must itself have
+	// finished R6MinDone of the template, and at least two other worlds must
+	// qualify. The world diverges when it lies outside the median by more
+	// than R6Band of the median and by at least R6MinDelta per unit-hour.
+	R6Window       time.Duration
+	R6Band         float64
+	R6MinUnitHours float64
+	R6MinDone      int
+	R6MinDelta     float64
 }
 
 func DefaultConfig() Config {
@@ -62,21 +77,27 @@ func DefaultConfig() Config {
 		Lambda: 0.2, K: 3, BaselineMinutes: 20, RecentMinutes: 5, MinSamples: 10, SigmaFloor: 0.5,
 		R3K: 3.5, SigmaFloorFrac: 0.05, SigmaFloorMin: time.Second,
 		CommonShare: 0.5, CommonWindow: 2 * time.Minute, CommonErrors: 5,
+		R6Window: time.Hour, R6Band: 0.5, R6MinUnitHours: 1, R6MinDone: 5, R6MinDelta: 1,
 	}
 }
 
 // Finding is one rule's verdict. Unit is empty for a fleet finding.
 type Finding struct {
-	Rule     string
-	Unit     string
+	Rule string
+	Unit string
+	// World is the world a world finding is about; empty for the others.
+	World    string
 	Severity string
 	Evidence []int64
-	// Detail is a short, coordinate-free sentence for the console.
+	// Detail is a short, coordinate-free sentence for the console, with no
+	// counts or percentages: anonymous callers read it.
 	Detail string
+	// Attrs are the numbers behind the finding, for signed-in callers only.
+	Attrs map[string]any
 }
 
-// Key is the dedupe identity: one live insight per rule and unit.
-func (f Finding) Key() string { return f.Rule + "/" + f.Unit }
+// Key is the dedupe identity: one live insight per rule, unit and world.
+func (f Finding) Key() string { return f.Rule + "/" + f.Unit + "/" + f.World }
 
 // OpenTask is a task that started and has not ended.
 type OpenTask struct {
@@ -91,6 +112,9 @@ type Input struct {
 	Now    time.Time
 	Events []unitlog.Event
 	Open   []OpenTask
+	// Worlds maps each rostered unit to its world. A unit missing from it
+	// falls back to the world its latest event carries.
+	Worlds map[string]string
 }
 
 func byUnit(es []unitlog.Event) map[string][]unitlog.Event {
@@ -322,5 +346,6 @@ func Evaluate(cfg Config, in Input, history map[string][]time.Duration) []Findin
 		}
 	}
 	out = append(out, LongTasks(cfg, in.Now, in.Open, history)...)
+	out = append(out, WorldDivergence(cfg, in)...)
 	return out
 }
