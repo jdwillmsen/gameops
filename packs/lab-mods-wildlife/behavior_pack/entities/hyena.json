@@ -482,7 +482,8 @@
       "gameops:set_variant_regular": {
         "add": {
           "component_groups": [
-            "gameops:variant_regular"
+            "gameops:variant_regular",
+            "gameops:baby"
           ]
         },
         "remove": {
@@ -494,7 +495,8 @@
       "gameops:set_variant_alpha": {
         "add": {
           "component_groups": [
-            "gameops:variant_alpha"
+            "gameops:variant_alpha",
+            "gameops:baby"
           ]
         },
         "remove": {

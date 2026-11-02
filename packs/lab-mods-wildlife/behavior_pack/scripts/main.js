@@ -2,7 +2,7 @@ import { world, system, ScriptEventSource, EffectTypes } from "@minecraft/server
 import {
   sprintPhase, pruneStale, auraDue, auraRecipients, auraAmplifier, nightOnly,
   packStrengthAmplifier, packSize, formatCensus, formatEffects, CENSUS_SPECIES,
-  formatEvent, levelAllows, eventDue, litterSize, pickParent, PARENT_RANGE,
+  formatEvent, levelAllows, eventDue, litterSize, pickParent, PARENT_RANGE, LITTERS,
 } from "./abilities.js";
 
 // "off" | "info" | "debug". info logs one line per taming, sit, stand, burst, ability and hit, and an
@@ -236,6 +236,7 @@ function inheritVariant(cub, value) {
 // Deferred a tick because the newborn's groups are not applied when the trigger fires.
 world.afterEvents.dataDrivenEntityTrigger.subscribe((event) => {
   const cub = event.entity;
+  if (!LITTERS[cub.typeId]) return;
   system.run(() => {
     try {
       if (!cub.isValid) return;
