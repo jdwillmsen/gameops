@@ -27,6 +27,10 @@ const (
 	ReasonInventoryDesync   = "inventory_desync"
 	ReasonChunkNotLoaded    = "chunk_not_loaded"
 	ReasonNoPath            = "no_path"
+	// ReasonMovementCorrected is never the reason of a failed task: it is the
+	// code crew-control puts on its rubberbanding event, listed here because
+	// the catalogue is one closed set on both sides.
+	ReasonMovementCorrected = "movement_corrected"
 	ReasonOther             = "other"
 )
 
@@ -36,7 +40,7 @@ var ReasonCodes = []string{
 	ReasonMissingTool, ReasonKitChunkNotLoaded, ReasonKitNoPath, ReasonKitChestTimeout,
 	ReasonKitVisitTimeout, ReasonSessionLost, ReasonDepositRejected, ReasonNoPickup,
 	ReasonNoReachableTarget, ReasonTrapClimbFailed, ReasonInventoryDesync,
-	ReasonChunkNotLoaded, ReasonNoPath, ReasonOther,
+	ReasonChunkNotLoaded, ReasonNoPath, ReasonMovementCorrected, ReasonOther,
 }
 
 // reasonRule is one row of the mapping. Rows are tried in order and the first

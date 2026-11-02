@@ -246,7 +246,10 @@ seconds; a task submitted sooner runs first, barehanded.
 
 The unit predicts its own movement and sends the result with every input; the
 server accepts it or corrects it, and `crew_movement_corrections_total` counts
-the corrections. Each correction is also logged as `movement_corrected`, at
+the corrections, and `/v1/state` carries the same running count as
+`movement.corrections` (it survives a reconnect and restarts from zero with the
+process) so the controller can raise `rubberbanding` when it climbs fast. Each
+correction is also logged as `movement_corrected`, at
 most one line per unit per 10 s with a `suppressed` count, carrying the skill,
 movement state and block names around the feet but no positions; the query
 that groups them is in
@@ -548,6 +551,7 @@ field. `session_id` (random per connection) is on `task_finished`,
 | `inventory_desync` | inventory never showed the transfer | `inventory did not show the deposit within 40 ticks` | deposit, withdraw |
 | `chunk_not_loaded` | target chunk not loaded | `the chest's chunk is not loaded` | chest skills |
 | `no_path` | the pathfinder found no route | `haul gave up after repeated failures: ...: no path` | any walking skill |
+| `movement_corrected` | the server keeps pulling the unit back | none: never a task's reason | crew-control's `rubberbanding` event, from `movement.corrections` |
 | `other` | anything not listed | `block did not break` | the fallback |
 
 A reason that matches no rule is `other`; the rules are one table in

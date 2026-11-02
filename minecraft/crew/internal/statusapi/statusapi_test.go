@@ -350,3 +350,38 @@ func TestStateCarriesTheNearbyCountsOnceTheUnitKnowsWhereItIs(t *testing.T) {
 		}
 	}
 }
+
+type movementFixed struct{ n *uint64 }
+
+func (m movementFixed) Corrections() uint64 { return *m.n }
+
+func TestStateCarriesTheRunningCorrectionCount(t *testing.T) {
+	var n uint64 = 7
+	h := Handler(fixed{}, "dev", Unit{}, nil, WithMovement(movementFixed{&n}))
+	read := func() map[string]any {
+		var body struct {
+			Movement map[string]any `json:"movement"`
+		}
+		if err := json.Unmarshal(get(t, h, "/v1/state").Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Movement
+	}
+	if got := read(); got["corrections"] != 7.0 {
+		t.Errorf("movement = %v, want corrections 7", got)
+	}
+	n = 19
+	if got := read(); got["corrections"] != 19.0 {
+		t.Errorf("movement = %v, want the count to follow the source", got)
+	}
+}
+
+func TestStateReportsAZeroCountAndOmitsMovementForAUnitWithNoSource(t *testing.T) {
+	var zero uint64
+	if body := get(t, Handler(fixed{}, "dev", Unit{}, nil, WithMovement(movementFixed{&zero})), "/v1/state").Body.String(); !strings.Contains(body, `"movement":{"corrections":0}`) {
+		t.Errorf("a quiet unit must report 0, not nothing: %s", body)
+	}
+	if body := get(t, Handler(fixed{}, "dev", Unit{}, nil), "/v1/state").Body.String(); strings.Contains(body, `"movement"`) {
+		t.Errorf("state carries movement without a source: %s", body)
+	}
+}

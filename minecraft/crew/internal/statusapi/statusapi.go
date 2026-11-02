@@ -44,6 +44,7 @@ type options struct {
 	sightings SightingSource
 	entities  func(func(belief.Entity))
 	nearby    NearbySource
+	movement  MovementSource
 }
 
 // NearbySource counts the mobs and players around a position.
@@ -54,6 +55,17 @@ type NearbySource interface {
 // WithNearby reports how many hostile mobs and players are near the unit as
 // "threat" in /v1/state.
 func WithNearby(n NearbySource) Option { return func(o *options) { o.nearby = n } }
+
+// MovementSource is the read side of a unit's movement counts.
+type MovementSource interface {
+	Corrections() uint64
+}
+
+// WithMovement reports how often the server has overruled the unit's
+// predicted movement as "movement" in /v1/state. A controller reads the
+// growth of the count to tell a unit the server keeps pulling back from one
+// that is merely not progressing.
+func WithMovement(m MovementSource) Option { return func(o *options) { o.movement = m } }
 
 // EntityView is one entity as a harness reads it back. Positions make it
 // unfit for a real lab, so WithEntities is wired only for a preview server.
@@ -137,8 +149,16 @@ type stateBody struct {
 	// knows where it is, because a placeholder position counts the wrong
 	// neighbours.
 	Threat *life.Nearby `json:"threat,omitempty"`
+	// Movement is absent from a unit that keeps no count.
+	Movement *movementView `json:"movement,omitempty"`
 	// Entities is absent unless the unit is a harness unit.
 	Entities []EntityView `json:"entities,omitempty"`
+}
+
+// movementView counts from the unit's start, and survives a reconnect, so a
+// reader tells a restart from a quiet spell by the count going down.
+type movementView struct {
+	Corrections uint64 `json:"corrections"`
 }
 
 type tasksView struct {
@@ -198,6 +218,9 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Op
 		if o.nearby != nil && body.State.Spawned && body.State.PositionKnown {
 			n := o.nearby.Nearby(body.State.Position)
 			body.Threat = &n
+		}
+		if o.movement != nil {
+			body.Movement = &movementView{Corrections: o.movement.Corrections()}
 		}
 		if o.tactics != nil {
 			t := o.tactics.Tactics()
