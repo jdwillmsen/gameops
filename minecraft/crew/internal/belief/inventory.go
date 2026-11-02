@@ -12,8 +12,15 @@ import (
 // Armor, the offhand and containers arrive in other windows and are not kept.
 const inventorySize = 36
 
-// armourChestSlot is the chest's place in the armour window, after the helmet.
-const armourChestSlot = 1
+// The armour window holds the four worn pieces in this order; the chest is
+// the one elytra can stand in for.
+const (
+	armourSlots     = 4
+	armourChestSlot = 1
+)
+
+// armourNames name the armour window's slots as the status API reports them.
+var armourNames = [armourSlots]string{"helmet", "chest", "legs", "boots"}
 
 // hotbarSlots are the first slots of that inventory.
 const hotbarSlots = 9
@@ -27,6 +34,10 @@ type Item struct {
 	Count int `json:"count"`
 	// StackNetworkID is what a later item request must quote for the stack.
 	StackNetworkID int32 `json:"stack_network_id"`
+	// DurabilityPct is how much of the item's wear is left, 0 to 100; nil
+	// for an item that cannot wear out and for a stack whose damage cannot
+	// be read, so unknown is never shown as full or as broken.
+	DurabilityPct *int `json:"durability_pct,omitempty"`
 	// Wire is the stack exactly as the server last sent it, nil when only
 	// its ID and count are known. A held stack quoted without its data (a
 	// name, enchantments, damage) does not match the server's, which then
@@ -67,9 +78,9 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 		t.window, t.opened = uint32(p.WindowID), map[int32]protocol.ItemStack{}
 	case *packet.InventoryContent:
 		if p.WindowID == protocol.WindowIDArmour {
-			t.chest = stackRef{}
-			if len(p.Content) > armourChestSlot {
-				t.chest = refOf(p.Content[armourChestSlot])
+			t.armour = [armourSlots]stackRef{}
+			for i := 0; i < len(p.Content) && i < armourSlots; i++ {
+				t.armour[i] = refOf(p.Content[i])
 			}
 			return true
 		}
@@ -87,8 +98,8 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 		}
 	case *packet.InventorySlot:
 		if p.WindowID == protocol.WindowIDArmour {
-			if p.Slot == armourChestSlot {
-				t.chest = refOf(p.NewItem)
+			if p.Slot < armourSlots {
+				t.armour[p.Slot] = refOf(p.NewItem)
 			}
 			return true
 		}
@@ -190,17 +201,33 @@ func (t *Tracker) inventoryLocked() []Item {
 		if !ok {
 			name = fmt.Sprintf("item#%d", s.itemID)
 		}
-		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID, Wire: s.wire})
+		out = append(out, Item{Slot: slot, Name: name, Count: s.count, StackNetworkID: s.stackID, Wire: s.wire, DurabilityPct: durabilityPct(name, s.wire)})
 	}
 	return out
 }
 
-func (t *Tracker) chestLocked() string {
-	if t.chest.empty() {
-		return ""
-	}
-	if name, ok := t.itemNames[t.chest.itemID]; ok {
+func (t *Tracker) nameOfLocked(s stackRef) string {
+	if name, ok := t.itemNames[s.itemID]; ok {
 		return name
 	}
-	return fmt.Sprintf("item#%d", t.chest.itemID)
+	return fmt.Sprintf("item#%d", s.itemID)
+}
+
+func (t *Tracker) chestLocked() string {
+	if c := t.armour[armourChestSlot]; !c.empty() {
+		return t.nameOfLocked(c)
+	}
+	return ""
+}
+
+func (t *Tracker) armourLocked() []ArmourPiece {
+	var out []ArmourPiece
+	for i, s := range t.armour {
+		if s.empty() {
+			continue
+		}
+		name := t.nameOfLocked(s)
+		out = append(out, ArmourPiece{Slot: armourNames[i], Name: name, DurabilityPct: durabilityPct(name, s.wire)})
+	}
+	return out
 }

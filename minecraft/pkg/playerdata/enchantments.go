@@ -16,6 +16,12 @@ var enchantments = map[int]string{
 	40: "Breach",
 }
 
+// MaxDamage is how much durability an item has, by the game's own name
+// without the minecraft: prefix; 0 for an item that cannot wear out. Neither
+// the save nor the wire records the maximum, only how much is used, so every
+// reader that shows wear starts from this table.
+func MaxDamage(name string) int { return maxDamage[name] }
+
 // maxDamage is how much durability an item has, which the save leaves out:
 // it records only how much is used. Armour and tools are looked up by
 // material and kind below; the rest are listed.
