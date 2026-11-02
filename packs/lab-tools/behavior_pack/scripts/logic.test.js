@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   STAND_Y, STATIONS, PEN_SPECIES, ARENA_MOBS, SPAWNABLE, stationAt, clampCount, spawnPoint, spawnEventFor,
-  resetAreas, inBox, TELEPORTS, inLab, penCenter, LAB_BOUNDS,
+  resetAreas, inBox, TELEPORTS, inLab, penCenter, LAB_BOUNDS, SPECIES, PADS, padAt, signs, SIGN_LINE_MAX,
 } from "./logic.js";
 
 test("stationAt finds a lectern only at its own spot and level", () => {
@@ -81,4 +81,34 @@ test("every area and station lies inside the lab bounds", () => {
 test("penCenter returns the pen's middle or null", () => {
   assert.deepEqual(penCenter("tiger"), { x: -23.5, y: STAND_Y, z: -41.5 });
   assert.equal(penCenter("werewolf"), null);
+});
+
+test("pads send a player to a spot that is not on a pad", () => {
+  assert.equal(padAt({ x: 25.2, y: STAND_Y, z: 0.4 }).name, "into the arena");
+  assert.equal(padAt({ x: 34, y: STAND_Y, z: -0.6 }).name, "out of the arena");
+  assert.equal(padAt({ x: 25, y: 10, z: 0 }), null);
+  for (const p of PADS) {
+    assert.equal(padAt(p.to), null, p.name);
+    assert.ok(inLab(p.to), p.name);
+  }
+});
+
+test("every sign fits a sign face and stands inside the lab", () => {
+  const all = signs();
+  assert.ok(all.length >= 19);
+  const spots = all.map((s) => `${s.x},${s.z}`);
+  assert.equal(new Set(spots).size, spots.length, "two signs on one spot");
+  for (const s of all) {
+    assert.equal(s.lines.length, 4);
+    for (const l of s.lines) assert.ok(l.length <= SIGN_LINE_MAX, `${s.x},${s.z} "${l}"`);
+    assert.ok([0, 4, 8, 12].includes(s.rot));
+    assert.ok(inLab({ x: s.x, y: STAND_Y, z: s.z }));
+  }
+});
+
+test("species facts exist for every pen and name its taming food", () => {
+  for (const p of PEN_SPECIES) {
+    assert.ok(SPECIES[p.id], p.id);
+    assert.ok(SPECIES[p.id].food.endsWith(p.food.replace("_", " ")), p.id);
+  }
 });

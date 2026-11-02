@@ -1,8 +1,8 @@
-import { world, system } from "@minecraft/server";
+import { world, system, BlockPermutation, SignSide } from "@minecraft/server";
 import { ActionFormData, ModalFormData, FormCancelationReason } from "@minecraft/server-ui";
 import {
   STAND_Y, stationAt, clampCount, spawnPoint, spawnEventFor, resetAreas, SPAWNABLE, DRAGON_TIERS, TELEPORTS,
-  inLab, penCenter,
+  inLab, penCenter, padAt, signs,
 } from "./logic.js";
 import { GUIDE_PAGES, PEN_NOTES, STATION_NOTES } from "./guide.js";
 
@@ -214,12 +214,55 @@ world.beforeEvents.playerInteractWithBlock.subscribe((ev) => {
   });
 });
 
+// The vanilla book and the lab's own Guide book both open the main menu.
+const BOOKS = new Set(["minecraft:book", "gameops:guide_book"]);
+
 world.afterEvents.itemUse.subscribe((ev) => {
-  if (ev.itemStack.typeId !== "minecraft:book") return;
+  if (!BOOKS.has(ev.itemStack.typeId)) return;
   if (!inLab(ev.source.location)) return;
   if (system.currentTick - (lastLectern.get(ev.source.id) ?? -100) <= 4) return;
   mainMenu(ev.source).catch((e) => console.warn(`gameops:tools menu failed ${e}`));
 });
+
+function placeSigns() {
+  const dim = world.getDimension("overworld");
+  let placed = 0;
+  let missing = 0;
+  for (const s of signs()) {
+    try {
+      const block = dim.getBlock({ x: s.x, y: STAND_Y, z: s.z });
+      if (!block) {
+        missing++;
+        continue;
+      }
+      block.setPermutation(BlockPermutation.resolve("minecraft:standing_sign", { ground_sign_direction: s.rot }));
+      const sign = dim.getBlock({ x: s.x, y: STAND_Y, z: s.z }).getComponent("minecraft:sign");
+      sign.setText(s.lines.join("\n"), SignSide.Front);
+      sign.setWaxed(true);
+      placed++;
+    } catch {
+      missing++;
+    }
+  }
+  console.warn(`gameops:tools signs placed ${placed} missing ${missing}`);
+}
+
+system.afterEvents.scriptEventReceive.subscribe((ev) => {
+  if (ev.id === "gameops:signs") placeSigns();
+});
+
+// Pads carry players through the sealed arena dome. A cooldown stops a player bouncing between them.
+const padCooldown = new Map();
+system.runInterval(() => {
+  for (const player of world.getAllPlayers()) {
+    const pad = padAt(player.location);
+    if (!pad || player.dimension.id !== "minecraft:overworld") continue;
+    if (system.currentTick < (padCooldown.get(player.id) ?? 0)) continue;
+    padCooldown.set(player.id, system.currentTick + 60);
+    player.teleport(pad.to);
+    say(player, pad.name);
+  }
+}, 10);
 
 // Builds every form shape without showing it, so a wrong argument shape for this server's UI module
 // shows up in the log at startup and not when a player first right-clicks a lectern.
