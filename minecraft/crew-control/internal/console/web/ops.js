@@ -9,7 +9,8 @@ import {
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
 import { statusRole } from '/static/squad.js';
 import { openBulk } from '/static/bulk-ui.js';
-import { createGovernor, lowerBudget } from '/static/governor.js';
+import { createGovernor, nextShedStep } from '/static/governor.js';
+import { WALL_QUALITY_CHOICES, wallQualityLabel } from '/static/quality.js';
 import { openDialog } from '/static/kit/dialog.js';
 import { createToasts } from '/static/kit/toast.js';
 import { sortCell, markSort } from '/static/kit/table.js';
@@ -27,8 +28,14 @@ const roleChip = s => (statusRole(s) ? [' ', el('span', { className: 'role ' + s
 
 const PREFS = 'crew-console-prefs';
 function loadPrefs() {
-  const d = { side: true, dock: true, budget: 6, sort: 'unit', desc: false, level: 'all' };
-  try { return { ...d, ...JSON.parse(localStorage.getItem(PREFS) || '{}') }; } catch { return d; }
+  const d = { side: true, dock: true, budget: 6, quality: 'auto', sort: 'unit', desc: false, level: 'all' };
+  try {
+    const p = { ...d, ...JSON.parse(localStorage.getItem(PREFS) || '{}') };
+    // A pref saved by an older build must not pin a level the camera does not
+    // know; Auto is the safe answer.
+    if (!WALL_QUALITY_CHOICES.includes(p.quality)) p.quality = d.quality;
+    return p;
+  } catch { return d; }
 }
 
 // host: { statuses, order(), state(), focus(id), detail(id), setMode(m), setView(v),
@@ -41,10 +48,14 @@ export function initOps(host) {
   let unread = 0;
   let positions = [];
   let wallPage = 0;
-  // The budget the frame-rate governor stepped down to; never saved, so the
-  // viewer's own choice comes back on the next load.
+  // The budget and quality the frame-rate governor stepped down to; never
+  // saved, so the viewer's own choice comes back on the next load.
   let eased = 0;
+  let easedQuality = '';
   const budget = () => eased || prefs.budget;
+  // Auto starts at high and the governor walks it down. A pinned level is the
+  // viewer's choice and is never eased away from.
+  const wallQuality = () => (prefs.quality === 'auto' ? easedQuality || 'high' : prefs.quality);
   let pin = '';
   let kiosk = false;
   const picked = new Set();
@@ -178,10 +189,20 @@ export function initOps(host) {
     for (const b of budgetsFor(order.length)) {
       const btn = el('button', { type: 'button', textContent: budgetLabel(b), title: b === 0 ? 'Status cards only, no cameras' : `${b} cameras at a time` });
       btn.setAttribute('aria-pressed', String(budget() === b));
-      btn.addEventListener('click', () => { prefs.budget = b; eased = 0; wallPage = 0; save(); host.setView('wall'); });
+      btn.addEventListener('click', () => { prefs.budget = b; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); });
       bar.append(btn);
     }
-    if (eased) bar.append(el('span', { className: 'pg', textContent: `Reduced to ${eased} live: low frame rate`, title: 'The page could not keep up, pick a budget to try again' }));
+    bar.append(el('span', { className: 'lbl', textContent: 'Quality' }));
+    for (const q of WALL_QUALITY_CHOICES) {
+      const btn = el('button', { type: 'button', textContent: wallQualityLabel(q), title: q === 'auto' ? `Follow the frame rate; now ${wallQuality()}` : `${wallQualityLabel(q)} quality on every live feed` });
+      btn.setAttribute('aria-pressed', String(prefs.quality === q));
+      btn.addEventListener('click', () => { prefs.quality = q; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); });
+      bar.append(btn);
+    }
+    const shed = [];
+    if (eased) shed.push(`${eased} live`);
+    if (easedQuality) shed.push(`${easedQuality} quality`);
+    if (shed.length) bar.append(el('span', { className: 'pg', textContent: `Reduced to ${shed.join(' and ')}: low frame rate`, title: 'The page could not keep up, pick a budget or quality to try again' }));
     if (pg.pages > 1) {
       const prev = el('button', { type: 'button', textContent: '<', title: 'Previous page (,)' });
       const next = el('button', { type: 'button', textContent: '>', title: 'Next page (.)' });
@@ -193,7 +214,7 @@ export function initOps(host) {
     for (const id of pg.ids) {
       const tile = el('div', { className: 'tile' + (pg.live ? '' : ' card') });
       tile.dataset.unit = id;
-      if (pg.live) tile.append(el('iframe', { src: wallSrc(id), title: id }));
+      if (pg.live) tile.append(el('iframe', { src: wallSrc(id, wallQuality()), title: id }));
       const cover = el('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
       cover.setAttribute('aria-label', `Focus ${id}`);
       cover.addEventListener('click', () => host.focus(id));
@@ -262,7 +283,9 @@ export function initOps(host) {
       swap.addEventListener('click', () => { const was = host.state().unit; host.focus(pin); pin = was; renderPip(); });
       const close = el('button', { type: 'button', className: 'x', textContent: 'x', title: 'Unpin (p)' });
       close.addEventListener('click', () => { pin = ''; renderPip(); });
-      box.replaceChildren(el('iframe', { src: wallSrc(pin), title: 'pinned ' + pin }), swap, el('div', { className: 'label' }), close);
+      // The pinned tile is the one the viewer is watching closely, so it never
+      // shares the wall's economy.
+      box.replaceChildren(el('iframe', { src: wallSrc(pin, 'high'), title: 'pinned ' + pin }), swap, el('div', { className: 'label' }), close);
     }
     box.querySelector('.label').textContent = `pin ${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
     box.classList.toggle('crit', worst(alertsOf(s)) === 'crit');
@@ -438,7 +461,10 @@ export function initOps(host) {
     items.push({ label: 'Previous unit', hint: 'k', run: () => host.focus(step(ord, st.unit, -1)) });
     items.push({ label: 'Jump to next alert', keywords: 'problem', hint: 'a', run: jumpAlert });
     for (const b of budgetsFor(ord.length)) {
-      items.push({ label: b === 0 ? 'Wall: status cards only' : b >= ALL ? 'Wall: all feeds live' : `Wall: ${b} live feeds`, keywords: 'budget cameras', run: () => { prefs.budget = b; eased = 0; wallPage = 0; save(); host.setView('wall'); } });
+      items.push({ label: b === 0 ? 'Wall: status cards only' : b >= ALL ? 'Wall: all feeds live' : `Wall: ${b} live feeds`, keywords: 'budget cameras', run: () => { prefs.budget = b; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); } });
+    }
+    for (const q of WALL_QUALITY_CHOICES) {
+      items.push({ label: `Wall quality: ${wallQualityLabel(q)}`, keywords: 'quality resolution cameras', hint: prefs.quality === q ? 'current' : '', run: () => { prefs.quality = q; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); } });
     }
     items.push({ label: 'Toggle roster', hint: 'r', run: () => toggle('side') });
     items.push({ label: 'Toggle event feed', hint: 'e', run: () => toggle('dock') });
@@ -604,9 +630,10 @@ export function initOps(host) {
     const pg = host.state().view === 'wall' && document.visibilityState === 'visible' ? pageOf(order, budget(), wallPage) : null;
     // Only live tiles cost enough to shed, and only the focused wall counts.
     if (!pg || !pg.live || !governor.frame(t)) { if (!pg || !pg.live) governor.reset(); return; }
-    const next = lowerBudget(budgetsFor(order.length), budget(), ALL);
-    if (!next) return;
-    eased = next;
+    const step = nextShedStep({ auto: prefs.quality === 'auto', quality: wallQuality(), budget: budget(), budgets: budgetsFor(order.length), all: ALL });
+    if (step.quality) easedQuality = step.quality;
+    else if (step.budget) eased = step.budget;
+    else return;
     wallPage = 0;
     governor.reset();
     host.setView('wall');

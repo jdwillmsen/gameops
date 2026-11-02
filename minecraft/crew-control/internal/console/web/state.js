@@ -1,3 +1,5 @@
+import { DEFAULT_QUALITY, qualityOf } from './quality.js';
+
 export const MODES = ['first', 'third', 'orbit', 'top'];
 export const VIEWS = ['focus', 'wall', 'fleet', 'detail', 'jobs', 'events', 'ledger', 'timeline', 'dash', 'heat', 'replay'];
 
@@ -24,7 +26,10 @@ export function format({ unit, mode, view, job }) {
 }
 
 export const tileSrc = (id, mode) => `/units/${encodeURIComponent(id)}/camera?mode=${mode}`;
-export const wallSrc = id => `/units/${encodeURIComponent(id)}/camera?mode=first&hud=0&r=2`;
+// The wall keeps its small radius whatever the level: quality buys frame rate
+// by rendering less per pixel, not by replaying less world. q is explicit so a
+// wall tile never falls back to the page's own default.
+export const wallSrc = (id, quality = DEFAULT_QUALITY) => `/units/${encodeURIComponent(id)}/camera?mode=first&hud=0&r=2&q=${qualityOf(quality)}`;
 
 export function badge(s) {
   if (!s.online) return 'offline';
