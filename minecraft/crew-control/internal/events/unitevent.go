@@ -28,6 +28,7 @@ var reasonCodes = map[string]bool{
 	"kit_visit_timeout": true, "session_lost": true, "deposit_rejected": true, "no_pickup": true,
 	"no_reachable_target": true, "trap_climb_failed": true, "inventory_desync": true,
 	"chunk_not_loaded": true, "no_path": true, "other": true,
+	"placement_failed": true, "no_progress": true, "unit_died": true, "unsafe_nearby": true,
 	// The clipping reasons of movement_clip, from the unit's act package.
 	"predicted_inside_block": true, "corrected_inside_block": true, "corrected_in_free_space": true,
 }
