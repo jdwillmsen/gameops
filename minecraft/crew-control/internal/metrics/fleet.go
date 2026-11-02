@@ -101,6 +101,7 @@ type Fleet struct {
 	hits       *prometheus.CounterVec
 	damageTkn  *prometheus.CounterVec
 	unitDim    *prometheus.GaugeVec
+	corrected  *prometheus.CounterVec
 	skipped    *prometheus.CounterVec
 
 	mu   sync.Mutex
@@ -108,6 +109,9 @@ type Fleet struct {
 	// fights is each unit's fight totals at its last poll, the baseline the
 	// next poll's growth is measured from.
 	fights map[string]telemetry.FightTotals
+	// corrections is each unit's running correction count at its last poll,
+	// the baseline for the next poll's growth.
+	corrections map[string]uint64
 }
 
 // Option adjusts a Fleet before its series are created.
@@ -138,7 +142,7 @@ func ForRoster(r roster.Roster) Option {
 // dropped, so the unit label is the roster and cannot outgrow it, and the
 // world label is the roster's worlds for the same reason.
 func New(unitIDs []string, opts ...Option) *Fleet {
-	f := &Fleet{reg: prometheus.NewRegistry(), units: make(map[string]string, len(unitIDs)), fights: map[string]telemetry.FightTotals{}}
+	f := &Fleet{reg: prometheus.NewRegistry(), units: make(map[string]string, len(unitIDs)), fights: map[string]telemetry.FightTotals{}, corrections: map[string]uint64{}}
 	for _, id := range unitIDs {
 		f.units[id] = roster.DefaultWorld
 	}
@@ -231,7 +235,11 @@ func New(unitIDs []string, opts ...Option) *Fleet {
 		Name: "crew_fleet_position_samples_dropped_total",
 		Help: "Position samples the heat grid or the replay recorder skipped because the unit stood outside the overworld, by world, the dimension (nether, end, other) and the store (heat, replay). Both stores keep overworld rows only, so this is what they leave out. One sample per store per sampling tick.",
 	}, []string{"world", "dim", "store"})
-	f.reg.MustRegister(f.unitDim, f.skipped, f.swings, f.hits, f.damageTkn, f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
+	f.corrected = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_unit_corrections_total",
+		Help: "Times the server overruled a unit's predicted movement, summed from the growth of movement.corrections in its state between polls. A unit that restarts, or goes offline, starts a new baseline, so growth across that gap is lost and the series undercounts; it never counts a unit's history from before crew-control watched. A unit that does not report the count (an older unit) stays at zero.",
+	}, []string{"world", "unit"})
+	f.reg.MustRegister(f.unitDim, f.skipped, f.corrected, f.swings, f.hits, f.damageTkn, f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
 		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger, f.toolPct)
 
 	for _, w := range f.worlds {
@@ -250,6 +258,7 @@ func New(unitIDs []string, opts ...Option) *Fleet {
 		f.swings.WithLabelValues(w, id)
 		f.hits.WithLabelValues(w, id)
 		f.damageTkn.WithLabelValues(w, id)
+		f.corrected.WithLabelValues(w, id)
 		for _, s := range States {
 			f.unitState.WithLabelValues(w, id, s)
 			f.inState.WithLabelValues(w, id, s)
@@ -363,6 +372,7 @@ func (f *Fleet) ObservePoll(now time.Time, states []telemetry.UnitState) {
 			f.unitState.WithLabelValues(w, u.ID, s).Set(v)
 		}
 		f.observeFight(w, u.ID, u.Fight)
+		f.observeCorrections(w, u.ID, u.Corrections)
 		if dt > 0 && validState(u.State) {
 			f.inState.WithLabelValues(w, u.ID, u.State).Add(dt.Seconds())
 		}
@@ -399,6 +409,24 @@ func (f *Fleet) observeFight(world, unit string, cur *telemetry.FightTotals) {
 	f.swings.WithLabelValues(world, unit).Add(float64(d.Swings))
 	f.hits.WithLabelValues(world, unit).Add(float64(d.Hits))
 	f.damageTkn.WithLabelValues(world, unit).Add(d.Damage)
+}
+
+// observeCorrections adds the growth of one unit's correction count since the
+// last poll, on the same terms as observeFight: a first reading, one after a
+// gap and one after a restart (a count that went down) only set the baseline.
+func (f *Fleet) observeCorrections(world, unit string, cur *uint64) {
+	f.mu.Lock()
+	prev, had := f.corrections[unit]
+	if cur == nil {
+		delete(f.corrections, unit)
+		f.mu.Unlock()
+		return
+	}
+	f.corrections[unit] = *cur
+	f.mu.Unlock()
+	if had && *cur > prev {
+		f.corrected.WithLabelValues(world, unit).Add(float64(*cur - prev))
+	}
 }
 
 // setOrClear drops the series for an unknown reading: Prometheus would

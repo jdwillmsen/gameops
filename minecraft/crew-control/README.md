@@ -708,7 +708,7 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`, `fight_ended`. A `fight_ended` event closes a run of fight activity read from the growth of a warrior's totals: it is raised when they have held still for 10 s, or at once when a death is counted, and its payload has `swings`, `hits`, `damage` and an `outcome`. The unit sends counts and no verdict, so the outcome is inferred: `loss` if the unit died, else `win` if it landed any hit (it survived having hit something, not necessarily a kill), else `disengaged`; `other` when the fight was cut off by a restart, a lost field or the unit going offline. The mob that killed the unit is not reported. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`, `fight_ended`, `rubberbanding`. A `rubberbanding` event is raised once when the unit's running `movement.corrections` count (the server overruling its predicted movement) grows by 10 or more within 30 s, and again only after the window has fallen to 2 or fewer; it carries the closed reason code `movement_corrected`, fixed text, and the count and window in its payload only, never in the public feed text. A unit that predates the field never raises it. A `fight_ended` event closes a run of fight activity read from the growth of a warrior's totals: it is raised when they have held still for 10 s, or at once when a death is counted, and its payload has `swings`, `hits`, `damage` and an `outcome`. The unit sends counts and no verdict, so the outcome is inferred: `loss` if the unit died, else `win` if it landed any hit (it survived having hit something, not necessarily a kill), else `disengaged`; `other` when the fight was cut off by a restart, a lost field or the unit going offline. The mob that killed the unit is not reported. A `died` event's payload carries the `day_phase` when the unit had one. A `threat_high`
 event is raised once as the unit's reported hostile count (within 16 blocks,
 capped at 9 by the unit) reaches 3, and again only after it has fallen to 1 or
 fewer; its payload and text carry the counts and nothing else. Only the bit
@@ -902,6 +902,7 @@ the units' own.
 | `crew_fleet_task_duration_seconds` | histogram | `world`, `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
 | `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `world`, `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
 | `crew_fleet_unit_deaths_total` | counter | `world`, `unit` | Deaths a poll saw |
+| `crew_fleet_unit_corrections_total` | counter | `world`, `unit` | Times the server overruled the unit's predicted movement, summed from the growth of `movement.corrections` in its state between polls, on the same baseline rules as the fight counters. A unit that does not report the count stays at zero |
 | `crew_fleet_unit_swings_total`, `crew_fleet_unit_hits_landed_total`, `crew_fleet_unit_damage_taken_total` | counter | `world`, `unit` | A warrior's swings, landed hits and health lost, summed from the growth of `tasks.fight.total` in its state between polls. The first reading, one after the unit was offline or reported no fight, and one after a restart (any total going down) only set a baseline, so a unit's history from before crew-control watched is never counted and growth across such a gap is lost. Hits are an upper bound when several warriors fight one target |
 | `crew_fleet_deaths_by_day_phase_total` | counter | `world`, `phase` | The same deaths by the unit's own day phase when found dead: `dawn`, `day`, `dusk`, `night`, or `unknown` for a unit with no clock (an older unit, or before the server sent the time) |
 | `crew_fleet_unit_stuck_total` | counter | `world`, `unit` | Stalls (no progress for 90 s on a running task), once each |
@@ -945,11 +946,11 @@ Label values are closed sets, never a raw string a unit sent:
 | `other` | anything else | |
 
 Series stay bounded by the label sets. A unit has one world, so the per-unit
-series (1,920 for 20 units, the vitals, tool and dimension gauges included) do
-not grow with the world count. The fleet-wide series (failure reasons,
-duration histograms, state and online gauges, deaths by day phase, dropped
-position samples) do: 537 per world. The worst case is therefore
-1,920 + 537 x worlds, so 2,457 for the one lab and 3,531 for three worlds, and
+series (1,980 for 20 units, the vitals, tool, dimension and correction gauges
+included) do not grow with the world count. The fleet-wide series (failure
+reasons, duration histograms, state and online gauges, deaths by day phase,
+dropped position samples) do: 537 per world. The worst case is therefore
+1,980 + 537 x worlds, so 2,517 for the one lab and 3,591 for three worlds, and
 adding a unit to an existing world adds only its own series. The usual count is a few hundred because a series appears only
 once its event has happened. Per-unit state, death and stall series exist from
 start so that every unit shows up before it does anything.
@@ -1035,6 +1036,7 @@ Failures no rule covers are listed as unexplained with equal prominence.
 | --- | --- | --- |
 | `missing_tool` | `missing_tool.kit_failed`, `missing_tool.died` | the `kit_failed` or `died` event (named by `cause_ref`, else the latest within 30 min), then the failure |
 | `session_lost` | `session_lost.session_error` | a `session_error` named by `cause_ref` or within 60 s before |
+| `movement_corrected` | `movement_corrected.rubberbanding` | a `rubberbanding` event within 3 minutes before the failure; tried first of the symptom rules (ahead of the trap, combat and vitals rules), since a unit the server keeps pulling back makes no progress and fails to path, while a `missing_tool` or `session_lost` failure keeps its own cause |
 | `geometry_trap` | `no_path.same_anchor` | 3 or more `no_path` failures from one unchanged anchor with no success between; the cause is stated as unknown |
 | `combat` | `combat.threat_high` | a `threat_high` event within 3 minutes before the failure; tried before the vitals rule, since a fight is what lowers health |
 | `low_hunger`, `low_health` | `vitals.low_hunger`, `vitals.low_health` | a low-vitals event within 2 minutes before the failure |

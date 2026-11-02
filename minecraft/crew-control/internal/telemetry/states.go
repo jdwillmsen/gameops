@@ -29,6 +29,9 @@ type UnitState struct {
 	// Fight is the warrior's running fight totals, nil while offline and for
 	// a unit that reports none, so a gap is never read as a reset to zero.
 	Fight *FightTotals
+	// Corrections is the running count of server movement corrections, nil
+	// while offline and for a unit that does not report it.
+	Corrections *uint64
 }
 
 // stateOf orders the readings by what an operator needs to act on first: a
@@ -53,7 +56,7 @@ func (p *Poller) statesLocked() []UnitState {
 	out := make([]UnitState, len(p.units))
 	for i, u := range p.units {
 		st := p.statuses[i]
-		out[i] = UnitState{ID: u.ID, World: u.World, Dim: p.positions[i].DimName, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger, ToolDurability: p.tracks[i].held, ToolItem: p.tracks[i].heldItem, Fight: p.tracks[i].fightPrev}
+		out[i] = UnitState{ID: u.ID, World: u.World, Dim: p.positions[i].DimName, State: stateOf(st, p.tracks[i].stuck), Health: st.Health, Hunger: st.Hunger, ToolDurability: p.tracks[i].held, ToolItem: p.tracks[i].heldItem, Fight: p.tracks[i].fightPrev, Corrections: p.tracks[i].corrections}
 	}
 	return out
 }

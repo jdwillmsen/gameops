@@ -20,6 +20,9 @@ const (
 	ClassLowHunger    = "low_hunger"
 	ClassLowHealth    = "low_health"
 	ClassCombat       = "combat"
+	// ClassMovementCorrected is a unit the server kept pulling back, which
+	// shows as no progress and so is easy to mistake for a stall or a trap.
+	ClassMovementCorrected = "movement_corrected"
 )
 
 // Reason codes the rules look for on a failed task.
@@ -39,6 +42,10 @@ const (
 	// combatWindow: how far back a threat_high still counts as preceding a
 	// failure. A fight outlasts a vitals reading, so it is looked for longer.
 	combatWindow = 3 * time.Minute
+	// correctedWindow: how far back a rubberbanding event still counts as
+	// preceding a failure. It is as long as a fight window: a unit pulled
+	// back keeps failing for as long as the server keeps doing it.
+	correctedWindow = 3 * time.Minute
 	// kitWindow: how far back a failed kit pickup can still explain a
 	// missing tool.
 	kitWindow = 30 * time.Minute
@@ -154,11 +161,16 @@ func classify(f unitlog.Event, before []unitlog.Event, byID map[int64]unitlog.Ev
 		return missingTool(f, before, byID)
 	case reasonSessionLost:
 		return sessionLost(f, before, byID)
-	case reasonNoPath:
-		if run, ok := runs[f.ID]; ok {
-			return verdict{ClassGeometryTrap, "no_path.same_anchor", run,
-				"repeated failed paths from an unchanged position: a geometry trap, cause unknown"}, true
-		}
+	}
+	// Ahead of the trap rule and every other no-progress explanation: a unit
+	// the server keeps pulling back fails to path and fails to progress, and
+	// the correction is the cause, not the symptom.
+	if v, ok := movementCorrected(f, before); ok {
+		return v, true
+	}
+	if run, ok := runs[f.ID]; ok && f.Reason == reasonNoPath {
+		return verdict{ClassGeometryTrap, "no_path.same_anchor", run,
+			"repeated failed paths from an unchanged position: a geometry trap, cause unknown"}, true
 	}
 	if v, ok := combat(f, before); ok {
 		return v, true
@@ -227,6 +239,15 @@ func sessionLost(f unitlog.Event, before []unitlog.Event, byID map[int64]unitlog
 	}
 	return verdict{ClassSessionLost, "session_lost.session_error", []int64{c.ID, f.ID},
 		"the game session ended right after a session error"}, true
+}
+
+func movementCorrected(f unitlog.Event, before []unitlog.Event) (verdict, bool) {
+	c, ok := lastBefore(f, before, correctedWindow, unitlog.KindRubberbanding)
+	if !ok {
+		return verdict{}, false
+	}
+	return verdict{ClassMovementCorrected, "movement_corrected.rubberbanding", []int64{c.ID, f.ID},
+		"the server was correcting the unit's movement just before the task failed"}, true
 }
 
 // combat is tried before vitals: a unit hurt in a fight has low health

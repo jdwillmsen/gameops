@@ -158,6 +158,10 @@ type stateResponse struct {
 		Hostiles int `json:"hostiles"`
 		Players  int `json:"players"`
 	} `json:"threat"`
+	// Movement is absent from a unit that predates the count.
+	Movement *struct {
+		Corrections *uint64 `json:"corrections"`
+	} `json:"movement"`
 	Tasks struct {
 		Current *TaskSummary `json:"current"`
 		Recent  []recentTask `json:"recent"`
@@ -446,6 +450,9 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 	o.recent = res.st.Tasks.Recent
 	o.effects = res.st.State.Effects
 	o.fight = res.st.Tasks.Fight.totals()
+	if m := res.st.Movement; m != nil {
+		o.corrections = m.Corrections
+	}
 	o.dayPhase = closedEnv(res.st.State.Env).DayPhase
 	if t := res.st.Threat; t != nil {
 		o.threat = &Threat{Hostiles: min(max(t.Hostiles, 0), maxThreatCount), Players: min(max(t.Players, 0), maxThreatCount)}

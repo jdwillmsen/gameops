@@ -30,6 +30,8 @@ var reasonCodes = map[string]bool{
 	"chunk_not_loaded": true, "no_path": true, "other": true,
 	// The clipping reasons of movement_clip, from the unit's act package.
 	"predicted_inside_block": true, "corrected_inside_block": true, "corrected_in_free_space": true,
+	// The code of a rubberbanding event, which crew-control raises itself.
+	"movement_corrected": true,
 }
 
 // KnownReasonCode reports whether code is in the units' closed catalogue.

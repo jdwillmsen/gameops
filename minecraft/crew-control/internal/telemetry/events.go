@@ -26,7 +26,7 @@ type Event struct {
 	Name string    `json:"name"`
 	// Kind is one of online, offline, died, respawned, task_started,
 	// task_done, task_failed, task_cancelled, task_ended (outcome unknown),
-	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost, threat_high, fight_ended.
+	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost, threat_high, fight_ended, rubberbanding.
 	Kind string `json:"kind"`
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
@@ -109,6 +109,12 @@ type track struct {
 	// tool_breaking alert read them.
 	held     *int
 	heldItem string
+	// corrections is the unit's running correction count at the last poll,
+	// nil before the first and from a unit that does not report it; the
+	// window holds the growth in the last rubberbandWindow.
+	corrections      *uint64
+	correctionWindow []correctionSample
+	rubberbanding    bool
 }
 
 type recentTask struct {
@@ -151,6 +157,9 @@ type observation struct {
 	fight *FightTotals
 	// dayPhase is the closed phase at this poll, empty when unknown.
 	dayPhase string
+	// corrections is the unit's running count of server movement corrections,
+	// nil from a unit that predates the field.
+	corrections *uint64
 }
 
 // observe advances t to o and returns what changed. It is pure so the rules
@@ -176,6 +185,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		t.observeEffects(o.effects, now)
 		t.underAttack = o.threat != nil && o.threat.Hostiles >= threatHigh
 		t.fightPrev = o.fight
+		t.corrections = o.corrections
 		t.taskID, t.template, t.progress, t.progressAt = o.curID, o.curTemplate, o.curProgress, now
 		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		t.lowHP = o.health != nil && *o.health <= lowHealth
@@ -191,6 +201,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			t.wear, t.wearSeeded = [len(wearSlots)]map[string]int{}, false
 			t.effects, t.effectsSeeded = nil, false
 			t.underAttack = false
+			t.resetCorrections()
 			out = append(out, t.observeFight(nil, now)...)
 			return out
 		}
@@ -222,6 +233,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	out = append(out, t.observeEffects(o.effects, now)...)
 	out = append(out, t.observeThreat(o.threat, now)...)
 	out = append(out, t.observeFight(o.fight, now)...)
+	out = append(out, t.observeCorrections(o.corrections, now)...)
 
 	if o.curID != t.taskID {
 		if t.taskID != "" {
