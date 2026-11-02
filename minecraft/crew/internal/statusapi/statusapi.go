@@ -13,6 +13,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 )
 
@@ -125,10 +126,14 @@ type Unit struct {
 }
 
 type stateBody struct {
-	Version string          `json:"version"`
-	Unit    Unit            `json:"unit"`
-	State   belief.Snapshot `json:"state"`
-	Tasks   tasksView       `json:"tasks"`
+	Version string `json:"version"`
+	// SessionID names the unit's current connection to the game server, so a
+	// controller can tell the events of one connection from the next. Absent
+	// before the first connect.
+	SessionID string          `json:"session_id,omitempty"`
+	Unit      Unit            `json:"unit"`
+	State     belief.Snapshot `json:"state"`
+	Tasks     tasksView       `json:"tasks"`
 	// Tactics is absent for a unit that has no tuning to report.
 	Tactics *Tactics `json:"tactics,omitempty"`
 	// Seen is absent for a unit that keeps no sightings.
@@ -194,7 +199,7 @@ func Handler(src Source, version string, unit Unit, tasks TaskSource, opts ...Op
 				view.Fight = &s
 			}
 		}
-		body := stateBody{Version: version, Unit: unit, State: src.Snapshot(), Tasks: view}
+		body := stateBody{Version: version, SessionID: sessionid.Current(), Unit: unit, State: src.Snapshot(), Tasks: view}
 		if o.nearby != nil && body.State.Spawned && body.State.PositionKnown {
 			n := o.nearby.Nearby(body.State.Position)
 			body.Threat = &n
