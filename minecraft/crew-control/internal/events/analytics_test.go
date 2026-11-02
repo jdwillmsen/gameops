@@ -202,3 +202,15 @@ func TestFromUnitKeepsAMovementClipReasonAndNothingPositional(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownReasonCodesIncludeTheWiderCatalogue(t *testing.T) {
+	for _, code := range []string{"placement_failed", "no_progress", "unit_died", "unsafe_nearby", "other"} {
+		if !KnownReasonCode(code) {
+			t.Errorf("%q is not a known reason code", code)
+		}
+	}
+	e, err := FromUnit("crew-01", UnitEvent{Kind: "kit_failed", ReasonCode: "a_code_from_the_future"}, time.Now())
+	if err != nil || e.ReasonCode != "other" {
+		t.Errorf("an unknown code stored as %q (%v)", e.ReasonCode, err)
+	}
+}
