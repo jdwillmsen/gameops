@@ -560,12 +560,29 @@
   // off the end.
   function tally(rows, nameOf) {
     const list = el('ul', 'tally');
-    for (const [name, n] of rows.slice(0, LIST_ROWS)) {
+    const rowOf = ([name, n]) => {
       const row = el('li');
       row.append(el('span', 'name', nameOf(name)), el('span', 'dim', fmt(n)));
-      list.append(row);
-    }
-    if (rows.length > LIST_ROWS) list.append(el('li', 'dim', `and ${fmt(rows.length - LIST_ROWS)} more`));
+      return row;
+    };
+    for (const r of rows.slice(0, LIST_ROWS)) list.append(rowOf(r));
+    if (rows.length <= LIST_ROWS) return list;
+    // The rest are already loaded, so they are one press away rather than a
+    // line of text; the figure is the control so a keyboard can reach it.
+    const left = rows.length - LIST_ROWS;
+    const extra = rows.slice(LIST_ROWS).map(rowOf);
+    const toggle = button(`and ${fmt(left)} more`, () => {
+      const open = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.textContent = open ? 'show fewer' : `and ${fmt(left)} more`;
+      if (open) for (const r of extra) list.insertBefore(r, more);
+      else for (const r of extra) r.remove();
+      list.classList.toggle('long', open);
+    }, 'ghost more');
+    toggle.setAttribute('aria-expanded', 'false');
+    const more = el('li', 'rest');
+    more.append(toggle);
+    list.append(more);
     return list;
   }
 

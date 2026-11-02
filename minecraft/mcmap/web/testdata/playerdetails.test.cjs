@@ -416,6 +416,25 @@ test('long lists are cut and say how many were left off', async () => {
   assert.ok(!words(t).includes('Mob N'));
 });
 
+test('"and N more" opens every row, closes again and says which it is', async () => {
+  const many = Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`mob_${String.fromCharCode(97 + i)}`, 20 - i]));
+  const t = load({ body: { ...ANSWER, counters: { ...COUNTERS, kills: many } } });
+  t.app.playerDetails.open({ id: '-9', name: 'Alex' });
+  await tick();
+  const more = press(body(t), 'and 4 more');
+  assert.ok(more, 'the line is a button');
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.ok(!words(t).includes('Mob N'));
+  more.click();
+  assert.equal(more.getAttribute('aria-expanded'), 'true');
+  assert.equal(more.textContent, 'show fewer');
+  assert.ok(words(t).includes('Mob N7'), words(t));
+  more.click();
+  assert.equal(more.getAttribute('aria-expanded'), 'false');
+  assert.equal(more.textContent, 'and 4 more');
+  assert.ok(!words(t).includes('Mob N'));
+});
+
 test('says so when nothing is counted yet, and says nothing when the map keeps no counters', async () => {
   const none = load({ body: { ...ANSWER, counters: { state: 'none' } } });
   none.app.playerDetails.open({ id: '-9', name: 'Alex' });
