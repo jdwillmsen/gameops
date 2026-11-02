@@ -35,6 +35,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/blocks"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape/blocktable"
@@ -84,6 +85,7 @@ var version = "dev"
 
 func main() {
 	log := logging.New(os.Getenv("LOG_LEVEL"))
+	unitevent.SetVersion(version)
 
 	cfg, err := config.Load()
 	if err != nil {

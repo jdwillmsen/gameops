@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 // instant makes every wait elapse at once, so the loop's control flow is
@@ -59,6 +61,39 @@ func TestLoopResetsBeliefWhenASessionEnds(t *testing.T) {
 	runConnectLoop(ctx, loopOptions{minDelay: time.Millisecond, maxDelay: time.Millisecond, after: instant}, connect, func() { resets++ }, discardLog{})
 	if resets != 1 {
 		t.Errorf("onEnd called %d times, want 1", resets)
+	}
+}
+
+func TestLoopReportsASessionErrorToTheController(t *testing.T) {
+	var got []unitevent.Event
+	unitevent.SetSink(func(e unitevent.Event) { got = append(got, e) })
+	t.Cleanup(func() { unitevent.SetSink(nil) })
+	ctx, cancel := context.WithCancel(context.Background())
+	connect := func(context.Context) error {
+		defer cancel()
+		return errors.New("kicked")
+	}
+	// The connect that ends in cancel is not an error to report.
+	runConnectLoop(ctx, loopOptions{minDelay: time.Millisecond, maxDelay: time.Millisecond, after: instant}, connect, func() {}, discardLog{})
+	if len(got) != 0 {
+		t.Fatalf("a shutdown reported %+v", got)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	calls := 0
+	connect = func(context.Context) error {
+		calls++
+		if calls == 2 {
+			cancel()
+		}
+		return errors.New("kicked")
+	}
+	runConnectLoop(ctx, loopOptions{minDelay: time.Millisecond, maxDelay: time.Millisecond, after: instant}, connect, func() {}, discardLog{})
+	if len(got) != 1 {
+		t.Fatalf("reported %d session errors, want 1", len(got))
+	}
+	if e := got[0]; e.Kind != "session_error" || e.ReasonCode != "session_lost" || e.Reason != "kicked" || e.SessionID == "" {
+		t.Errorf("event = %+v", e)
 	}
 }
 

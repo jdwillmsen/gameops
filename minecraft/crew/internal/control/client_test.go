@@ -24,6 +24,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 const (
@@ -64,6 +65,10 @@ type fakeControl struct {
 	releaseFirst chan struct{}
 	releaseID    string
 	releaseIDCh  chan struct{}
+
+	unitEvents    []unitevent.Event
+	unitEventFail int // how many unit-event posts to answer 500 before accepting
+	unitEventCode int // when non-zero, unit-event posts get this status
 }
 
 func newFakeControl(t *testing.T) *fakeControl {
@@ -189,6 +194,29 @@ func newFakeControl(t *testing.T) *fakeControl {
 			return
 		}
 		f.events = append(f.events, ev)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /v1/units/"+unit+"/unit-events", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer "+token {
+			f.badAuth = true
+		}
+		if f.unitEventCode != 0 {
+			w.WriteHeader(f.unitEventCode)
+			return
+		}
+		if f.unitEventFail > 0 {
+			f.unitEventFail--
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var e unitevent.Event
+		if json.NewDecoder(r.Body).Decode(&e) != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		f.unitEvents = append(f.unitEvents, e)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	f.srv = httptest.NewUnstartedServer(mux)
@@ -1497,5 +1525,85 @@ func TestReasonCodeAndSessionRideTheReportAndAreDroppedForAnOldController(t *tes
 				t.Errorf("reason text changed: %q", e.Reason)
 			}
 		}
+	}
+}
+
+func (f *fakeControl) waitUnitEvents(t *testing.T, n int) []unitevent.Event {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		f.mu.Lock()
+		got := append([]unitevent.Event(nil), f.unitEvents...)
+		f.mu.Unlock()
+		if len(got) >= n {
+			return got
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d unit events", n)
+	return nil
+}
+
+// startListening returns once the client has polled, which is after it began
+// listening for unit events.
+func startListening(t *testing.T, f *fakeControl) *harness {
+	t.Helper()
+	h := start(t, &stubRunner{}, f)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if all, _ := f.pollCounts(); all > 0 {
+			return h
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("the client never polled")
+	return nil
+}
+
+func TestUnitEventsAreReportedInOrderWithTheirReason(t *testing.T) {
+	f := newFakeControl(t)
+	startListening(t, f)
+	unitevent.Emit(unitevent.Event{Kind: "kit_failed", ReasonCode: "kit_no_path", Reason: "no path", SessionID: "6a36f7ecb575"})
+	unitevent.Emit(unitevent.Event{Kind: "session_error", Reason: strings.Repeat("é", 500), SessionID: "6a36f7ecb575"})
+
+	got := f.waitUnitEvents(t, 2)
+	if got[0].Kind != "kit_failed" || got[0].ReasonCode != "kit_no_path" || got[0].SessionID != "6a36f7ecb575" || got[0].At.IsZero() {
+		t.Errorf("first = %+v", got[0])
+	}
+	if got[1].Kind != "session_error" || len(got[1].Reason) > maxReasonBytes || !utf8.ValidString(got[1].Reason) {
+		t.Errorf("second = %d bytes, valid utf-8 %v", len(got[1].Reason), utf8.ValidString(got[1].Reason))
+	}
+}
+
+func TestUnitEventSurvivesAControllerBlip(t *testing.T) {
+	f := newFakeControl(t)
+	f.unitEventFail = 2
+	startListening(t, f)
+	unitevent.Emit(unitevent.Event{Kind: "kit_failed"})
+	if got := f.waitUnitEvents(t, 1); got[0].Kind != "kit_failed" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+// A controller that predates the route answers 404; the unit must not retry
+// it or let it hold up the events behind it.
+func TestUnitEventTheControllerDoesNotTakeIsDropped(t *testing.T) {
+	f := newFakeControl(t)
+	f.unitEventCode = http.StatusNotFound
+	h := startListening(t, f)
+	unitevent.Emit(unitevent.Event{Kind: "kit_failed"})
+	deadline := time.Now().Add(5 * time.Second)
+	for h.log.count("control_unit_event_dropped") == 0 && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+	}
+	if h.log.count("control_unit_event_dropped") != 1 {
+		t.Fatalf("dropped %d times", h.log.count("control_unit_event_dropped"))
+	}
+	f.mu.Lock()
+	f.unitEventCode = 0
+	f.mu.Unlock()
+	unitevent.Emit(unitevent.Event{Kind: "session_error"})
+	if got := f.waitUnitEvents(t, 1); got[0].Kind != "session_error" {
+		t.Errorf("got %+v", got)
 	}
 }

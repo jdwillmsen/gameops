@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
 )
 
 // A session lasting at least this long is treated as healthy and resets the
@@ -53,6 +55,7 @@ func runConnectLoop(ctx context.Context, opt loopOptions, connect func(context.C
 		}
 		if err != nil {
 			log.Error("session_error", map[string]any{"error": err.Error(), "session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
+			unitevent.Emit(unitevent.Event{Kind: "session_error", ReasonCode: task.ReasonSessionLost, Reason: err.Error(), SessionID: sid})
 		} else {
 			log.Info("session_ended", map[string]any{"session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
 		}
