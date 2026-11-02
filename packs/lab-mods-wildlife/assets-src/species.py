@@ -23,12 +23,16 @@ class Species:
     pounce: bool = False
     # (variant, health) for variants that are tougher than the base value.
     variant_health: tuple = ()
+    # What it drops on death: (item, min, max) rolled independently. Experience is paid only when a
+    # player landed the last hit, so lava and falls cannot farm it.
+    drops: tuple = ()
+    xp: int = 0
 
 
 def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg,
-       active_speed=0.0, tired_speed=0.0, pounce=False, variant_health=()):
+       active_speed=0.0, tired_speed=0.0, pounce=False, variant_health=(), drops=(), xp=0):
     return Species(id, f"gameops_{id}", health, damage, speed, tame_item, prey, rivals, variants, ability, rig,
-                   box, egg, active_speed, tired_speed, pounce, variant_health)
+                   box, egg, active_speed, tired_speed, pounce, variant_health, drops, xp)
 
 
 SMALL = ("rabbit", "chicken")
@@ -36,16 +40,17 @@ LIVESTOCK = ("sheep", "pig", "cow")
 
 SPECIES = {s.id: s for s in (
     _s("tiger", 60, 8, 0.28, "beef", LIVESTOCK, (), ("orange", "white"), "charge", "cat",
-       (1.0, 1.2), ("#d9822b", "#2a2018"), active_speed=0.40, tired_speed=0.18),
+       (1.0, 1.2), ("#d9822b", "#2a2018"), active_speed=0.40, tired_speed=0.18, drops=(("beef", 1, 3), ("leather", 1, 2)), xp=8),
     _s("cheetah", 30, 5, 0.45, "rabbit", SMALL, ("gameops_hyena",), (), "sprint", "cat",
-       (0.8, 0.9), ("#d9b25a", "#3a2a18"), active_speed=0.60, tired_speed=0.20),
+       (0.8, 0.9), ("#d9b25a", "#3a2a18"), active_speed=0.60, tired_speed=0.20, drops=(("rabbit", 1, 2), ("rabbit_hide", 0, 1)), xp=5),
     _s("lion", 50, 7, 0.30, "mutton", LIVESTOCK, ("gameops_hyena",), ("male", "female"), "roar", "cat",
-       (1.0, 1.2), ("#c9a05a", "#6a4220")),
+       (1.0, 1.2), ("#c9a05a", "#6a4220"), drops=(("mutton", 1, 3), ("leather", 0, 2)), xp=7),
     _s("black_leopard", 40, 6, 0.32, "chicken", SMALL, ("gameops_hyena",), (), "ambush", "cat",
-       (0.9, 1.0), ("#26262c", "#6a6a74"), pounce=True),
+       (0.9, 1.0), ("#26262c", "#6a6a74"), pounce=True, drops=(("chicken", 0, 1), ("leather", 0, 2), ("bone", 0, 1)), xp=6),
     _s("brown_bear", 80, 9, 0.25, "salmon", (), (), (), "guard", "bear",
-       (1.4, 1.5), ("#5a3a22", "#a07a50")),
+       (1.4, 1.5), ("#5a3a22", "#a07a50"), drops=(("leather", 1, 3), ("salmon", 0, 2)), xp=10),
     _s("hyena", 30, 7, 0.32, "rotten_flesh", (),
        ("gameops_lion", "gameops_cheetah", "gameops_black_leopard"), ("regular", "alpha"), "pack", "hyena",
-       (0.9, 1.0), ("#b59a62", "#3a2e1a"), variant_health=(("alpha", 40),)),
+       (0.9, 1.0), ("#b59a62", "#3a2e1a"), variant_health=(("alpha", 40),),
+       drops=(("rotten_flesh", 1, 2), ("bone", 0, 2)), xp=5),
 )}

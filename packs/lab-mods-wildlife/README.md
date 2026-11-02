@@ -92,6 +92,14 @@ the owner's approval to roll the pack out.
 - Models and textures look right; the mane is hidden on the female lion.
 - Strength and resistance effects actually appear on the recipients (the startup log warns if an effect id is unknown).
 
+## Drops, experience and taming feedback
+
+Each animal drops items on death (tiger beef and leather, cheetah rabbit and hide, lion mutton and leather,
+black leopard chicken, leather and bone, brown bear leather and salmon, hyena rotten flesh and bone) and pays
+experience only when a player landed the last hit (tiger 8, cheetah 5, lion 7, leopard 6, bear 10, hyena 5).
+Taming plays a burst of hearts and a chime. Drops come from `loot_tables/entities/<id>.json`, generated from
+`species.py`.
+
 ## Known gaps
 
 - No command function places a wild group; use spawn eggs or `/summon`.

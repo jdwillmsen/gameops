@@ -245,7 +245,7 @@ class CheckPacks(unittest.TestCase):
             comps["minecraft:tameable"] = {"probability": 0.33, "tame_items": "bone"}
             comps["minecraft:behavior.stay_while_sitting"] = {"priority": 3}
             comps["minecraft:persistent"] = {}
-            for goal in ("owner_hurt_by_target", "owner_hit_target"):
+            for goal in ("owner_hurt_by_target", "owner_hurt_target"):
                 comps["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [{"filters": no_player}]}
             if fn:
                 fn(comps)
@@ -267,7 +267,7 @@ class CheckPacks(unittest.TestCase):
 
     def test_wildlife_policy_rejects_player_family_target(self):
         player = {"test": "is_family", "subject": "other", "value": "player"}
-        for goal in ("nearest_attackable_target", "owner_hurt_by_target", "owner_hit_target", "melee_attack"):
+        for goal in ("nearest_attackable_target", "owner_hurt_by_target", "owner_hurt_target", "melee_attack"):
             with self.subTest(goal=goal):
                 def fn(c, goal=goal):
                     c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
@@ -276,7 +276,7 @@ class CheckPacks(unittest.TestCase):
                 self.assertFails(f"{goal} must never select family player")
 
     def test_wildlife_owner_goal_needs_player_exclusion(self):
-        for goal in ("owner_hurt_by_target", "owner_hit_target"):
+        for goal in ("owner_hurt_by_target", "owner_hurt_target"):
             with self.subTest(goal=goal):
                 def fn(c, goal=goal):
                     c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
@@ -390,7 +390,7 @@ class CheckPacks(unittest.TestCase):
 
     def test_wildlife_owner_goal_mixed_entries_rejected(self):
         no_player = {"test": "is_family", "subject": "other", "operator": "!=", "value": "player"}
-        for goal in ("owner_hurt_by_target", "owner_hit_target", "nearest_attackable_target"):
+        for goal in ("owner_hurt_by_target", "owner_hurt_target", "nearest_attackable_target"):
             with self.subTest(goal=goal):
                 def fn(c, goal=goal):
                     c["minecraft:behavior." + goal] = {"priority": 1, "entity_types": [
@@ -405,7 +405,7 @@ class CheckPacks(unittest.TestCase):
         self.assertFails("nearest_attackable_target entity_types entry 0 must exclude family player")
 
     def test_wildlife_target_without_entity_types_rejected(self):
-        for goal in ("nearest_attackable_target", "owner_hit_target"):
+        for goal in ("nearest_attackable_target", "owner_hurt_target"):
             with self.subTest(goal=goal):
                 self.make_wildlife(lambda c, goal=goal: c.update({"minecraft:behavior." + goal: {"priority": 1}}))
                 self.assertFails(f"{goal} needs entity_types")

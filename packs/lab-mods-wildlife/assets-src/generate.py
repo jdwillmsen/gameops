@@ -57,6 +57,20 @@ def render_controller(s: Species) -> dict:
     return {"format_version": "1.8.0", "render_controllers": {f"controller.render.gameops.{s.id}": ctl}}
 
 
+def loot_table(s: Species) -> dict:
+    """One pool per drop so each item is rolled on its own; looting adds one more at most."""
+    pools = []
+    for item, lo, hi in s.drops:
+        pools.append({"rolls": 1, "entries": [{
+            "type": "item", "name": f"minecraft:{item}", "weight": 1,
+            "functions": [
+                {"function": "set_count", "count": {"min": lo, "max": hi}},
+                {"function": "looting_enchant", "count": {"min": 0, "max": 1}},
+            ],
+        }]})
+    return {"pools": pools}
+
+
 def lang(species) -> bytes:
     lines = []
     for s in species:
@@ -73,6 +87,7 @@ def files() -> dict:
     }
     for s in species:
         out[f"behavior_pack/entities/{s.id}.json"] = dump(build_behavior.entity_json(s))
+        out[f"behavior_pack/loot_tables/entities/{s.id}.json"] = dump(loot_table(s))
         out[f"resource_pack/entity/{s.id}.entity.json"] = dump(client_entity(s))
         out[f"resource_pack/models/entity/{s.id}.geo.json"] = dump(build_models.geometry(s))
         out[f"resource_pack/render_controllers/{s.id}.render_controllers.json"] = dump(render_controller(s))
