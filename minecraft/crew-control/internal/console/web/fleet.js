@@ -21,6 +21,18 @@ export function alertsOf(s) {
   return out;
 }
 
+// The effect names a unit may show, which the server also enforces. A name
+// outside the list never reaches the page, whatever the status carried.
+export const EFFECTS = ['speed', 'slowness', 'haste', 'mining_fatigue', 'strength', 'instant_health', 'instant_damage', 'jump_boost', 'nausea', 'regeneration', 'resistance', 'fire_resistance', 'water_breathing', 'invisibility', 'blindness', 'night_vision', 'hunger', 'weakness', 'poison', 'wither', 'health_boost', 'absorption', 'saturation', 'levitation', 'fatal_poison', 'conduit_power', 'slow_falling', 'bad_omen', 'village_hero', 'darkness', 'trial_omen', 'wind_charged', 'weaving', 'oozing', 'infested', 'raid_omen', 'other'];
+export const HARMFUL = ['poison', 'wither', 'fatal_poison', 'levitation', 'darkness', 'weakness', 'slowness', 'mining_fatigue', 'nausea', 'blindness'];
+
+// Chips for a unit's effects, harmful ones first.
+export function effectChips(s) {
+  if (!s || !s.online || !Array.isArray(s.effects)) return [];
+  const chips = s.effects.filter(n => EFFECTS.includes(n)).map(n => ({ name: n, label: n.replace(/_/g, ' '), harmful: HARMFUL.includes(n) }));
+  return chips.sort((a, b) => Number(b.harmful) - Number(a.harmful));
+}
+
 export const worst = alerts => (alerts.some(a => a.level === 'crit') ? 'crit' : alerts.length ? 'warn' : '');
 
 export function counts(list) {

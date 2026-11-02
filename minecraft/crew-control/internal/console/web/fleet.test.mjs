@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { alertsOf, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, mergeEvents, filterEvents, ago, project, nearest, fuzzy, rankItems, worst, budgetsFor, budgetLabel } from './fleet.js';
+import { alertsOf, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, mergeEvents, filterEvents, ago, project, nearest, fuzzy, rankItems, worst, budgetsFor, budgetLabel, effectChips } from './fleet.js';
 
 const u = (id, extra = {}) => ({ id, name: id, online: true, dead: false, health: 20, hunger: 20, task: null, ...extra });
 
@@ -145,4 +145,13 @@ test('budgets offered fit the fleet', () => {
   assert.deepEqual(budgetsFor(3), [0, 999]);
   assert.deepEqual(budgetsFor(20), [0, 4, 6, 9, 12, 999]);
   assert.deepEqual(['Cards', '6', 'All'], [0, 6, 999].map(budgetLabel));
+});
+
+test('effectChips: closed names only, harmful first, nothing for an offline unit', () => {
+  assert.deepEqual(effectChips(u('a')), []);
+  assert.deepEqual(effectChips(u('a', { effects: ['speed', 'poison', 'night_vision'] })).map(c => c.name), ['poison', 'speed', 'night_vision']);
+  assert.deepEqual(effectChips(u('a', { effects: ['mining_fatigue'] })), [{ name: 'mining_fatigue', label: 'mining fatigue', harmful: true }]);
+  assert.deepEqual(effectChips(u('a', { effects: ['<img src=x>', 'speed', 'other'] })).map(c => c.name), ['speed', 'other']);
+  assert.deepEqual(effectChips(u('a', { online: false, effects: ['poison'] })), []);
+  assert.deepEqual(effectChips(u('a', { effects: 'poison' })), []);
 });
