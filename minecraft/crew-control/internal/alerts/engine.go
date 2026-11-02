@@ -148,11 +148,7 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 		set(RuleLowFood, s, low, SevWarn, "hunger low ("+strconv.Itoa(food)+")")
 
 		worn := s.Online && tool[s.ID] != nil && *tool[s.ID] <= e.cfg.ToolBelow
-		pct := 0
-		if tool[s.ID] != nil {
-			pct = *tool[s.ID]
-		}
-		set(RuleToolWorn, s, worn, SevWarn, "held tool nearly worn out ("+strconv.Itoa(pct)+"% left)")
+		set(RuleToolWorn, s, worn, SevWarn, "held tool nearly worn out")
 
 		harmful := harmfulOf(s)
 		set(RuleHarmful, s, s.Online && len(harmful) > 0, SevWarn, "harmful effect: "+strings.Join(harmful, ", "))
