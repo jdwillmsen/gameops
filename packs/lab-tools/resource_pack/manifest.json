@@ -2,7 +2,7 @@
   "format_version": 2,
   "header": {
     "name": "gameops lab tools (resources)",
-    "description": "Pairs the lab tools script pack with the resource side the pack checker requires",
+    "description": "Spawn egg names for the lab mobs, and the resource side the pack checker requires",
     "uuid": "af5139eb-069f-49f6-a7c7-18f57a64ea67",
     "version": [
       0,
