@@ -94,6 +94,7 @@ whatever is still wrong fires again on the first poll.
 | `low_food` | warn | hunger is known and at or under `hunger_below` | hunger is above it, or unknown |
 | `unit_silent` | warn | the unit has been unreachable for `silent_for` | the unit answers a poll |
 | `harmful_effect` | warn | the unit has poison, wither, fatal poison, levitation, darkness, weakness, slowness, mining fatigue, nausea or blindness | none of those is on it, or the unit is offline |
+| `under_attack` | warn | the unit reports 3 or more hostile mobs within 16 blocks | the count falls to 1 or fewer, or the unit goes offline |
 | `tool_breaking` | warn | the held item has `tool_below` percent of its durability left or less | the item is repaired or put away, or its wear is unknown |
 
 `CREW_ALERTS` sets the thresholds; every key is optional:
@@ -698,7 +699,11 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`. An
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`, `threat_high`. A `threat_high`
+event is raised once as the unit's reported hostile count (within 16 blocks,
+capped at 9 by the unit) reaches 3, and again only after it has fallen to 1 or
+fewer; its payload and text carry the counts and nothing else. Only the bit
+`under_attack` is on the public status, shown as a dot on the wall tile. An
 effect event is raised when the unit's status effects change between two polls;
 its payload has the `effect` (one of the units' 36 names, else `other`) and the
 `amplifier`, never a duration, and a stronger or longer dose of an effect the
@@ -1011,6 +1016,7 @@ Failures no rule covers are listed as unexplained with equal prominence.
 | `missing_tool` | `missing_tool.kit_failed`, `missing_tool.died` | the `kit_failed` or `died` event (named by `cause_ref`, else the latest within 30 min), then the failure |
 | `session_lost` | `session_lost.session_error` | a `session_error` named by `cause_ref` or within 60 s before |
 | `geometry_trap` | `no_path.same_anchor` | 3 or more `no_path` failures from one unchanged anchor with no success between; the cause is stated as unknown |
+| `combat` | `combat.threat_high` | a `threat_high` event within 3 minutes before the failure; tried before the vitals rule, since a fight is what lowers health |
 | `low_hunger`, `low_health` | `vitals.low_hunger`, `vitals.low_health` | a low-vitals event within 2 minutes before the failure |
 
 To add a rule, write a function in `internal/explain` that takes the failure

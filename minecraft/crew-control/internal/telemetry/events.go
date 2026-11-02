@@ -26,7 +26,7 @@ type Event struct {
 	Name string    `json:"name"`
 	// Kind is one of online, offline, died, respawned, task_started,
 	// task_done, task_failed, task_cancelled, task_ended (outcome unknown),
-	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost.
+	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost, threat_high.
 	Kind string `json:"kind"`
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
@@ -85,6 +85,8 @@ type track struct {
 	// effects are the unit's status effects at the last poll, by id.
 	effects       map[int]heldEffect
 	effectsSeeded bool
+	// underAttack is the threat_high state, with its hysteresis.
+	underAttack bool
 	// held is the durability left on the held item at the last poll, nil
 	// when unknown; the gauge and the tool_breaking alert read it.
 	held *int
@@ -122,6 +124,9 @@ type observation struct {
 	recent      []recentTask
 	wear        [len(wearSlots)]*int
 	effects     []LiveEffect
+	// threat is nil from a unit that predates the field or does not yet know
+	// where it is, which is not the same as nothing nearby.
+	threat *Threat
 }
 
 // observe advances t to o and returns what changed. It is pure so the rules
@@ -147,6 +152,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			t.wear[i] = bucketOf(w)
 		}
 		t.observeEffects(o.effects, now)
+		t.underAttack = o.threat != nil && o.threat.Hostiles >= threatHigh
 		t.taskID, t.template, t.progress, t.progressAt = o.curID, o.curTemplate, o.curProgress, now
 		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		t.lowHP = o.health != nil && *o.health <= lowHealth
@@ -161,6 +167,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			t.taskID, t.template, t.stuck, t.lowHP, t.lowFood = "", "", false, false, false
 			t.wear = [len(wearSlots)]int{}
 			t.effects, t.effectsSeeded = nil, false
+			t.underAttack = false
 			return out
 		}
 	}
@@ -186,6 +193,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	t.lowFood = hungry
 	out = append(out, t.observeWear(o.wear, now)...)
 	out = append(out, t.observeEffects(o.effects, now)...)
+	out = append(out, t.observeThreat(o.threat, now)...)
 
 	if o.curID != t.taskID {
 		if t.taskID != "" {

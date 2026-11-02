@@ -513,3 +513,33 @@ func TestEveryDocumentedHarmfulEffectFires(t *testing.T) {
 		}
 	}
 }
+
+func TestUnderAttackFollowsTheStatusFlag(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	poll := func(sec int, s telemetry.Status) {
+		e.Poll(t0.Add(time.Duration(sec)*time.Second), []telemetry.Status{s}, states("a", "working"))
+	}
+	attacked := func(online, on bool) telemetry.Status {
+		s := st("a", online, nil, t0)
+		s.UnderAttack = on
+		return s
+	}
+	poll(0, attacked(true, false))
+	if find(e, "under_attack.a") != nil {
+		t.Fatal("fired with no attack")
+	}
+	poll(1, attacked(true, true))
+	a := find(e, "under_attack.a")
+	if a == nil || a.State != StateFiring || a.Severity != SevWarn || a.Rule != RuleAttack {
+		t.Fatalf("did not fire: %+v", a)
+	}
+	poll(2, attacked(true, false))
+	if find(e, "under_attack.a").State != StateResolved {
+		t.Fatal("the end of the attack did not resolve")
+	}
+	poll(3, attacked(true, true))
+	poll(4, attacked(false, true))
+	if find(e, "under_attack.a").State != StateResolved {
+		t.Fatal("an offline unit must not stay under attack")
+	}
+}

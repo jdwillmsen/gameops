@@ -27,6 +27,9 @@ const (
 	// the amplifier in the payload, never a duration.
 	KindEffectGained = "effect_gained"
 	KindEffectLost   = "effect_lost"
+	// KindThreatHigh is several hostile mobs close to the unit; the payload
+	// has counts only.
+	KindThreatHigh = "threat_high"
 )
 
 // Event carries no position by construction.
