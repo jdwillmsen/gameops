@@ -103,6 +103,19 @@ def entity_json(s: Species) -> dict:
         "minecraft:behavior.owner_hurt_target": {
             "priority": 2, "entity_types": [{"filters": NOT_PLAYER, "max_dist": 16}]},
     }
+    # Only a standing tamed adult breeds: a cub never does, and sitting drops this group. The cub's owner
+    # is copied by main.js, so the native tamed inheritance (which would give it no owner) is off.
+    active["minecraft:breedable"] = {
+        "require_tame": True,
+        "inherit_tamed": False,
+        "breed_items": [s.tame_item],
+        "breeds_with": [{
+            "mate_type": f"gameops:{s.id}",
+            "baby_type": f"gameops:{s.id}",
+            "breed_event": {"event": "minecraft:entity_born", "target": "baby"},
+        }],
+    }
+    active["minecraft:behavior.breed"] = {"priority": 5, "speed_multiplier": 1.0}
     active.update(targeting(s, tamed=True))
     if s.pounce:
         active["minecraft:behavior.leap_at_target"] = LEAP
@@ -186,7 +199,8 @@ def entity_json(s: Species) -> dict:
                 "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"],
                                         props={SITTING_PROPERTY: False}),
                 "gameops:as_baby": event(add=["gameops:baby"]),
-                "minecraft:entity_born": event(add=["gameops:baby"]),
+                # Wild too, so main.js can tame the newborn to its parent's owner through the tameable component.
+                "minecraft:entity_born": event(add=["gameops:baby", "gameops:wild"]),
                 "gameops:grow_up": event(remove=["gameops:baby"]),
                 **ability_events,
             },
