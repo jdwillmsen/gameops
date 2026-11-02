@@ -65,7 +65,11 @@ func totals(items []telemetry.LiveItem) map[string]int {
 func (t *Tracker) Observe(unit string, present bool, template string, items []telemetry.LiveItem) Gain {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !present {
+	// A nil inventory is a poll that could not read one, and is not told
+	// apart from a genuinely empty one: taking it as empty would make the
+	// next full read look like every stack was just picked up. Treating it as
+	// unknown only costs the one poll's gain.
+	if !present || items == nil {
 		delete(t.units, unit)
 		return Gain{}
 	}

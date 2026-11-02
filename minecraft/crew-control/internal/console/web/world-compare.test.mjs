@@ -142,3 +142,19 @@ test('it composes with the dashboard data: samples carry the connected units per
   assert.equal(m.worlds.length, 2);
   assert.equal(METRICS.length, m.worlds[0].cells.length);
 });
+
+test('events from before the first sample are not divided by the sampled hours', () => {
+  // The feed reaches back 50 minutes; this page has only watched the last
+  // three, so only those three minutes' events can be divided by their hours.
+  const start = 50 * 60_000;
+  const feed = [];
+  for (let i = 0; i < 50; i++) feed.push(ev(i + 1, i * 60_000, 'a', 'task_done', { world: 'lab', template: 'gather_and_deposit' }));
+  for (let i = 0; i < 3; i++) feed.push(ev(100 + i, start + i * 60_000, 'a', 'task_done', { world: 'lab', template: 'gather_and_deposit' }));
+  const samples = Array.from({ length: 9 }, (_, i) => ({ t: T0 + start + i * 20_000, online: { lab: 1 } }));
+  const m = compareWorlds({ units: [unit('a', 'lab')], feed, samples, durations: [], filter: F(), inFilter });
+  const hours = unitHours(samples, T0 + start, T0 + HOUR);
+  const watched = hours.get('lab');
+  assert.ok(watched >= MIN_UNIT_HOURS, 'enough watched time to show a rate');
+  // 3 events in the watched span, not 53: the old arithmetic reported ~16x more.
+  assert.equal(cell(m.worlds[0], 'doneRate').text, METRICS.find(x => x.key === 'doneRate').fmt(3 / watched));
+});

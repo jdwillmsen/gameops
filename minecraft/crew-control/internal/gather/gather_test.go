@@ -138,3 +138,20 @@ func TestOnlyGatheringTemplatesCount(t *testing.T) {
 		}
 	}
 }
+
+func TestAnUnreadInventoryDoesNotMakeTheNextReadAGain(t *testing.T) {
+	tr := NewTracker()
+	tr.Observe("crew-01", true, "mine_shaft", inv("cobblestone", 40, "oak_log", 30))
+	// One poll that could not read the inventory, then a full read: nothing
+	// was picked up in between, so nothing may be counted.
+	if g := tr.Observe("crew-01", true, "mine_shaft", nil); g.Total() != 0 {
+		t.Fatalf("an unread inventory gained %v", g)
+	}
+	if g := tr.Observe("crew-01", true, "mine_shaft", inv("cobblestone", 40, "oak_log", 30)); g.Total() != 0 {
+		t.Fatalf("a full read after an unread one gained %v", g)
+	}
+	// Growth after the new baseline still counts.
+	if g := tr.Observe("crew-01", true, "mine_shaft", inv("cobblestone", 45, "oak_log", 30)); g.Total() != 5 {
+		t.Fatalf("real growth counted %v, want 5", g)
+	}
+}

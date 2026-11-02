@@ -94,8 +94,14 @@ export function compareWorlds({ units, feed, samples, durations, filter, inFilte
     }
   }
   const worldOfEvent = e => (e.world ? worldOf(e) : unitWorld.get(e.unit));
+  // Unit-hours come from samples this page has gathered, which start when it
+  // loaded; the feed reaches further back. Counting events from before the
+  // first sample would divide a long window's events by a short window's
+  // hours and inflate every rate.
+  const covered = samples.length ? Math.max(filter.from, samples[0].t) : filter.to;
+  const counted = { ...filter, from: covered };
   for (const e of feed) {
-    if (!inFilter(e, filter)) continue;
+    if (!inFilter(e, counted)) continue;
     const w = worldOfEvent(e);
     if (!w) continue;
     const s = get(w);
@@ -112,7 +118,7 @@ export function compareWorlds({ units, feed, samples, durations, filter, inFilte
     if (w) get(w).secs.push(d.secs);
   }
 
-  const hours = unitHours(samples, filter.from, filter.to);
+  const hours = unitHours(samples, covered, filter.to);
   const all = [...stats.values()].sort((a, b) => a.world.localeCompare(b.world)).slice(0, MAX_WORLDS);
   const rows = all.map(s => {
     const h = hours.get(s.world) || 0;
