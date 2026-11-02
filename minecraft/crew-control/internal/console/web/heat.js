@@ -6,6 +6,7 @@ export const LAYERS = [
   { id: 'position', label: 'Position', hint: 'where units stand' },
   { id: 'mining', label: 'Mining', hint: 'time on gathering tasks' },
   { id: 'travel', label: 'Travel', hint: 'cells crossed while moving' },
+  { id: 'yield', label: 'Yield', hint: 'items gained while gathering' },
 ];
 export const WINDOWS = ['15m', '1h', '6h'];
 
@@ -83,9 +84,11 @@ export function hottest(grid, n = 5) {
 
 export function summary(grid) {
   const cells = (grid.cells || []).length;
-  if (!cells) return 'No samples in this window yet.';
+  if (!cells) return grid.layer === 'yield' ? 'No items gained in this window yet.' : 'No samples in this window yet.';
   const scope = grid.unit || 'the fleet';
-  return `${cells} cells of ${grid.cell}x${grid.cell} blocks, ${grid.samples} samples from ${scope}, busiest cell ${grid.max}.`;
+  // A yield answer counts items gained, where the others count position samples.
+  const what = grid.layer === 'yield' ? 'items' : 'samples';
+  return `${cells} cells of ${grid.cell}x${grid.cell} blocks, ${grid.samples} ${what} from ${scope}, busiest cell ${grid.max}.`;
 }
 
 export const heatQuery = ({ layer, window, unit }) => {
