@@ -1,5 +1,5 @@
 #alerts-unread { background: var(--crit); color: #000; border-radius: 8px; padding: 0 5px; margin-left: 4px; font-size: 11px; }
-#alerts { width: 380px; flex: none; overflow-y: auto; padding: 10px; background: #1b1b1b; border-left: 1px solid #333; }
+#alerts { width: 380px; flex: none; overflow-y: auto; padding: 0; background: #1b1b1b; border-left: 1px solid #333; }
 #alerts[hidden] { display: none; }
 #alerts h2 { margin: 0 0 6px; font-size: 14px; }
 .al-filter { display: flex; gap: 6px; margin-bottom: 6px; }
