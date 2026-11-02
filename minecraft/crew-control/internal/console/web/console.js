@@ -14,6 +14,7 @@ import { initTimeline } from '/static/timeline-ui.js';
 import { initDirector } from '/static/director-ui.js';
 import { openStream } from '/static/kit/stream.js';
 import { createKeys } from '/static/kit/keys.js';
+import { confirmDialog } from '/static/kit/confirm.js';
 import { step } from '/static/fleet.js';
 import { MODES, parse, format, tileSrc, wallSrc, badge, nextMode, gotoBody, taskBody, startPoint, splitWork, describeItem, isTyping, canCancel, GATHER_ITEMS, PARALLEL_DEMO, stockBody, seenAgo, stepCount, jobCancellable, jobTitle, placeBody, renameBody, knownState } from '/static/state.js';
 
@@ -907,8 +908,8 @@ function placeRow(p) {
       jobsUI.post(save, '/v1/places', renameBody(p, name.value), 'Renamed.');
     });
     const del = el('button', { type: 'button', className: 'danger', textContent: 'Delete' });
-    del.addEventListener('click', () => {
-      if (!confirm(`Delete ${p.name || p.id}?`)) return;
+    del.addEventListener('click', async () => {
+      if (!await confirmDialog({ label: 'Delete place', message: `Delete ${p.name || p.id}?`, confirmLabel: 'Delete' })) return;
       jobsUI.post(del, '/v1/places/delete', { id: p.id }, 'Deleted.');
     });
     li.append(el('div', { className: 'point' }, name, save, del));
