@@ -12,6 +12,7 @@ import { openBulk } from '/static/bulk-ui.js';
 import { createGovernor, nextShedStep } from '/static/governor.js';
 import { WALL_QUALITY_CHOICES, wallQualityLabel } from '/static/quality.js';
 import { openDialog } from '/static/kit/dialog.js';
+import { confirmDialog } from '/static/kit/confirm.js';
 import { createToasts } from '/static/kit/toast.js';
 import { sortCell, markSort } from '/static/kit/table.js';
 
@@ -565,7 +566,7 @@ export function initOps(host) {
     if (!host.operator() || !ids.length) return;
     const names = ids.map(id => host.statuses.get(id)?.name || id);
     const what = ids.length > 3 ? `${ids.length} units` : names.join(', ');
-    if (!confirm(`Stop ${what}? Their queued work is cancelled.`)) return;
+    if (!await confirmDialog({ label: 'Stop units', message: `Stop ${what}? Their queued work is cancelled.`, confirmLabel: 'Stop' })) return;
     const results = await Promise.all(ids.map(id => host.api('POST', `/v1/work/${encodeURIComponent(id)}/stop`, {})));
     if (results.some(r => r.status === 401)) {
       toast({ level: 'warn', name: 'Fleet', text: 'you were signed out' });
