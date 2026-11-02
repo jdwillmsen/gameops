@@ -2,6 +2,7 @@
 // and paints. Signed in, the history comes from the server and a live tail
 // streams new rows; signed out, the same filter runs over the public feed the
 // page already holds, which carries no coordinates.
+import { openStream } from '/static/kit/stream.js';
 import {
   KINDS, SEVERITIES, RANGES, PAGE, ROW_CAP, severityOf, readFilter, formatFilter, toServerQuery, emptyFilter, isDefault, chips, dropChip,
   toggleIn, fromPublic, filterAndSort, mergeRows, nextSort, tailsToTop, detailText, matchRow, sortRows,
@@ -45,7 +46,6 @@ export function initExplorer(host) {
   let paused = false;
   let pending = 0;
   let tail = null;
-  let tailTimer = 0;
   let views = [];
   let open = new Set();
   // The public feed, newest first, kept while the screen is away so the
@@ -95,7 +95,6 @@ export function initExplorer(host) {
   // ---- live tail ----
 
   function closeTail() {
-    clearTimeout(tailTimer);
     if (tail) tail.close();
     tail = null;
   }
@@ -104,21 +103,17 @@ export function initExplorer(host) {
     closeTail();
     if (!mounted || !signedIn() || typeof EventSource === 'undefined') return;
     const my = token;
-    const es = tail = new EventSource(`/v1/explorer/tail?${toServerQuery(filter)}&after=${head}`);
-    es.addEventListener('events', ev => {
-      if (my !== token) return;
-      let d;
-      try { d = JSON.parse(ev.data); } catch { return; }
-      head = Math.max(head, d.head || 0);
-      incoming(d.events || []);
-    });
-    // Reopened from the newest id seen, so the browser's own retry (which
-    // would reuse the stale address) never replays or skips rows.
-    es.onerror = () => {
-      if (tail !== es) return;
-      closeTail();
-      tailTimer = setTimeout(openTail, 2000);
-    };
+    // Rebuilt from the newest id seen on any error, so the browser's own retry
+    // (which would reuse the stale address) never replays or skips rows.
+    tail = openStream(() => `/v1/explorer/tail?${toServerQuery(filter)}&after=${head}`, {
+      events(ev) {
+        if (my !== token) return;
+        let d;
+        try { d = JSON.parse(ev.data); } catch { return; }
+        head = Math.max(head, d.head || 0);
+        incoming(d.events || []);
+      },
+    }, { min: 2000, max: 2000, always: true });
   }
 
   function incoming(batch) {

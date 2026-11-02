@@ -1,5 +1,6 @@
 // The squad panel is a view: it shows the public snapshot and can open a
 // member's camera. Orders are issued from the operator panel, never here.
+import { openStream } from './kit/stream.js';
 
 const ROLE_LABELS = { vanguard: 'Vanguard', striker: 'Striker', ranger: 'Ranger', mender: 'Mender', builder: 'Builder' };
 
@@ -33,7 +34,6 @@ export function initSquads(host) {
   let open = false;
   let data = { squads: [], battalions: [] };
   let source = null;
-  let retry = null;
 
   const nameOf = unit => {
     const s = host.statuses && host.statuses.get(unit);
@@ -111,33 +111,22 @@ export function initSquads(host) {
 
   function connect() {
     if (source || !open) return;
-    const es = source = new EventSource('/v1/squads/stream');
-    es.addEventListener('squads', ev => {
-      try {
-        const d = JSON.parse(ev.data) || {};
-        data = { squads: d.squads || [], battalions: d.battalions || [] };
-      } catch { return; }
-      render();
-    });
-    es.onerror = () => {
-      if (source !== es) return;
-      // The browser retries a live stream itself; a closed one (a gateway
-      // restart or the stream cap) is rebuilt while the panel is open.
-      if (es.readyState !== EventSource.CLOSED) return;
-      es.close();
-      source = null;
-      if (open) retry = setTimeout(connect, 5000);
-    };
+    source = openStream('/v1/squads/stream', {
+      squads(ev) {
+        try {
+          const d = JSON.parse(ev.data) || {};
+          data = { squads: d.squads || [], battalions: d.battalions || [] };
+        } catch { return; }
+        render();
+      },
+    }, { min: 5000, max: 5000 });
   }
 
   function setOpen(next) {
     open = next;
-    if (!open) {
-      clearTimeout(retry);
-      if (source) {
-        source.close();
-        source = null;
-      }
+    if (!open && source) {
+      source.close();
+      source = null;
     }
     render();
     if (open) connect();

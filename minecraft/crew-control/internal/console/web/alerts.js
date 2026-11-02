@@ -1,5 +1,6 @@
 // The alerts panel and bell. The server decides what is firing; this only
 // shows it, toasts what is new and, for operators, sends acknowledge and mute.
+import { openStream } from './kit/stream.js';
 
 export const RULE_LABELS = {
   unit_died: 'Unit died',
@@ -194,26 +195,20 @@ export function initAlerts(host) {
 
   function connect() {
     if (source) return;
-    const es = source = new EventSource('/v1/alerts/stream');
-    es.addEventListener('alerts', ev => {
-      try {
-        const data = JSON.parse(ev.data) || {};
-        list = data.alerts || [];
-        snoozed = data.snoozed || {};
-      } catch { return; }
-      // The first list is state to catch up on, not news.
-      const fresh = newlyLoud(seen, list, Date.now());
-      if (!initial) fresh.forEach(toast);
-      initial = false;
-      render();
-    });
-    es.onerror = () => {
-      if (source !== es) return;
-      if (es.readyState !== EventSource.CLOSED) return;
-      es.close();
-      source = null;
-      setTimeout(connect, 5000);
-    };
+    source = openStream('/v1/alerts/stream', {
+      alerts(ev) {
+        try {
+          const data = JSON.parse(ev.data) || {};
+          list = data.alerts || [];
+          snoozed = data.snoozed || {};
+        } catch { return; }
+        // The first list is state to catch up on, not news.
+        const fresh = newlyLoud(seen, list, Date.now());
+        if (!initial) fresh.forEach(toast);
+        initial = false;
+        render();
+      },
+    }, { min: 5000, max: 5000 });
   }
 
   function setOpen(next) {
