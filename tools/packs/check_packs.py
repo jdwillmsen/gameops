@@ -143,7 +143,8 @@ def entity_filter_items(node, rep=None, where=""):
             yield from entity_filter_items(item, rep, where)
 
 
-POLICIES = ("arena", "wildlife")
+# "tools" is a script-only pack: it defines no mobs, so the entity rules do not apply and any entity is an error.
+POLICIES = ("arena", "wildlife", "tools")
 WILDLIFE_FAMILY = "gameops_wildlife"
 PLAYER_TARGET_GOALS = ("nearest_attackable_target", "owner_hurt_by_target", "owner_hit_target", "melee_attack")
 OWNER_GOALS = ("owner_hurt_by_target", "owner_hit_target")
@@ -364,9 +365,12 @@ def check_pack_dir(pack, rep):
             if not os.path.isfile(os.path.join(rp, ref + ".png")):
                 rep.fail(f"{path}: texture {ref}.png does not exist")
 
-    if not bp_ids:
+    if policy == "tools":
+        if bp_ids or rp_ids:
+            rep.fail(f"{pack}: a tools pack must not define entities, found {sorted(bp_ids | rp_ids)}")
+    elif not bp_ids:
         rep.fail(f"{bp}: no entity definitions found")
-    if bp_ids != rp_ids:
+    if policy != "tools" and bp_ids != rp_ids:
         rep.fail(f"{pack}: entity identifiers differ: behaviour {sorted(bp_ids)} vs client {sorted(rp_ids)}")
 
     for path in walk(rp):

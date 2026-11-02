@@ -1,0 +1,30 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "gameops lab tools (resources)",
+    "description": "Pairs the lab tools script pack with the resource side the pack checker requires",
+    "uuid": "af5139eb-069f-49f6-a7c7-18f57a64ea67",
+    "version": [
+      0,
+      0,
+      1
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      0
+    ]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "description": "Empty",
+      "uuid": "e390b484-6680-44d7-9a41-c1ac6b2d5d18",
+      "version": [
+        0,
+        0,
+        1
+      ]
+    }
+  ]
+}

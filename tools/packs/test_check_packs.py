@@ -111,6 +111,27 @@ class CheckPacks(unittest.TestCase):
         check_packs.check_pack_dir(os.path.join(HERE, "..", "..", "packs", "lab-mods-wildlife"), rep)
         self.assertEqual(rep.errors, [])
 
+    def test_shipped_tools_pack_is_clean(self):
+        rep = check_packs.Report()
+        check_packs.check_pack_dir(os.path.join(HERE, "..", "..", "packs", "lab-tools"), rep)
+        self.assertEqual(rep.errors, [])
+
+    def test_tools_policy_rejects_an_entity(self):
+        import shutil
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        try:
+            pack = os.path.join(tmp, "lab-tools")
+            shutil.copytree(os.path.join(HERE, "..", "..", "packs", "lab-tools"), pack)
+            os.makedirs(os.path.join(pack, "behavior_pack", "entities"))
+            with open(os.path.join(pack, "behavior_pack", "entities", "x.json"), "w") as f:
+                f.write('{"format_version": "1.21.0", "minecraft:entity": {"description": {"identifier": "gameops:x", "is_spawnable": true, "is_summonable": true}, "components": {}}}')
+            rep = check_packs.Report()
+            check_packs.check_pack_dir(pack, rep)
+            self.assertTrue(any("must not define entities" in e for e in rep.errors), rep.errors)
+        finally:
+            shutil.rmtree(tmp)
+
     def test_uuid_shared_between_packs(self):
         def fn(d):
             d["header"]["uuid"] = "40cf3288-abac-4a12-b49b-20c8b46a2d42"
