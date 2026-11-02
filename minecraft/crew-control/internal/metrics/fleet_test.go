@@ -14,6 +14,7 @@ import (
 
 	dto "github.com/prometheus/client_model/go"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/gather"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
@@ -290,6 +291,7 @@ func TestLabelSetIsClosed(t *testing.T) {
 		"world":    {roster.DefaultWorld},
 		"unit":     roster3,
 		"template": append(slices.Clone(Templates), TemplateOther),
+		"class":    gather.Classes,
 		"reason":   Reasons,
 		"outcome":  Outcomes,
 		"state":    States,
@@ -330,9 +332,9 @@ func maxSeries(n, w int) int {
 	t, o, r, s := len(Templates)+1, len(Outcomes), len(Reasons), len(States)
 	hist := t * 2 * (len(durationBuckets) + 3)
 	// Per unit: last done, deaths, stuck, health, hunger, tool wear, dimension
-	// and corrections, the three fight counters, and the two state series
-	// over every state.
-	perUnit := n*t + n*t*o + 2*n*s + 11*n
+	// and corrections, the three fight counters, the two state series over
+	// every state, and the gathered-item classes.
+	perUnit := n*t + n*t*o + 2*n*s + 11*n + n*len(gather.Classes)
 	perWorld := t*r + hist + s + 1 + len(DayPhases) + 1 + 3*2 // the last term is the skipped position samples
 	return perUnit + w*perWorld
 }
@@ -779,5 +781,39 @@ func TestCorrectionCounterExistsForEveryUnitAndIgnoresStrangers(t *testing.T) {
 	f.ObservePoll(time.Unix(2, 0), []telemetry.UnitState{{ID: "crew-99", State: "idle", Corrections: &c}})
 	if find(families(t, f)[name], map[string]string{"unit": "crew-99"}) != nil {
 		t.Error("a unit outside the roster got a series")
+	}
+}
+
+func TestGatheredItemsAreCountedByWorldUnitAndClass(t *testing.T) {
+	f := worldsFleet()
+	f.Gathered("crew-01", map[string]int{"wood": 4, "stone": 2})
+	f.Gathered("crew-01", map[string]int{"wood": 1})
+	f.Gathered("crew-03", map[string]int{"ore": 3})
+	// A class the table does not know, a non-positive count and a stranger.
+	f.Gathered("crew-02", map[string]int{"vibes": 5, "dirt": 0, "crop": -3})
+	f.Gathered("crew-99", map[string]int{"wood": 9})
+	name := "crew_fleet_gathered_items_total"
+	for _, c := range []struct {
+		l    map[string]string
+		want float64
+	}{
+		{map[string]string{"world": "lab", "unit": "crew-01", "class": "wood"}, 5},
+		{map[string]string{"world": "lab", "unit": "crew-01", "class": "stone"}, 2},
+		{map[string]string{"world": "fwb", "unit": "crew-03", "class": "ore"}, 3},
+		{map[string]string{"world": "lab", "unit": "crew-02", "class": "other"}, 5},
+		{map[string]string{"world": "lab", "unit": "crew-02", "class": "dirt"}, 0},
+		{map[string]string{"world": "lab", "unit": "crew-02", "class": "crop"}, 0},
+	} {
+		if got := value(t, f, name, c.l); got != c.want {
+			t.Errorf("%s%v = %v, want %v", name, c.l, got, c.want)
+		}
+	}
+	fam := families(t, f)[name]
+	if find(fam, map[string]string{"unit": "crew-99", "class": "wood"}) != nil {
+		t.Error("a unit outside the roster got a series")
+	}
+	// Every class exists from the start for every unit, so rate() sees the first pickup.
+	if want := 3 * len(gather.Classes); len(fam.Metric) != want {
+		t.Errorf("%d gathered series, want %d (3 units x %d classes)", len(fam.Metric), want, len(gather.Classes))
 	}
 }

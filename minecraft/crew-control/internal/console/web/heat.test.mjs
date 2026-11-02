@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { levelOf, legendSteps, boundsOf, fit, cellIndex, cellAt, hottest, summary, heatQuery, LAB, LEVELS } from './heat.js';
+import { LAYERS, layerOf, levelOf, legendSteps, boundsOf, fit, cellIndex, cellAt, hottest, summary, heatQuery, LAB, LEVELS } from './heat.js';
 
 test('levelOf: empty is 0, the maximum is the top class, and it never decreases', () => {
   assert.equal(levelOf(0, 10), 0);
@@ -36,6 +36,16 @@ test('cellAt floors negative coordinates into the right cell', () => {
   const g = { cell: 4, cells: [[-1, -125, 7]] };
   const c = cellAt(g, cellIndex(g), -1, -497);
   assert.deepEqual([c.cx, c.cz, c.n, c.x0, c.x1], [-1, -125, 7, -4, -1]);
+});
+
+test('the yield layer is offered, counts items in its summary and never falls back silently', () => {
+  assert.ok(LAYERS.some(l => l.id === 'yield'));
+  assert.equal(layerOf('yield').label, 'Yield');
+  assert.equal(layerOf('nope').id, 'position');
+  const g = { layer: 'yield', cell: 4, unit: 'crew-01', samples: 12, max: 9, cells: [[1, 1, 3], [2, 2, 9]] };
+  assert.match(summary(g), /2 cells of 4x4 blocks, 12 items from crew-01, busiest cell 9/);
+  assert.equal(summary({ layer: 'yield', cells: [] }), 'No items gained in this window yet.');
+  assert.equal(heatQuery({ layer: 'yield', window: '1h', unit: '' }), '/v1/heatmap?layer=yield&window=1h');
 });
 
 test('hottest orders by count then position; summary and query are plain', () => {

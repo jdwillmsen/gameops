@@ -21,6 +21,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/gather"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
@@ -102,6 +103,7 @@ type Fleet struct {
 	damageTkn  *prometheus.CounterVec
 	unitDim    *prometheus.GaugeVec
 	corrected  *prometheus.CounterVec
+	gathered   *prometheus.CounterVec
 	skipped    *prometheus.CounterVec
 
 	mu   sync.Mutex
@@ -239,7 +241,11 @@ func New(unitIDs []string, opts ...Option) *Fleet {
 		Name: "crew_fleet_unit_corrections_total",
 		Help: "Times the server overruled a unit's predicted movement, summed from the growth of movement.corrections in its state between polls. A unit that restarts, or goes offline, starts a new baseline, so growth across that gap is lost and the series undercounts; it never counts a unit's history from before crew-control watched. A unit that does not report the count (an older unit) stays at zero.",
 	}, []string{"world", "unit"})
-	f.reg.MustRegister(f.unitDim, f.skipped, f.corrected, f.swings, f.hits, f.damageTkn, f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
+	f.gathered = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "crew_fleet_gathered_items_total",
+		Help: "Items a unit's inventory gained while its task was a gathering one (gather_and_deposit or mine_shaft), by item class (wood, stone, ore, dirt, crop, food, other). Counted from the growth of the inventory between polls: pickups that arrive in a poll the unit then spends (a deposit in the same second) are undercounted, and items that arrive from a chest or a craft are never counted. A unit that is offline, dead or newly seen starts a new baseline, so its history before that is not counted.",
+	}, []string{"world", "unit", "class"})
+	f.reg.MustRegister(f.unitDim, f.skipped, f.corrected, f.gathered, f.swings, f.hits, f.damageTkn, f.deathsAt, f.started, f.finished, f.failures, f.duration, f.lastDone,
 		f.deaths, f.stuck, f.fleetUnits, f.online, f.unitState, f.inState, f.health, f.hunger, f.toolPct)
 
 	for _, w := range f.worlds {
@@ -259,6 +265,9 @@ func New(unitIDs []string, opts ...Option) *Fleet {
 		f.hits.WithLabelValues(w, id)
 		f.damageTkn.WithLabelValues(w, id)
 		f.corrected.WithLabelValues(w, id)
+		for _, c := range gather.Classes {
+			f.gathered.WithLabelValues(w, id, c)
+		}
 		for _, s := range States {
 			f.unitState.WithLabelValues(w, id, s)
 			f.inState.WithLabelValues(w, id, s)
@@ -312,6 +321,25 @@ func (f *Fleet) observeDuration(world, template, outcome string, took time.Durat
 	// Zero means the unit sent no usable times, which is not a fast task.
 	if took > 0 {
 		f.duration.WithLabelValues(world, template, outcome).Observe(took.Seconds())
+	}
+}
+
+// Gathered adds the items one unit picked up since the last poll, by class.
+// A class outside gather.Classes is counted as other, so the label stays the
+// closed list whatever the caller held.
+func (f *Fleet) Gathered(unit string, byClass map[string]int) {
+	w, ok := f.units[unit]
+	if !ok {
+		return
+	}
+	for class, n := range byClass {
+		if n <= 0 {
+			continue
+		}
+		if !slices.Contains(gather.Classes, class) {
+			class = gather.Other
+		}
+		f.gathered.WithLabelValues(w, unit, class).Add(float64(n))
 	}
 }
 
