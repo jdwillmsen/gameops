@@ -35,11 +35,13 @@ type Status struct {
 	Effects []string `json:"effects,omitempty"`
 	// UnderAttack is set while several hostile mobs are close, with the
 	// event's hysteresis so a mob at the edge of range does not flicker it.
-	// Counts stay on the unit's own state; only this bit is public.
+	// Status carries the bit only; the counts are on the unit's own state,
+	// which the proxy serves as it is.
 	UnderAttack bool `json:"under_attack,omitempty"`
 	// DayPhase is dawn, day, dusk or night from the unit's world clock, empty
-	// until it has one; Raining is its last rain event. The biome is not
-	// here: where a unit stands is for signed-in operators only.
+	// until it has one; Raining is its last rain event. Status is curated
+	// and leaves the biome out, but that is not secrecy: the unit's own
+	// state, served by the proxy to anyone, carries env.biome.
 	DayPhase string       `json:"day_phase,omitempty"`
 	Raining  bool         `json:"raining,omitempty"`
 	Online   bool         `json:"online"`
@@ -94,8 +96,9 @@ type LiveEnv struct {
 }
 
 // Live is what a unit's own /v1/state said at the last poll. It answers the
-// operator-only detail view; unlike Status it is never broadcast, because
-// it carries what the unit holds.
+// operator-only detail view; unlike Status this service never broadcasts it.
+// The same body is public through the proxy's /units/{id}/v1/state, so the
+// split is curation of this service's surfaces, not a secret.
 type Live struct {
 	ID     string
 	Online bool
@@ -104,7 +107,7 @@ type Live struct {
 	Health, Hunger *float32
 	Inventory      []LiveItem
 	Armour         []LiveArmour
-	// Env carries the biome, which makes it operator-only like the rest.
+	// Env carries the biome, which Status leaves out.
 	Env     LiveEnv
 	Effects []LiveEffect
 	// PlayerID is the id the unit reports for its player, which is the one

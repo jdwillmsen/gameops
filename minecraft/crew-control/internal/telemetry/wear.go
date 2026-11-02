@@ -5,8 +5,9 @@ import (
 	"time"
 )
 
-// Wear buckets. The public feed shows only these; the exact percentage stays
-// on the operator-only views and the gauge.
+// Wear buckets. The public feed shows only these; the exact percentage is on
+// the operator-only views and the gauge, and also in the unit's own state,
+// which the proxy serves to anyone.
 const (
 	BucketLow      = "low"
 	BucketCritical = "critical"
