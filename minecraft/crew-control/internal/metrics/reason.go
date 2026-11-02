@@ -36,14 +36,14 @@ var reasonRules = []struct {
 }{
 	{ReasonSession, []string{"session ended"}},
 	{ReasonDied, []string{"unit died"}},
-	{ReasonNoPath, []string{"no path", "no walking path", "no standing spot", "cannot reach", "no way down", "trapped"}},
+	{ReasonNoPath, []string{"no path", "no walking path", "no standing spot", "cannot reach", "no way down", "trapped", "no reachable", "target not found"}},
 	{ReasonMissingItem, []string{" in inventory", "left to deposit", ", need ", "out of blocks", "nothing to haul"}},
 	{ReasonNoPickup, []string{"no pickup"}},
 	{ReasonNoProgress, []string{"no progress after"}},
 	{ReasonContainer, []string{"chest", "crafting table"}},
 	{ReasonServerRejected, []string{"server rejected", "server did not", "did not confirm"}},
 	{ReasonTimeout, []string{"took too long", "timed out", " ticks"}},
-	{ReasonActionFailed, []string{"did not break", "did not land", "never settled", "drifted", "did not come down", "is blocked at its first step"}},
+	{ReasonActionFailed, []string{"did not break", "did not land", "never settled", "drifted", "did not come down", "is blocked at its first step", "no solid neighbour", "not air or replaceable", "out of reach"}},
 	{ReasonInvalidTask, []string{"invalid task", "outside the allowed", "outside the area", "unknown template", "not in creative mode", "more than a unit walks", "hotbar has room"}},
 }
 

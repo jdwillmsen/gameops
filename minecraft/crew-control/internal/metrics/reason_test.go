@@ -39,13 +39,16 @@ func TestReasonTable(t *testing.T) {
 		"the unit is not in creative mode":                             ReasonInvalidTask,
 		"repair needs 2000 cells changed, more than a unit walks in one task (1000); use arenarepair for this damage": ReasonInvalidTask,
 		"repair needs 12 block types and the hotbar has room for 9; narrow the area or use arenarepair":               ReasonInvalidTask,
-		"block did not break":                ReasonActionFailed,
-		"jump did not land":                  ReasonActionFailed,
-		"invalid task: qty must be 1 to 256": ReasonInvalidTask,
-		"session ended":                      ReasonSession,
-		"unit died":                          ReasonDied,
-		"skill failed":                       ReasonOther,
-		"":                                   ReasonOther,
+		"block did not break": ReasonActionFailed,
+		"jump did not land":   ReasonActionFailed,
+		"bridging a missing stair floor: no solid neighbour to place against": ReasonActionFailed,
+		"the target is not air or replaceable":                                ReasonActionFailed,
+		"no reachable stone in the area":                                      ReasonNoPath,
+		"invalid task: qty must be 1 to 256":                                  ReasonInvalidTask,
+		"session ended":                                                       ReasonSession,
+		"unit died":                                                           ReasonDied,
+		"skill failed":                                                        ReasonOther,
+		"":                                                                    ReasonOther,
 	} {
 		if got := Reason(text); got != want {
 			t.Errorf("Reason(%q) = %q, want %q", text, got, want)
