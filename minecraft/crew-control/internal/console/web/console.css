@@ -110,6 +110,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .tile.crit { outline-color: var(--crit); }
 .tile .label { background: rgba(0, 0, 0, .7); font-size: 12px; }
 .tile.card { background: #141814; }
+.tile .fx { position: absolute; left: 6px; top: 34px; display: flex; flex-wrap: wrap; gap: 3px; max-width: calc(100% - 12px); pointer-events: none; }
+.tile .fxchip { font-size: 11px; padding: 0 6px; border-radius: 8px; background: rgba(0, 0, 0, .7); }
+.tile .fxchip.bad { background: #5a2d2d; }
 .tile.card .info { position: absolute; inset: 0; padding: 10px; display: flex; flex-direction: column; gap: 6px; justify-content: center; pointer-events: none; }
 .tile.card .label { display: none; }
 .tile.card .big { font-size: 16px; font-weight: 700; }

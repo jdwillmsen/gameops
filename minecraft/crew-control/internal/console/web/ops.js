@@ -3,7 +3,7 @@
 // the focused camera; this file owns everything that scales with the fleet.
 import { MODES, wallSrc, badge, nextMode } from '/static/state.js';
 import {
-  alertsOf, worst, counts, taskLine, sortUnits, step, nextAlerted, gridFor, pageOf, ALL, budgetLabel, budgetsFor,
+  alertsOf, worst, counts, taskLine, effectChips, sortUnits, step, nextAlerted, gridFor, pageOf, ALL, budgetLabel, budgetsFor,
   mergeEvents, filterEvents, isToast, ago, project, nearest, rankItems, KEYS,
 } from '/static/fleet.js';
 import { createFeedView, perFrame, timeText } from '/static/feedview.js';
@@ -218,7 +218,7 @@ export function initOps(host) {
       const cover = el('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
       cover.setAttribute('aria-label', `Focus ${id}`);
       cover.addEventListener('click', () => host.focus(id));
-      tile.append(cover, el('div', { className: 'label' }), el('div', { className: 'info' }));
+      tile.append(cover, el('div', { className: 'label' }), el('div', { className: 'fx' }), el('div', { className: 'info' }));
       grid.append(tile);
     }
     stage.append(bar, grid);
@@ -254,6 +254,7 @@ export function initOps(host) {
       tile.classList.toggle('crit', worst(al) === 'crit');
       tile.classList.toggle('warn', worst(al) === 'warn');
       tile.querySelector('.label').textContent = `${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
+      tile.querySelector('.fx').replaceChildren(...effectChips(s).map(c => el('span', { className: 'fxchip' + (c.harmful ? ' bad' : ''), textContent: c.label })));
       const info = tile.querySelector('.info');
       if (tile.classList.contains('card')) {
         info.replaceChildren(
