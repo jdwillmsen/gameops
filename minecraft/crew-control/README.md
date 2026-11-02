@@ -39,7 +39,7 @@ crew-control; it never calls them to command them.
 ## Routes
 
 - `GET /`: the console, one focused unit, a wall of every unit, the fleet overview (`?view=fleet`), a unit's inventory and ender chest (`?unit=<id>&view=detail`) the job graph (`?view=jobs&job=<id>`) the world ledger (`?view=ledger`) or the timeline (`?view=timeline`, with `&job=<id>` for one job); `GET /static/{file}` its assets, `/static/charts/{file}` the chart library and `/static/graph/{file}` the job graph; `GET /camera` redirects to `/`
-- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
+- `GET /v1/units/stream`: server-sent `units` events from a once-a-second poll of each unit's `/v1/state`, sent on connect, on change and every 15 s; each unit's `effects` there are closed effect names only (the units' 36, else `other`), which the wall tiles show as chips; at most 64 clients, then 503. Also an `events` backlog on connect and a `log` event per new fleet event (death, offline, low health or hunger, task started, done, failed, ended with an unknown outcome, stuck); the `events` backlog replaces the console feed on each connect; the last 200 are kept in memory. Signed-in streams also get `positions`, every 2 s when something moved, and a `jobs` event with the newest 20 jobs whenever one changes
 - `GET /v1/alerts`, `GET /v1/alerts/stream`: the alerts, see [Alerts](#alerts); anonymous and read-only, no coordinates and no operator id. `POST /v1/alerts/{id}/ack` and `/mute` (`{"for":"30m"}`, `0s` unmutes) and `POST /v1/alerts/rules/{rule}/mute` (the same body, for a whole alert type) need an operator session
 - `GET /units/{id}/camera`, `/units/{id}/v1/state`. `{id}` is the unit's id, or its in-game name when exactly one unit has it (an id wins over a name; a name two units share matches neither), so tools that only know a warrior's name, like the trainer's bridge, can read its state
 - `GET /units/{id}/v1/camera/{file}` for `ws`, `mesher.js`, `sky.js`, `entities.{js,png,json}`, `atlas.{png,json}`, `items.{png,json}`, `stats`
@@ -93,6 +93,7 @@ whatever is still wrong fires again on the first poll.
 | `task_failures` | crit | `failures` tasks failed in a row | a task finishes done |
 | `low_food` | warn | hunger is known and at or under `hunger_below` | hunger is above it, or unknown |
 | `unit_silent` | warn | the unit has been unreachable for `silent_for` | the unit answers a poll |
+| `harmful_effect` | warn | the unit has poison, wither, fatal poison, levitation, darkness, weakness, slowness, mining fatigue, nausea or blindness | none of those is on it, or the unit is offline |
 | `tool_breaking` | warn | the held item has `tool_below` percent of its durability left or less | the item is repaired or put away, or its wear is unknown |
 
 `CREW_ALERTS` sets the thresholds; every key is optional:
@@ -697,7 +698,12 @@ poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
 `online`, `offline`, `died`, `respawned`, `task_started`, `task_done`,
 `task_failed`, `task_cancelled`, `task_ended` (outcome unknown), `stuck`,
-`low_health`, `low_hunger`, `tool_worn`. A `tool_worn` event is raised when the
+`low_health`, `low_hunger`, `tool_worn`, `effect_gained`, `effect_lost`. An
+effect event is raised when the unit's status effects change between two polls;
+its payload has the `effect` (one of the units' 36 names, else `other`) and the
+`amplifier`, never a duration, and a stronger or longer dose of an effect the
+unit already has is not an event. The first poll after a start, or after the
+unit was offline, only sets the baseline. A `tool_worn` event is raised when the
 held item or a worn armour piece first falls to 25% durability left (`low`) and
 again at 10% (`critical`); its payload has the `slot` (held, helmet, chest,
 legs, boots) and `bucket`, never the percentage. A piece that is repaired

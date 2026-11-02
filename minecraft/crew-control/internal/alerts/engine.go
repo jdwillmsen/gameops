@@ -7,6 +7,7 @@ package alerts
 import (
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ const (
 	RuleLowFood  = "low_food"
 	RuleSilent   = "unit_silent"
 	RuleToolWorn = "tool_breaking"
+	RuleHarmful  = "harmful_effect"
 )
 
 const (
@@ -151,6 +153,9 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 		}
 		set(RuleToolWorn, s, worn, SevWarn, "held tool nearly worn out ("+strconv.Itoa(pct)+"% left)")
 
+		harmful := harmfulOf(s)
+		set(RuleHarmful, s, s.Online && len(harmful) > 0, SevWarn, "harmful effect: "+strings.Join(harmful, ", "))
+
 		seen := s.Seen
 		if seen.IsZero() {
 			seen = e.started
@@ -165,6 +170,18 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 		e.version++
 		e.notifyLocked()
 	}
+}
+
+// harmfulOf is the harmful effects on a unit, from the closed names its
+// public status carries.
+func harmfulOf(s telemetry.Status) []string {
+	var out []string
+	for _, name := range s.Effects {
+		if telemetry.IsHarmfulEffect(name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // setLocked drives one (rule, unit) through firing and resolved and reports
@@ -278,7 +295,7 @@ func (e *Engine) Mute(id string, d time.Duration, now time.Time) bool {
 	return true
 }
 
-var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true, RuleToolWorn: true}
+var knownRules = map[string]bool{RuleDied: true, RuleStuck: true, RuleFailures: true, RuleLowFood: true, RuleSilent: true, RuleToolWorn: true, RuleHarmful: true}
 
 // SnoozeRule mutes every alert of one rule until now+d, now and as they
 // fire; d <= 0 lifts it. It reports false for a rule that does not exist, so

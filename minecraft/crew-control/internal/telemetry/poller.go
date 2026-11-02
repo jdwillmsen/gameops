@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,13 +29,16 @@ type Status struct {
 	Name string `json:"name"`
 	// Role is the unit's claimed job as its own state reported it, one of
 	// roles; empty when it has none or reported something else.
-	Role   string       `json:"role,omitempty"`
-	Online bool         `json:"online"`
-	Health *float32     `json:"health"`
-	Hunger *float32     `json:"hunger"`
-	Dead   bool         `json:"dead"`
-	Task   *TaskSummary `json:"task"`
-	Seen   time.Time    `json:"seen"`
+	Role string `json:"role,omitempty"`
+	// Effects are the unit's status effects by closed name, sorted, so the
+	// public tiles never show text a unit chose; empty when it has none.
+	Effects []string     `json:"effects,omitempty"`
+	Online  bool         `json:"online"`
+	Health  *float32     `json:"health"`
+	Hunger  *float32     `json:"hunger"`
+	Dead    bool         `json:"dead"`
+	Task    *TaskSummary `json:"task"`
+	Seen    time.Time    `json:"seen"`
 }
 
 type TaskSummary struct {
@@ -243,6 +247,7 @@ func (p *Poller) tick(ctx context.Context) {
 				next.Role = res.st.Unit.Role
 			}
 			next.Dead = res.st.State.Dead
+			next.Effects = closedEffects(res.st.State.Effects)
 			next.Health = nil
 			if res.st.State.HealthKnown {
 				h := res.st.State.Health
@@ -266,7 +271,7 @@ func (p *Poller) tick(ctx context.Context) {
 			p.failures[i]++
 			if p.failures[i] >= offlineAfter {
 				// Stale health or task on an offline unit would read as live.
-				next.Online, next.Health, next.Hunger, next.Task, next.Dead = false, nil, nil, nil, false
+				next.Online, next.Health, next.Hunger, next.Task, next.Dead, next.Effects = false, nil, nil, nil, false, nil
 				p.positions[i] = Position{ID: p.units[i].ID}
 				p.lives[i] = Live{ID: p.units[i].ID}
 			}
@@ -300,7 +305,7 @@ func (p *Poller) tick(ctx context.Context) {
 // Seen moves every tick, so it is left out of the comparison or every poll
 // would count as a change.
 func sameShown(a, b Status) bool {
-	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role {
+	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role || !slices.Equal(a.Effects, b.Effects) {
 		return false
 	}
 	if (a.Hunger == nil) != (b.Hunger == nil) || (a.Hunger != nil && *a.Hunger != *b.Hunger) {
@@ -396,6 +401,7 @@ func (p *Poller) observeLocked(i int, st Status, res result, now time.Time) {
 		o.pos, o.posKnown = [3]float32{pos.X, pos.Y, pos.Z}, true
 	}
 	o.recent = res.st.Tasks.Recent
+	o.effects = res.st.State.Effects
 	o.wear = wearOf(res.st.State.HeldSlot, res.st.State.HeldKnown, res.st.State.Inventory, res.st.State.Armour)
 	for _, e := range p.tracks[i].observe(o, now) {
 		p.born = append(p.born, Born{Event: p.appendEventLocked(i, e), Pos: p.positions[i]})

@@ -83,7 +83,7 @@ func (t *track) observeWear(wear [len(wearSlots)]*int, now time.Time) []Event {
 			out = append(out, Event{
 				At: now, Kind: "tool_worn", Level: level,
 				Text:  fmt.Sprintf("%s worn: %s", wearSlots[i], bucketName(b)),
-				Attrs: map[string]string{"slot": wearSlots[i], "bucket": bucketName(b)},
+				Attrs: map[string]any{"slot": wearSlots[i], "bucket": bucketName(b)},
 			})
 		}
 		t.wear[i] = b
