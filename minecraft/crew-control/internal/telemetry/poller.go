@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 )
 
@@ -30,6 +31,12 @@ type Status struct {
 	// Role is the unit's claimed job as its own state reported it, one of
 	// roles; empty when it has none or reported something else.
 	Role string `json:"role,omitempty"`
+	// World is the roster's slug for the world the unit plays in, and Dim
+	// the closed name of the dimension it stands in; empty while the unit
+	// has not said where it is. Both are names from fixed lists, not
+	// places, so the public view may carry them.
+	World string `json:"world,omitempty"`
+	Dim   string `json:"dim,omitempty"`
 	// Effects are the unit's status effects by closed name, sorted, so the
 	// public tiles never show text a unit chose; empty when it has none.
 	Effects []string `json:"effects,omitempty"`
@@ -221,8 +228,8 @@ func NewPoller(r roster.Roster, client *http.Client, every time.Duration) *Polle
 		workCaches: map[string]*feedCache{},
 	}
 	for i, u := range units {
-		p.positions[i] = Position{ID: u.ID}
-		p.statuses[i] = Status{ID: u.ID, Name: u.Name}
+		p.positions[i] = Position{ID: u.ID, World: u.World}
+		p.statuses[i] = Status{ID: u.ID, Name: u.Name, World: u.World}
 		p.lives[i] = Live{ID: u.ID}
 		p.workCaches[u.ID] = &feedCache{}
 	}
@@ -293,7 +300,12 @@ func (p *Poller) tick(ctx context.Context) {
 			}
 			next.Task = res.st.Tasks.Current
 			s := res.st.State
-			p.positions[i] = Position{ID: p.units[i].ID, X: s.Position[0], Y: s.Position[1], Z: s.Position[2], Yaw: s.Yaw, Dim: s.Dimension, Known: s.PositionKnown}
+			p.positions[i] = Position{ID: p.units[i].ID, World: p.units[i].World, X: s.Position[0], Y: s.Position[1], Z: s.Position[2], Yaw: s.Yaw, Dim: s.Dimension, Known: s.PositionKnown}
+			next.Dim = ""
+			if s.PositionKnown {
+				p.positions[i].DimName = dimension.Name(s.Dimension)
+				next.Dim = p.positions[i].DimName
+			}
 
 			p.lives[i] = Live{
 				ID: p.units[i].ID, Online: true, Dead: s.Dead, At: now,
@@ -305,8 +317,8 @@ func (p *Poller) tick(ctx context.Context) {
 			if p.failures[i] >= offlineAfter {
 				// Stale health or task on an offline unit would read as live.
 				next.Online, next.Health, next.Hunger, next.Task, next.Dead, next.Effects = false, nil, nil, nil, false, nil
-				next.DayPhase, next.Raining, next.UnderAttack = "", false, false
-				p.positions[i] = Position{ID: p.units[i].ID}
+				next.DayPhase, next.Raining, next.UnderAttack, next.Dim = "", false, false, ""
+				p.positions[i] = Position{ID: p.units[i].ID, World: p.units[i].World}
 				p.lives[i] = Live{ID: p.units[i].ID}
 			}
 		}
@@ -340,7 +352,7 @@ func (p *Poller) tick(ctx context.Context) {
 // Seen moves every tick, so it is left out of the comparison or every poll
 // would count as a change.
 func sameShown(a, b Status) bool {
-	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role || a.UnderAttack != b.UnderAttack || a.DayPhase != b.DayPhase || a.Raining != b.Raining || !slices.Equal(a.Effects, b.Effects) {
+	if a.Online != b.Online || a.Dead != b.Dead || a.Role != b.Role || a.Dim != b.Dim || a.UnderAttack != b.UnderAttack || a.DayPhase != b.DayPhase || a.Raining != b.Raining || !slices.Equal(a.Effects, b.Effects) {
 		return false
 	}
 	if (a.Hunger == nil) != (b.Hunger == nil) || (a.Hunger != nil && *a.Hunger != *b.Hunger) {

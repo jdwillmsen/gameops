@@ -5,6 +5,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
 
@@ -41,6 +42,10 @@ type last struct {
 type Recorder struct {
 	store Store
 	seen  map[string]last
+	// OnDrop, when set before Run, hears of each sample skipped because the
+	// unit stood outside the overworld. It runs on the sampling loop and must
+	// not block.
+	OnDrop func(telemetry.Position)
 }
 
 func NewRecorder(store Store) *Recorder { return &Recorder{store: store, seen: map[string]last{}} }
@@ -55,8 +60,15 @@ func (r *Recorder) Sample(src Source, now time.Time) []Sample {
 	var out []Sample
 	for _, p := range src.Positions() {
 		st := status[p.ID]
-		if !p.Known || p.Dim != 0 || !st.Online || st.Dead {
+		if !p.Known || !st.Online || st.Dead {
 			delete(r.seen, p.ID)
+			continue
+		}
+		if dimension.Name(p.Dim) != dimension.Overworld {
+			delete(r.seen, p.ID)
+			if r.OnDrop != nil {
+				r.OnDrop(p)
+			}
 			continue
 		}
 		s := Sample{Unit: p.ID, At: now, X: float64(p.X), Y: float64(p.Y), Z: float64(p.Z)}

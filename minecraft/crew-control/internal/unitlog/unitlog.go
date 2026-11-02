@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/dimension"
 	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/events"
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/roster"
 )
 
 // Kinds the rules care about. task_* and died come from the poller today;
@@ -55,6 +57,9 @@ type Event struct {
 	// Anchor is a coarse, coordinate-free position fingerprint that is equal
 	// when a unit has not moved; empty when unknown.
 	Anchor string
+	// World is the roster slug of the unit's world and Dim the closed name of
+	// its dimension, both empty on an event stored before they were recorded.
+	World, Dim string
 }
 
 const other = "other"
@@ -77,6 +82,27 @@ func safeReason(r string) string {
 	return other
 }
 
+// safeDim keeps a dimension name only if it is in the closed list.
+func safeDim(d string) string {
+	if d == "" {
+		return ""
+	}
+	for _, n := range dimension.Names {
+		if n == d {
+			return d
+		}
+	}
+	return other
+}
+
+// safeWorld drops a world that is not shaped like a roster slug.
+func safeWorld(w string) string {
+	if roster.ValidWorld(w) {
+		return w
+	}
+	return ""
+}
+
 func safeTemplate(t string) string {
 	if t == "" || templates[t] {
 		return t
@@ -95,7 +121,9 @@ type payload struct {
 	Idle       bool   `json:"idle"`
 	Anchor     string `json:"anchor"`
 	// Task holds an id that is not a UUID, which the row's task_id cannot.
-	Task string `json:"task"`
+	Task  string `json:"task"`
+	World string `json:"world"`
+	Dim   string `json:"dim"`
 }
 
 // From converts a stored event. A payload that is not the expected object is
@@ -124,6 +152,7 @@ func From(e events.Event) Event {
 		Reason: safeReason(reason), Cause: cause, Template: safeTemplate(p.Template),
 		Duration: time.Duration(ms) * time.Millisecond,
 		Idle:     p.Idle || e.Outcome == events.OutcomeNoop, Anchor: p.Anchor,
+		World: safeWorld(p.World), Dim: safeDim(p.Dim),
 	}
 }
 
