@@ -76,10 +76,26 @@ func FromUnit(unit string, u UnitEvent, now time.Time) (Event, error) {
 	payload, _ := json.Marshal(map[string]string{"reason_text": boundText(u.Reason)})
 	e := Event{Unit: unit, At: at, Kind: u.Kind, Severity: sev, Payload: payload,
 		ReasonCode: code, SessionID: u.SessionID, Attempt: u.Attempt}
-	if len(u.CrewVersion) <= 32 && !strings.ContainsAny(u.CrewVersion, " \n\r\t") {
-		e.CrewVersion = u.CrewVersion
-	}
+	e.CrewVersion = CleanVersion(u.CrewVersion)
 	return e, nil
+}
+
+// CleanSession returns s if it has the shape of a unit's session id, else
+// empty: a polled value is the unit's own word and is stored only if it looks
+// like what the unit generates.
+func CleanSession(s string) string {
+	if sessionIDShape.MatchString(s) {
+		return s
+	}
+	return ""
+}
+
+// CleanVersion returns v if it is a plausible build label, else empty.
+func CleanVersion(v string) string {
+	if len(v) <= 32 && !strings.ContainsAny(v, " \n\r\t") {
+		return v
+	}
+	return ""
 }
 
 func boundText(s string) string {

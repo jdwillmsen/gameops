@@ -320,6 +320,10 @@ func (p *Poller) Positions() []Position {
 type Born struct {
 	Event
 	Pos Position
+	// Session and Version are what the unit's state said when the event was
+	// seen: the connection and crew build it happened under, as the unit
+	// spelled them. Empty from a unit that does not report them.
+	Session, Version string
 }
 
 // appendEventLocked sends only under p.mu, so the slot freed for a slow
