@@ -74,8 +74,10 @@ type Engine struct {
 	// fails counts consecutive failed tasks per unit, cleared by a success.
 	fails      map[string]int
 	stuckSince map[string]time.Time
-	version    uint64
-	subs       map[chan struct{}]struct{}
+	// toolItem is the item a unit's tool_breaking alert was raised for.
+	toolItem map[string]string
+	version  uint64
+	subs     map[chan struct{}]struct{}
 }
 
 func NewEngine(cfg Config, now time.Time) *Engine {
@@ -88,6 +90,7 @@ func NewEngine(cfg Config, now time.Time) *Engine {
 		ruleMutes:  map[string]time.Time{},
 		fails:      map[string]int{},
 		stuckSince: map[string]time.Time{},
+		toolItem:   map[string]string{},
 		subs:       map[chan struct{}]struct{}{},
 	}
 }
@@ -113,9 +116,10 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 	defer e.mu.Unlock()
 	state := make(map[string]string, len(states))
 	tool := make(map[string]*int, len(states))
+	toolItem := make(map[string]string, len(states))
 	for _, s := range states {
 		state[s.ID] = s.State
-		tool[s.ID] = s.ToolDurability
+		tool[s.ID], toolItem[s.ID] = s.ToolDurability, s.ToolItem
 	}
 	changed := false
 	set := func(rule string, s telemetry.Status, bad bool, sev, text string) {
@@ -147,8 +151,7 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 		}
 		set(RuleLowFood, s, low, SevWarn, "hunger low ("+strconv.Itoa(food)+")")
 
-		worn := s.Online && tool[s.ID] != nil && *tool[s.ID] <= e.cfg.ToolBelow
-		set(RuleToolWorn, s, worn, SevWarn, "held tool nearly worn out")
+		e.setToolLocked(s, tool[s.ID], toolItem[s.ID], set)
 
 		harmful := harmfulOf(s)
 		set(RuleHarmful, s, s.Online && len(harmful) > 0, SevWarn, "harmful effect: "+strings.Join(harmful, ", "))
@@ -169,6 +172,27 @@ func (e *Engine) Poll(now time.Time, statuses []telemetry.Status, states []telem
 		e.version++
 		e.notifyLocked()
 	}
+}
+
+// setToolLocked drives tool_breaking. While it fires for one item, a swap to
+// another item or an empty hand changes nothing: only that item's own repair,
+// or the unit going offline, resolves it. Otherwise a unit juggling a worn
+// tool and a fresh one would re-fire the alert on every swap.
+func (e *Engine) setToolLocked(s telemetry.Status, pct *int, item string, set func(rule string, s telemetry.Status, bad bool, sev, text string)) {
+	const text = "held tool nearly worn out"
+	if !s.Online {
+		set(RuleToolWorn, s, false, SevWarn, text)
+		return
+	}
+	a := e.alerts[alertID(RuleToolWorn, s.ID)]
+	if a != nil && a.State == StateFiring && (pct == nil || item != e.toolItem[s.ID]) {
+		return
+	}
+	worn := pct != nil && *pct <= e.cfg.ToolBelow
+	if worn {
+		e.toolItem[s.ID] = item
+	}
+	set(RuleToolWorn, s, worn, SevWarn, text)
 }
 
 // harmfulOf is the harmful effects on a unit, from the closed names its
