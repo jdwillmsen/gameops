@@ -325,7 +325,10 @@ in ticks (negative means it does not expire; a logout forgets them all), and
 is the one its record in the world save is filed under. An inventory or
 armour item that can wear out carries `durability_pct`, 0 to 100 of its wear
 left; it is absent for an item that cannot wear out and for a stack whose
-damage the unit cannot read, so absent means unknown, not full. It
+damage the unit cannot read, so absent means unknown, not full. Once the unit
+knows where it is, `threat` counts the `hostiles` (a fixed table of mob types)
+and `players` within 16 blocks, each capped at 9; it is counts alone, never a
+name, type or position, and other crew units count as players. It
 also carries a read-only `tasks` object: `current` (the running task or
 null) and `recent` (the last five others, newest first), each with id,
 template, state, skill, item, qty, progress, reason and timestamps. It never

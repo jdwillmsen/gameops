@@ -306,3 +306,47 @@ func TestStateListsEntitiesOnlyWhenAsked(t *testing.T) {
 		t.Errorf("entities = %+v", withList.Entities)
 	}
 }
+
+type nearbyFixed struct {
+	n    life.Nearby
+	seen *[3]float32
+}
+
+func (f nearbyFixed) Nearby(eye [3]float32) life.Nearby {
+	if f.seen != nil {
+		*f.seen = eye
+	}
+	return f.n
+}
+
+func TestStateCarriesTheNearbyCountsOnceTheUnitKnowsWhereItIs(t *testing.T) {
+	var asked [3]float32
+	src := nearbyFixed{n: life.Nearby{Hostiles: 4, Players: 1}, seen: &asked}
+	known := fixed{Spawned: true, PositionKnown: true, Position: [3]float32{1, 65, 2}}
+
+	rec := get(t, Handler(known, "dev", Unit{}, nil, WithNearby(src)), "/v1/state")
+	var body struct {
+		Threat *life.Nearby `json:"threat"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body.Threat == nil || *body.Threat != src.n {
+		t.Fatalf("threat = %+v (%v) in %s", body.Threat, err, rec.Body)
+	}
+	if asked != known.Position {
+		t.Errorf("counted around %v, want the unit's position %v", asked, known.Position)
+	}
+	for _, key := range []string{`"hostiles":4`, `"players":1`} {
+		if !strings.Contains(rec.Body.String(), key) {
+			t.Errorf("state lacks %s: %s", key, rec.Body)
+		}
+	}
+
+	for name, h := range map[string]http.Handler{
+		"no source":        Handler(known, "dev", Unit{}, nil),
+		"position unknown": Handler(fixed{Spawned: true}, "dev", Unit{}, nil, WithNearby(src)),
+		"not spawned":      Handler(fixed{PositionKnown: true}, "dev", Unit{}, nil, WithNearby(src)),
+	} {
+		if raw := get(t, h, "/v1/state").Body.String(); strings.Contains(raw, "threat") {
+			t.Errorf("%s: threat reported: %s", name, raw)
+		}
+	}
+}
