@@ -1,3 +1,5 @@
+import { QUALITIES, qualityOf } from './quality.js';
+
 // Steps the wall's live-camera budget down when the page cannot hold a usable
 // frame rate. The fixed budgets in fleet.js are chosen by a viewer on one
 // machine; this keeps a weaker one from freezing under "All".
@@ -37,4 +39,21 @@ export function lowerBudget(budgets, current, all) {
   const live = budgets.filter(b => b > 0).sort((a, b) => a - b);
   const smaller = live.filter(b => b < current && b < all);
   return smaller.length ? smaller[smaller.length - 1] : 0;
+}
+
+// One level cheaper, stopping at low. An unknown level is treated as the
+// default so a stale saved pref cannot skip the ladder.
+export function lowerQuality(quality) {
+  const i = QUALITIES.indexOf(qualityOf(quality));
+  return i > 0 ? QUALITIES[i - 1] : QUALITIES[0];
+}
+
+// What a slow wall sheds next: the live feeds' render quality before their
+// count, because a low-quality tile still shows what a unit is doing while a
+// dropped tile shows nothing. An empty step means nothing is left to shed:
+// Cards is the viewer's choice, not the governor's.
+export function nextShedStep({ auto, quality, budget, budgets, all }) {
+  if (auto && qualityOf(quality) !== QUALITIES[0]) return { quality: lowerQuality(quality) };
+  const next = lowerBudget(budgets, budget, all);
+  return next ? { budget: next } : {};
 }

@@ -58,7 +58,10 @@ test('format encodes ids', () => {
 
 test('tile urls', () => {
   assert.equal(tileSrc('crew-02', 'orbit'), '/units/crew-02/camera?mode=orbit');
-  assert.equal(wallSrc('crew-02'), '/units/crew-02/camera?mode=first&hud=0&r=2');
+  assert.equal(wallSrc('crew-02'), '/units/crew-02/camera?mode=first&hud=0&r=2&q=high');
+  assert.equal(wallSrc('crew-02', 'low'), '/units/crew-02/camera?mode=first&hud=0&r=2&q=low');
+  // A stale saved pref must not put an unknown q on the wire.
+  assert.equal(wallSrc('crew-02', 'bogus'), '/units/crew-02/camera?mode=first&hud=0&r=2&q=high');
 });
 
 test('badge text', () => {
