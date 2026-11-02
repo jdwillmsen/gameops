@@ -196,6 +196,29 @@ func TestRecorderForgetsUnitsThatLeave(t *testing.T) {
 	}
 }
 
+func TestRecorderReportsTheSamplesItLeavesOutOfTheOverworld(t *testing.T) {
+	src := &fakeSource{
+		pos: []telemetry.Position{
+			{ID: "a", X: 10, Known: true},
+			{ID: "n", X: 3, Dim: 1, Known: true},
+			{ID: "e", X: 3, Dim: 2, Known: true},
+			{ID: "x", X: 3, Dim: 9, Known: true},
+			{ID: "off", X: 3, Dim: 1, Known: true},
+			{ID: "u", Dim: 1, Known: false},
+		},
+		status: []telemetry.Status{online("a"), online("n"), online("e"), online("x"), {ID: "off"}, online("u")},
+	}
+	r := NewRecorder(NewMemory())
+	var dropped []int32
+	r.OnDrop = func(p telemetry.Position) { dropped = append(dropped, p.Dim) }
+	if got := r.Sample(src, t0); len(got) != 1 || got[0].Unit != "a" {
+		t.Fatalf("only the overworld unit is stored: %+v", got)
+	}
+	if len(dropped) != 3 || dropped[0] != 1 || dropped[1] != 2 || dropped[2] != 9 {
+		t.Errorf("dropped dims = %v, want [1 2 9] and nothing for the offline or unlocated unit", dropped)
+	}
+}
+
 type gate bool
 
 func (g gate) Operator(*http.Request) (auth.Operator, bool) { return auth.Operator{ID: "o"}, bool(g) }

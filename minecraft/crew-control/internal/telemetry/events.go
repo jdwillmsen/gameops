@@ -31,6 +31,11 @@ type Event struct {
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
 	Text  string `json:"text"`
+	// World and Dim say where the unit was: the roster's world slug, and the
+	// closed dimension name at the poll that produced the event, empty when
+	// the unit's position was not known. Names, not coordinates.
+	World string `json:"world,omitempty"`
+	Dim   string `json:"dim,omitempty"`
 	// Task is the work item a task event is about, when there is one. It is
 	// the queue's id, which the history store keys on; the text alone cannot
 	// carry it.
@@ -61,6 +66,10 @@ type Position struct {
 	Yaw   float32 `json:"yaw"`
 	Dim   int32   `json:"dim"`
 	Known bool    `json:"known"`
+	// World is the unit's roster world, and DimName the closed name of Dim,
+	// empty until the position is known; Dim stays the unit's raw id.
+	World   string `json:"world,omitempty"`
+	DimName string `json:"dim_name,omitempty"`
 }
 
 // track is what the poller remembers about a unit between polls to tell what
@@ -330,6 +339,8 @@ func (p *Poller) appendEventLocked(i int, e Event) Event {
 	e.Seq = p.seq
 	e.Unit = p.units[i].ID
 	e.Name = p.units[i].Name
+	e.World = p.units[i].World
+	e.Dim = p.positions[i].DimName
 	e.Text = tidy(e.Text)
 	p.feed = append(p.feed, e)
 	if len(p.feed) > feedSize {

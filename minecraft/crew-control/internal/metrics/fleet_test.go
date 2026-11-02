@@ -42,8 +42,16 @@ func labelsOf(m *dto.Metric) map[string]string {
 	return out
 }
 
-// find returns the series whose labels equal want exactly, or nil.
+// find returns the series whose labels equal want exactly, or nil. A want
+// that names no world means the lab, the only world most tests have.
 func find(mf *dto.MetricFamily, want map[string]string) *dto.Metric {
+	if _, ok := want["world"]; !ok {
+		withWorld := map[string]string{"world": roster.DefaultWorld}
+		for k, v := range want {
+			withWorld[k] = v
+		}
+		want = withWorld
+	}
 	for _, m := range mf.GetMetric() {
 		got := labelsOf(m)
 		if len(got) != len(want) {
@@ -279,6 +287,7 @@ func TestLabelSetIsClosed(t *testing.T) {
 	f.ObservePoll(time.Unix(2, 0), []telemetry.UnitState{{ID: "crew-01", State: "weird"}, {ID: "crew-99", State: "idle"}})
 
 	allowed := map[string][]string{
+		"world":    {roster.DefaultWorld},
 		"unit":     roster3,
 		"template": append(slices.Clone(Templates), TemplateOther),
 		"reason":   Reasons,
@@ -308,19 +317,21 @@ func TestLabelSetIsClosed(t *testing.T) {
 			}
 		}
 	}
-	if series > maxSeries(len(roster3)) {
-		t.Errorf("%d series for %d units, over the bound %d", series, len(roster3), maxSeries(len(roster3)))
+	if series > maxSeries(len(roster3), 1) {
+		t.Errorf("%d series for %d units, over the bound %d", series, len(roster3), maxSeries(len(roster3), 1))
 	}
 }
 
-// maxSeries is the worst case the label sets allow for n units, counting each
-// histogram series as its buckets plus sum and count. It is what the
-// "bounded cardinality" claim comes to.
-func maxSeries(n int) int {
+// maxSeries is the worst case the label sets allow for n units in w worlds,
+// counting each histogram series as its buckets plus sum and count. It is
+// what the "bounded cardinality" claim comes to. A unit is in one world, so
+// the series that carry the unit do not grow with w; the fleet-wide ones do.
+func maxSeries(n, w int) int {
 	t, o, r, s := len(Templates)+1, len(Outcomes), len(Reasons), len(States)
 	hist := t * 2 * (len(durationBuckets) + 3)
-	// n more for the tool durability gauge, and the day phases plus unknown.
-	return n*t + n*t*o + t*r + hist + n + 2*n + s + 1 + n*s*2 + n + len(DayPhases) + 1 + 3*n
+	perUnit := n*t + n*t*o + n + 2*n + n*s*2 + n + 3*n + n    // n more each: tool durability, dimension
+	perWorld := t*r + hist + s + 1 + len(DayPhases) + 1 + 3*2 // the last term is the skipped position samples
+	return perUnit + w*perWorld
 }
 
 func TestEveryNameInTheCatalogueIsExported(t *testing.T) {
@@ -359,7 +370,7 @@ func TestHandlerServesPrometheusText(t *testing.T) {
 	}
 	for _, want := range []string{
 		"# HELP crew_fleet_tasks_finished_total",
-		`crew_fleet_tasks_finished_total{outcome="done",template="haul",unit="crew-01"} 1`,
+		`crew_fleet_tasks_finished_total{outcome="done",template="haul",unit="crew-01",world="lab"} 1`,
 		"# TYPE crew_fleet_task_duration_seconds histogram",
 	} {
 		if !strings.Contains(body, want) {
@@ -592,5 +603,121 @@ func TestFightCountersExistForEveryUnitAndIgnoreStrangers(t *testing.T) {
 		if find(families(t, f)[name], map[string]string{"unit": "crew-99"}) != nil {
 			t.Errorf("%s grew a series for a unit off the roster", name)
 		}
+	}
+}
+
+func worldsFleet() *Fleet {
+	return New([]string{"crew-01", "crew-02", "crew-03"}, WithWorlds(map[string]string{"crew-03": "fwb"}))
+}
+
+func TestEveryFleetSeriesCarriesItsUnitsWorld(t *testing.T) {
+	f := worldsFleet()
+	f.Observe([]telemetry.Born{
+		born("crew-01", "task_started", "haul", 0, ""),
+		born("crew-01", "task_done", "gather_and_deposit", 9*time.Second, ""),
+		born("crew-03", "task_done", "gather_and_deposit", 9*time.Second, ""),
+		born("crew-03", "task_failed", "mine_shaft", 5*time.Second, "no pickaxe in inventory"),
+		born("crew-03", "stuck", "", 0, ""),
+		{Event: telemetry.Event{Unit: "crew-03", Kind: "died", Attrs: map[string]any{"day_phase": "night"}}},
+	})
+	f.ObservePoll(time.Unix(1, 0), []telemetry.UnitState{
+		{ID: "crew-01", World: "lab", State: "working"}, {ID: "crew-02", State: "idle"}, {ID: "crew-03", State: "offline"},
+	})
+	for name, mf := range families(t, f) {
+		if strings.HasPrefix(name, "crew_event_store_") {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			l := labelsOf(m)
+			if l["world"] != "lab" && l["world"] != "fwb" {
+				t.Errorf("%s%v has no roster world", name, l)
+			}
+			if u, ok := l["unit"]; ok && (u == "crew-03") != (l["world"] == "fwb") {
+				t.Errorf("%s%v puts the unit in the wrong world", name, l)
+			}
+		}
+	}
+	for _, c := range []struct {
+		name string
+		l    map[string]string
+		want float64
+	}{
+		{"crew_fleet_tasks_finished_total", map[string]string{"world": "fwb", "unit": "crew-03", "template": "gather_and_deposit", "outcome": "done"}, 1},
+		{"crew_fleet_tasks_finished_total", map[string]string{"world": "lab", "unit": "crew-01", "template": "gather_and_deposit", "outcome": "done"}, 1},
+		{"crew_fleet_task_failures_total", map[string]string{"world": "fwb", "template": "mine_shaft", "reason": "missing_item"}, 1},
+		{"crew_fleet_task_failures_total", map[string]string{"world": "lab", "template": "mine_shaft", "reason": "missing_item"}, 0},
+		{"crew_fleet_deaths_by_day_phase_total", map[string]string{"world": "fwb", "phase": "night"}, 1},
+		{"crew_fleet_unit_deaths_total", map[string]string{"world": "fwb", "unit": "crew-03"}, 1},
+		{"crew_fleet_unit_stuck_total", map[string]string{"world": "fwb", "unit": "crew-03"}, 1},
+		{"crew_fleet_units", map[string]string{"world": "lab", "state": "working"}, 1},
+		{"crew_fleet_units", map[string]string{"world": "lab", "state": "idle"}, 1},
+		{"crew_fleet_units", map[string]string{"world": "fwb", "state": "offline"}, 1},
+		{"crew_fleet_units_online", map[string]string{"world": "lab"}, 2},
+		{"crew_fleet_units_online", map[string]string{"world": "fwb"}, 0},
+	} {
+		if got := value(t, f, c.name, c.l); got != c.want {
+			t.Errorf("%s%v = %v, want %v", c.name, c.l, got, c.want)
+		}
+	}
+	if mf := families(t, f)["crew_fleet_task_duration_seconds"]; find(mf, map[string]string{"world": "fwb", "template": "gather_and_deposit", "outcome": "done"}) == nil {
+		t.Error("the duration histogram has no fwb series")
+	}
+}
+
+func TestUnitDimensionGaugeFollowsTheClosedNamesAndClearsWhenUnknown(t *testing.T) {
+	f := New(roster3)
+	dim := func(unit string) float64 {
+		return value(t, f, "crew_fleet_unit_dimension", map[string]string{"unit": unit})
+	}
+	f.ObservePoll(time.Unix(1, 0), []telemetry.UnitState{
+		{ID: "crew-01", State: "idle", Dim: "overworld"},
+		{ID: "crew-02", State: "idle", Dim: "end"},
+		{ID: "crew-03", State: "idle", Dim: "something_new"},
+	})
+	if dim("crew-01") != 0 || dim("crew-02") != 2 || dim("crew-03") != 3 {
+		t.Errorf("gauge = %v %v %v, want 0 2 3 (an unlisted name reads as other)", dim("crew-01"), dim("crew-02"), dim("crew-03"))
+	}
+	f.ObservePoll(time.Unix(2, 0), []telemetry.UnitState{{ID: "crew-01", State: "offline"}, {ID: "crew-02", State: "idle", Dim: "nether"}, {ID: "crew-03", State: "idle"}})
+	mf := families(t, f)["crew_fleet_unit_dimension"]
+	if find(mf, map[string]string{"unit": "crew-01"}) != nil || find(mf, map[string]string{"unit": "crew-03"}) != nil {
+		t.Error("a unit with no known dimension kept its last reading, which would read as the overworld")
+	}
+	if dim("crew-02") != 1 {
+		t.Errorf("nether = %v, want 1", dim("crew-02"))
+	}
+}
+
+func TestDroppedPositionSamplesAreCountedByWorldDimensionAndStore(t *testing.T) {
+	f := worldsFleet()
+	n := telemetry.Position{ID: "crew-01", Dim: 1}
+	f.PositionDropped(StoreHeat, n)
+	f.PositionDropped(StoreHeat, n)
+	f.PositionDropped(StoreReplay, telemetry.Position{ID: "crew-03", Dim: 2})
+	f.PositionDropped(StoreReplay, telemetry.Position{ID: "crew-03", Dim: 77})
+	// Not dropped, not rostered and not a store: none may add a series.
+	f.PositionDropped(StoreHeat, telemetry.Position{ID: "crew-01", Dim: 0})
+	f.PositionDropped(StoreHeat, telemetry.Position{ID: "crew-99", Dim: 1})
+	f.PositionDropped("elsewhere", n)
+	name := "crew_fleet_position_samples_dropped_total"
+	for _, c := range []struct {
+		l    map[string]string
+		want float64
+	}{
+		{map[string]string{"world": "lab", "dim": "nether", "store": "heat"}, 2},
+		{map[string]string{"world": "fwb", "dim": "end", "store": "replay"}, 1},
+		{map[string]string{"world": "fwb", "dim": "other", "store": "replay"}, 1},
+	} {
+		if got := value(t, f, name, c.l); got != c.want {
+			t.Errorf("%s%v = %v, want %v", name, c.l, got, c.want)
+		}
+	}
+	if n := len(families(t, f)[name].Metric); n != 3 {
+		t.Errorf("%d dropped series, want 3", n)
+	}
+}
+
+func TestWorstCaseSeriesGrowsByTheFleetWideSeriesPerWorld(t *testing.T) {
+	if maxSeries(20, 2)-maxSeries(20, 1) != maxSeries(0, 1) {
+		t.Error("a second world must add only the series that carry no unit")
 	}
 }

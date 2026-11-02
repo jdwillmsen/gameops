@@ -15,7 +15,7 @@ crew-control; it never calls them to command them.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `CREW_UNITS` | required | JSON list `[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`, 1 to 26 units; an optional `"player"` per unit names its id in the world save when the unit has not reported its own (see [Unit detail](#unit-detail)) |
+| `CREW_UNITS` | required | JSON list `[{"id":"crew-01","name":"Agate","url":"http://crew-01:8080"}]`, 1 to 26 units; an optional `"player"` per unit names its id in the world save when the unit has not reported its own (see [Unit detail](#unit-detail)); an optional `"world"` slug (lowercase letters, digits and dashes, at most 16, default `lab`) names the world the unit plays in and is the `world` label on every fleet series |
 | `LISTEN_ADDR` | `0.0.0.0:8080` | Listen address |
 | `LOG_LEVEL` | `info` | Log level |
 | `PUBLIC_ORIGIN` | unset | `https://host`, lower case, no port or path; its host is the WebAuthn RP ID. Unset, or no operators, turns sign-in off |
@@ -144,7 +144,9 @@ Every `HEAT_SAMPLE` the service reads each online, living unit in the
 overworld and folds it into per-minute counters on a 4x4 block grid, kept
 for 6 hours. Memory is bounded by that retention and a cap of 256 cells per
 unit, layer and minute (overflow is counted in `dropped`), not by uptime.
-Nothing is written to disk, so a restart empties the maps.
+Nothing is written to disk, so a restart empties the maps. A unit in the nether,
+the end or an unknown dimension is not mapped, and each skipped sample is
+counted in `crew_fleet_position_samples_dropped_total{store="heat"}`.
 
 - **Position**: samples per cell.
 - **Mining**: samples taken while the unit's task is a gathering one. Units
@@ -180,6 +182,11 @@ unit moved at least a quarter of a block or 30 seconds passed since its last
 row, so a standing fleet costs a row per unit per 30 s rather than per 2 s.
 The console interpolates between rows, and does not interpolate across a gap
 over 90 s: the unit was offline or dead, so it is not drawn until it returns.
+Rows are overworld only, which is why the table has no dimension or world
+column; the samples left out for any other dimension are counted in
+`crew_fleet_position_samples_dropped_total{store="replay"}`. The live position
+rows on the signed-in stream carry `world` and `dim_name` beside the unit's raw
+`dim` id.
 Rows are kept as long as the event history (30 days) and pruned daily with it.
 Positions sit beside the event store, not in `crew_event`, so a row every two
 seconds per moving unit cannot slow the explorer or the analytics. Until the
@@ -694,6 +701,8 @@ events are written back, oldest first. During an outage the console sees only
 what memory holds, and a restart loses it. Queries and appends are cut off
 after 5 s so a hung database cannot hold the writer.
 
+**Which world.** Every event the poller derives has `world` (the unit's roster slug) and, when the unit's position was known at that poll, `dim` (`overworld`, `nether`, `end` or `other`), on the public feed and as keys in the stored payload. They are payload keys, not columns, so no migration is needed and history from before them reads with neither; a filter by world is not available until they become a column.
+
 **Where events come from.** The poller derives them from each unit's status
 poll every second, the same events as the live feed, and the writer stores them
 in batches of up to 64 (one insert, at least once a second). Today that is
@@ -887,22 +896,24 @@ the units' own.
 
 | Metric | Type | Labels | Meaning |
 | --- | --- | --- | --- |
-| `crew_fleet_tasks_started_total` | counter | `unit`, `template` | Task starts the poller saw. Includes starts that turned out to be idle polls |
-| `crew_fleet_tasks_finished_total` | counter | `unit`, `template`, `outcome` | Task ends. `done` excludes idle polls, so `rate(done)` is throughput |
-| `crew_fleet_task_failures_total` | counter | `template`, `reason` | Failed tasks by normalised reason |
-| `crew_fleet_task_duration_seconds` | histogram | `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
-| `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
-| `crew_fleet_unit_deaths_total` | counter | `unit` | Deaths a poll saw |
-| `crew_fleet_unit_swings_total`, `crew_fleet_unit_hits_landed_total`, `crew_fleet_unit_damage_taken_total` | counter | `unit` | A warrior's swings, landed hits and health lost, summed from the growth of `tasks.fight.total` in its state between polls. The first reading, one after the unit was offline or reported no fight, and one after a restart (any total going down) only set a baseline, so a unit's history from before crew-control watched is never counted and growth across such a gap is lost. Hits are an upper bound when several warriors fight one target |
-| `crew_fleet_deaths_by_day_phase_total` | counter | `phase` | The same deaths by the unit's own day phase when found dead: `dawn`, `day`, `dusk`, `night`, or `unknown` for a unit with no clock (an older unit, or before the server sent the time) |
-| `crew_fleet_unit_stuck_total` | counter | `unit` | Stalls (no progress for 90 s on a running task), once each |
-| `crew_fleet_units` | gauge | `state` | Units per state at the last poll; the five states sum to the roster |
-| `crew_fleet_units_online` | gauge | none | Everything but `offline` |
-| `crew_fleet_unit_state` | gauge | `unit`, `state` | 1 for each unit's current state, 0 otherwise |
-| `crew_fleet_unit_state_seconds_total` | counter | `unit`, `state` | Time each unit has spent in each state |
-| `crew_fleet_unit_health` | gauge | `unit` | Health points (0 to 20) at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero |
-| `crew_fleet_unit_hunger` | gauge | `unit` | Food level (0 to 20) at the last poll, absent on the same terms |
-| `crew_fleet_unit_tool_durability_pct` | gauge | `unit` | Durability left (0 to 100) on the item the unit held at the last poll. Absent while offline, empty-handed, holding an item that cannot wear out, or from a unit that predates the field. Armour wear is in the `tool_worn` events |
+| `crew_fleet_tasks_started_total` | counter | `world`, `unit`, `template` | Task starts the poller saw. Includes starts that turned out to be idle polls |
+| `crew_fleet_tasks_finished_total` | counter | `world`, `unit`, `template`, `outcome` | Task ends. `done` excludes idle polls, so `rate(done)` is throughput |
+| `crew_fleet_task_failures_total` | counter | `world`, `template`, `reason` | Failed tasks by normalised reason |
+| `crew_fleet_task_duration_seconds` | histogram | `world`, `template`, `outcome` | How long tasks ran, from the unit's own times; `done` and `failed` only, idle polls left out |
+| `crew_fleet_unit_last_done_timestamp_seconds` | gauge | `world`, `unit` | When the unit last finished real work; `time()` minus it is its time without work. Absent until the first |
+| `crew_fleet_unit_deaths_total` | counter | `world`, `unit` | Deaths a poll saw |
+| `crew_fleet_unit_swings_total`, `crew_fleet_unit_hits_landed_total`, `crew_fleet_unit_damage_taken_total` | counter | `world`, `unit` | A warrior's swings, landed hits and health lost, summed from the growth of `tasks.fight.total` in its state between polls. The first reading, one after the unit was offline or reported no fight, and one after a restart (any total going down) only set a baseline, so a unit's history from before crew-control watched is never counted and growth across such a gap is lost. Hits are an upper bound when several warriors fight one target |
+| `crew_fleet_deaths_by_day_phase_total` | counter | `world`, `phase` | The same deaths by the unit's own day phase when found dead: `dawn`, `day`, `dusk`, `night`, or `unknown` for a unit with no clock (an older unit, or before the server sent the time) |
+| `crew_fleet_unit_stuck_total` | counter | `world`, `unit` | Stalls (no progress for 90 s on a running task), once each |
+| `crew_fleet_units` | gauge | `world`, `state` | Units per state at the last poll; the five states sum to the world's units |
+| `crew_fleet_units_online` | gauge | `world` | Everything but `offline`, per world |
+| `crew_fleet_unit_state` | gauge | `world`, `unit`, `state` | 1 for each unit's current state, 0 otherwise |
+| `crew_fleet_unit_state_seconds_total` | counter | `world`, `unit`, `state` | Time each unit has spent in each state |
+| `crew_fleet_unit_health` | gauge | `world`, `unit` | Health points (0 to 20) at the last poll. Absent while the unit is offline or has not reported one, so a gap is never a zero |
+| `crew_fleet_unit_hunger` | gauge | `world`, `unit` | Food level (0 to 20) at the last poll, absent on the same terms |
+| `crew_fleet_unit_dimension` | gauge | `world`, `unit` | The dimension at the last poll: `0` overworld, `1` nether, `2` end, `3` any other id. Absent while offline or before the unit knows where it is, so a gap is never the overworld |
+| `crew_fleet_position_samples_dropped_total` | counter | `world`, `dim`, `store` | Position samples the heat grid (`store="heat"`) or the replay recorder (`store="replay"`) skipped because the unit stood outside the overworld, by `dim` (`nether`, `end`, `other`) |
+| `crew_fleet_unit_tool_durability_pct` | gauge | `world`, `unit` | Durability left (0 to 100) on the item the unit held at the last poll. Absent while offline, empty-handed, holding an item that cannot wear out, or from a unit that predates the field. Armour wear is in the `tool_worn` events |
 | `crew_event_store_degraded` | gauge | none | 1 while event history is held in memory because Postgres is unreachable or not yet reached |
 | `crew_event_store_diverted_events_total` | counter | none | Events written to memory instead of Postgres |
 | `crew_event_store_replayed_events_total` | counter | none | Diverted events written back after Postgres returned |
@@ -911,6 +922,8 @@ the units' own.
 Label values are closed sets, never a raw string a unit sent:
 
 - `unit`: the roster. Events from any other id are dropped.
+- `world`: the roster's world slugs (`lab` unless a unit says otherwise). It comes from the unit's roster entry, never from the unit's own report. A unit is in one world, so the label does not multiply any series that already carries `unit`.
+- `dim`: `nether`, `end` or `other`, from the unit's dimension id; ids other than 0, 1 and 2 are `other`.
 - `state`: `working`, `idle`, `stuck`, `dead`, `offline`. Offline wins, then dead, then stuck, then working, else idle.
 - `outcome`: `done`, `failed`, `cancelled`, `unknown` (the unit's recent list no longer held the verdict), `idle` (a successful finish of an idle-eligible template within 2 s, the rule the history's idle roll-up uses; it is the idle-poll count).
 - `template`: the twelve crew templates (`gather_and_deposit`, `haul`, `withdraw`, `deposit`, `mine_shaft`, `goto`, `inspect`, `observe_blocks`, `place_block`, `craft`, `repair_build`, `build_blueprint`), else `other`.
@@ -931,8 +944,13 @@ Label values are closed sets, never a raw string a unit sent:
 | `invalid_task` | `invalid task`, `outside the allowed`, `outside the area`, `unknown template`, `not in creative mode`, `more than a unit walks`, `hotbar has room` | |
 | `other` | anything else | |
 
-Series stay bounded by the label sets: with 20 units the worst case is about two
-thousand (the two vitals gauges add at most 40), and the usual count is a few hundred because a series appears only
+Series stay bounded by the label sets. A unit has one world, so the per-unit
+series (1,920 for 20 units, the vitals, tool and dimension gauges included) do
+not grow with the world count. The fleet-wide series (failure reasons,
+duration histograms, state and online gauges, deaths by day phase, dropped
+position samples) do: 537 per world. The worst case is therefore
+1,920 + 537 x worlds, so 2,457 for the one lab and 3,531 for three worlds, and
+adding a unit to an existing world adds only its own series. The usual count is a few hundred because a series appears only
 once its event has happened. Per-unit state, death and stall series exist from
 start so that every unit shows up before it does anything.
 

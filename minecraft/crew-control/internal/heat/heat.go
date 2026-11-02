@@ -9,6 +9,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew-control/internal/telemetry"
 )
 
 const (
@@ -70,6 +72,10 @@ type Store struct {
 	mu     sync.Mutex
 	slices map[int64]*slice
 	last   map[string]last
+	// OnDrop, when set before Run, hears of each sample skipped because the
+	// unit stood outside the overworld. It runs on the sampling loop and must
+	// not block.
+	OnDrop func(telemetry.Position)
 }
 
 func New() *Store {
