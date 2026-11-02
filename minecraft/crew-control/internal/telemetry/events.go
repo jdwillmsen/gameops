@@ -26,7 +26,7 @@ type Event struct {
 	Name string    `json:"name"`
 	// Kind is one of online, offline, died, respawned, task_started,
 	// task_done, task_failed, task_cancelled, task_ended (outcome unknown),
-	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost, threat_high.
+	// stuck, low_health, low_hunger, tool_worn, effect_gained, effect_lost, threat_high, fight_ended.
 	Kind string `json:"kind"`
 	// Level is ok, info, warn or crit; the console colours and toasts by it.
 	Level string `json:"level"`
@@ -87,6 +87,10 @@ type track struct {
 	effectsSeeded bool
 	// underAttack is the threat_high state, with its hysteresis.
 	underAttack bool
+	// fightPrev is the fight totals at the last poll, nil before the first
+	// and while the unit reports none; fight is the one under way, if any.
+	fightPrev *FightTotals
+	fight     *openFight
 	// held is the durability left on the held item at the last poll, nil
 	// when unknown; the gauge and the tool_breaking alert read it.
 	held *int
@@ -127,6 +131,8 @@ type observation struct {
 	// threat is nil from a unit that predates the field or does not yet know
 	// where it is, which is not the same as nothing nearby.
 	threat *Threat
+	// fight is the warrior's running totals, nil when it reports none.
+	fight *FightTotals
 	// dayPhase is the closed phase at this poll, empty when unknown.
 	dayPhase string
 }
@@ -155,6 +161,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 		}
 		t.observeEffects(o.effects, now)
 		t.underAttack = o.threat != nil && o.threat.Hostiles >= threatHigh
+		t.fightPrev = o.fight
 		t.taskID, t.template, t.progress, t.progressAt = o.curID, o.curTemplate, o.curProgress, now
 		t.anchor, t.anchorKnown = o.pos, o.posKnown
 		t.lowHP = o.health != nil && *o.health <= lowHealth
@@ -170,6 +177,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 			t.wear = [len(wearSlots)]int{}
 			t.effects, t.effectsSeeded = nil, false
 			t.underAttack = false
+			out = append(out, t.observeFight(nil, now)...)
 			return out
 		}
 	}
@@ -199,6 +207,7 @@ func (t *track) observe(o observation, now time.Time) []Event {
 	out = append(out, t.observeWear(o.wear, now)...)
 	out = append(out, t.observeEffects(o.effects, now)...)
 	out = append(out, t.observeThreat(o.threat, now)...)
+	out = append(out, t.observeFight(o.fight, now)...)
 
 	if o.curID != t.taskID {
 		if t.taskID != "" {

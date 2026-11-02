@@ -320,7 +320,7 @@ func maxSeries(n int) int {
 	t, o, r, s := len(Templates)+1, len(Outcomes), len(Reasons), len(States)
 	hist := t * 2 * (len(durationBuckets) + 3)
 	// n more for the tool durability gauge, and the day phases plus unknown.
-	return n*t + n*t*o + t*r + hist + n + 2*n + s + 1 + n*s*2 + n + len(DayPhases) + 1
+	return n*t + n*t*o + t*r + hist + n + 2*n + s + 1 + n*s*2 + n + len(DayPhases) + 1 + 3*n
 }
 
 func TestEveryNameInTheCatalogueIsExported(t *testing.T) {
@@ -524,5 +524,73 @@ func TestDeathsAreCountedByTheDayPhaseTheyHappenedIn(t *testing.T) {
 	}
 	if n := len(families(t, f)[name].Metric); n != 5 {
 		t.Errorf("%d series, want exactly the five phases", n)
+	}
+}
+
+func fightPoll(f *Fleet, at int, unit string, t *telemetry.FightTotals) {
+	f.ObservePoll(time.Unix(int64(1_700_000_000+at), 0), []telemetry.UnitState{{ID: unit, State: "working", Fight: t}})
+}
+
+func TestFightCountersGrowByPollDeltasAndRebaselineOnRestart(t *testing.T) {
+	f := New(roster3)
+	u := roster3[0]
+	get := func(name string) float64 { return value(t, f, name, map[string]string{"unit": u}) }
+	want := func(swings, hits, damage float64) {
+		t.Helper()
+		for name, w := range map[string]float64{
+			"crew_fleet_unit_swings_total": swings, "crew_fleet_unit_hits_landed_total": hits, "crew_fleet_unit_damage_taken_total": damage,
+		} {
+			if got := get(name); got != w {
+				t.Errorf("%s = %v, want %v", name, got, w)
+			}
+		}
+	}
+
+	// A unit that has fought for hours before crew-control looked adds
+	// nothing for that history.
+	fightPoll(f, 0, u, &telemetry.FightTotals{Swings: 5000, Hits: 3000, Damage: 900.5})
+	want(0, 0, 0)
+
+	fightPoll(f, 1, u, &telemetry.FightTotals{Swings: 5004, Hits: 3001, Damage: 902})
+	want(4, 1, 1.5)
+	fightPoll(f, 2, u, &telemetry.FightTotals{Swings: 5004, Hits: 3001, Damage: 902})
+	want(4, 1, 1.5)
+
+	// A restart makes the totals go down: that poll adds nothing, and growth
+	// resumes from the new baseline.
+	fightPoll(f, 3, u, &telemetry.FightTotals{Swings: 2, Hits: 1, Damage: 0.5})
+	want(4, 1, 1.5)
+	fightPoll(f, 4, u, &telemetry.FightTotals{Swings: 9, Hits: 3, Damage: 4})
+	want(11, 3, 5)
+
+	// One total going down is a restart even if the others grew.
+	fightPoll(f, 5, u, &telemetry.FightTotals{Swings: 20, Hits: 2, Damage: 9})
+	want(11, 3, 5)
+
+	// A gap (offline, or an older unit) drops the baseline instead of
+	// reading the return as a reset to zero or as a jump.
+	fightPoll(f, 6, u, nil)
+	fightPoll(f, 7, u, &telemetry.FightTotals{Swings: 500, Hits: 400, Damage: 99})
+	want(11, 3, 5)
+	fightPoll(f, 8, u, &telemetry.FightTotals{Swings: 501, Hits: 400, Damage: 99})
+	want(12, 3, 5)
+}
+
+func TestFightCountersExistForEveryUnitAndIgnoreStrangers(t *testing.T) {
+	f := New(roster3)
+	fam := families(t, f)
+	for _, name := range []string{"crew_fleet_unit_swings_total", "crew_fleet_unit_hits_landed_total", "crew_fleet_unit_damage_taken_total"} {
+		for _, u := range roster3 {
+			if find(fam[name], map[string]string{"unit": u}) == nil {
+				t.Errorf("%s has no series for %s before any fight", name, u)
+			}
+		}
+	}
+	fightPoll(f, 0, "crew-99", &telemetry.FightTotals{Swings: 1})
+	fightPoll(f, 1, "crew-99", &telemetry.FightTotals{Swings: 9})
+	for _, name := range []string{"crew_fleet_unit_swings_total"} {
+		if find(families(t, f)[name], map[string]string{"unit": "crew-99"}) != nil {
+			t.Errorf("%s grew a series for a unit off the roster", name)
+		}
 	}
 }

@@ -30,6 +30,9 @@ const (
 	// KindThreatHigh is several hostile mobs close to the unit; the payload
 	// has counts only.
 	KindThreatHigh = "threat_high"
+	// KindFightEnded closes a warrior's run of fighting; the payload has the
+	// counts and an outcome from a closed list.
+	KindFightEnded = "fight_ended"
 )
 
 // Event carries no position by construction.
