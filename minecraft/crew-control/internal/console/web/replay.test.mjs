@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildTracks, indexAt, positionAt, trailOf, frameAt, advance, boundsOf, eventsUpTo, withMs, positionsQuery, eventsQuery,
+  buildTracks, indexAt, positionAt, trailOf, frameAt, advance, boundsOf, eventsUpTo, withMs, phaseMarks, phaseAt, PHASE_REACH, positionsQuery, eventsQuery,
   fetchAll, summary, clock, MAX_GAP, HOLD,
 } from './replay.js';
 import { LAB } from './heat.js';
@@ -134,4 +134,29 @@ test('scrubbing an hour of twenty moving units computes a frame well inside 100 
   console.log(`replay frame: ${per.toFixed(4)} ms per frame, 20 units x 1800 samples`);
   assert.ok(seen > 0);
   assert.ok(per < 10, `${per} ms per frame`);
+});
+
+test('phase marks come from events that recorded a phase, closed list only', () => {
+  const marks = phaseMarks([
+    { at: '2026-10-26T12:00:10Z', payload: { day_phase: 'night' } },
+    { at: '2026-10-26T12:00:00Z', payload: { day_phase: 'dusk' } },
+    { at: '2026-10-26T12:00:20Z', payload: { day_phase: 'noon' } },
+    { at: '2026-10-26T12:00:30Z', payload: { text: 'x', biome: 'swampland' } },
+    { at: '2026-10-26T12:00:40Z', payload: null },
+    { at: '2026-10-26T12:00:50Z' },
+  ].map(withMs));
+  assert.deepEqual(marks.map(m => m.phase), ['dusk', 'night']);
+  assert.ok(marks[0].ms < marks[1].ms);
+});
+
+test('the phase at a time is the nearest mark within reach, else none', () => {
+  const marks = [{ ms: 1_000_000, phase: 'dusk' }, { ms: 1_100_000, phase: 'night' }];
+  assert.equal(phaseAt(marks, 1_000_000), 'dusk');
+  assert.equal(phaseAt(marks, 1_040_000), 'dusk');
+  assert.equal(phaseAt(marks, 1_060_000), 'night');
+  assert.equal(phaseAt(marks, 1_050_000), 'dusk', 'a tie goes to the earlier mark');
+  assert.equal(phaseAt(marks, 1_100_000 + PHASE_REACH), 'night');
+  assert.equal(phaseAt(marks, 1_100_000 + PHASE_REACH + 1), '');
+  assert.equal(phaseAt(marks, 1_000_000 - PHASE_REACH - 1), '');
+  assert.equal(phaseAt([], 5), '');
 });

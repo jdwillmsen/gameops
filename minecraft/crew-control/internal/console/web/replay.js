@@ -2,6 +2,7 @@
 // position at any instant, and playback arithmetic. replay-ui.js paints;
 // nothing here touches the DOM.
 import { LAB, fit } from './heat.js';
+import { PHASES } from './fleet.js';
 
 export { fit };
 
@@ -120,6 +121,37 @@ export function eventsUpTo(events, time, n = 12, unit = '') {
     if (!unit || events[i].unit === unit) out.push(events[i]);
   }
   return out;
+}
+
+// Replay stores no clock of its own: the phase of day is known only where an
+// event recorded it. A mark vouches for the stretch around it, short enough
+// that it is rarely wrong about the phase (dawn and dusk last 90 s), and the
+// background stays plain where no event is near rather than guessing.
+export const PHASE_REACH = 120_000;
+
+// Oldest first, from the closed list only: the payload is data from a store,
+// and a phase outside the list is no phase.
+export function phaseMarks(events) {
+  const out = [];
+  for (const e of events) {
+    const phase = e.payload && e.payload.day_phase;
+    if (PHASES.includes(phase)) out.push({ ms: e.ms, phase });
+  }
+  return out.sort((a, b) => a.ms - b.ms);
+}
+
+// The phase of the mark nearest to time, or '' when none is within reach. A
+// tie goes to the earlier mark, the one the unit had already lived through.
+export function phaseAt(marks, time, reach = PHASE_REACH) {
+  let lo = 0, hi = marks.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (marks[mid].ms <= time) lo = mid + 1; else hi = mid;
+  }
+  const before = lo > 0 ? marks[lo - 1] : null;
+  const after = lo < marks.length ? marks[lo] : null;
+  const best = before && (!after || time - before.ms <= after.ms - time) ? before : after;
+  return best && Math.abs(best.ms - time) <= reach ? best.phase : '';
 }
 
 export const withMs = e => ({ ...e, ms: Date.parse(e.at) });
