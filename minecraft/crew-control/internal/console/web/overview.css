@@ -14,9 +14,9 @@ body.view-fleet #dock { height: 96px; }
   flex-direction: column;
   gap: 6px;
   padding: 6px 10px;
-  background: #111;
+  background: var(--bg);
   font: 13px ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-  color: #ddd;
+  color: var(--text);
   overflow: hidden;
 }
 .ov.has-pos { --ov-cols: 30px minmax(96px, 1fr) 108px 86px 120px 120px minmax(130px, 1.1fr) minmax(150px, 1.3fr) 116px; }

@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The insight strip on the fleet overview (capacity tiles and the live
 // insight rows) and the Why panel on the unit detail page. Both read public
 // routes that carry no coordinates, so they work signed out; evidence ids
@@ -8,15 +9,6 @@ import { renderWhy } from './why.js';
 const POLL_MS = 15_000;
 const WINDOW = '1h';
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 async function getJSON(path) {
   try {
@@ -46,52 +38,52 @@ function poller(fn) {
 }
 
 export function createInsightStrip() {
-  const root = el('section', { className: 'ins', role: 'region', 'aria-label': 'Insights and capacity' });
-  const tiles = el('div', { className: 'ins-tiles' });
-  const table = el('details', { className: 'ins-table' }, el('summary', { textContent: 'Capacity by task type' }));
-  const rows = el('ul', { className: 'ins-rows' });
+  const root = h('section', { className: 'ins', role: 'region', 'aria-label': 'Insights and capacity' });
+  const tiles = h('div', { className: 'ins-tiles' });
+  const table = h('details', { className: 'ins-table' }, h('summary', { textContent: 'Capacity by task type' }));
+  const rows = h('ul', { className: 'ins-rows' });
   root.append(tiles, table, rows);
   const open = new Map(); // insight id -> the Why element once asked for
   let seq = 0;
 
   function paintCapacity(report) {
-    tiles.replaceChildren(...capacityTiles(report).map(t => el('div', { className: 'ins-tile', title: t.note },
-      el('span', { className: 'ins-tile-label', textContent: t.label }),
-      el('span', { className: 'ins-tile-value', textContent: t.value }),
-      el('span', { className: 'ins-tile-note', textContent: t.note }))));
-    const head = el('tr', {}, ...['Task type', 'Per min', 'Mean s', 'Busy units', 'Failed s'].map(h => el('th', { textContent: h })));
-    const body = templateRows(report).map(r => el('tr', { className: r.unsteady ? 'unsteady' : '' },
-      el('td', { textContent: r.template }), el('td', { textContent: r.lambda }), el('td', { textContent: r.mean }),
-      el('td', { textContent: r.l }), el('td', { textContent: String(r.failedTime) })));
-    const t = el('table', {}, el('thead', {}, head), el('tbody', {}, ...body));
-    table.replaceChildren(table.firstElementChild || el('summary', { textContent: 'Capacity by task type' }), t);
+    tiles.replaceChildren(...capacityTiles(report).map(t => h('div', { className: 'ins-tile', title: t.note },
+      h('span', { className: 'ins-tile-label', textContent: t.label }),
+      h('span', { className: 'ins-tile-value', textContent: t.value }),
+      h('span', { className: 'ins-tile-note', textContent: t.note }))));
+    const head = h('tr', {}, ...['Task type', 'Per min', 'Mean s', 'Busy units', 'Failed s'].map(col => h('th', { textContent: col })));
+    const body = templateRows(report).map(r => h('tr', { className: r.unsteady ? 'unsteady' : '' },
+      h('td', { textContent: r.template }), h('td', { textContent: r.lambda }), h('td', { textContent: r.mean }),
+      h('td', { textContent: r.l }), h('td', { textContent: String(r.failedTime) })));
+    const t = h('table', {}, h('thead', {}, head), h('tbody', {}, ...body));
+    table.replaceChildren(table.firstElementChild || h('summary', { textContent: 'Capacity by task type' }), t);
   }
 
   function paintInsights(list) {
     const items = insightRows(list);
     if (!items.length) {
-      rows.replaceChildren(el('li', { className: 'ins-none', textContent: 'No insights: nothing the rules flag right now.' }));
+      rows.replaceChildren(h('li', { className: 'ins-none', textContent: 'No insights: nothing the rules flag right now.' }));
       return;
     }
     rows.replaceChildren(...items.map(i => {
-      const why = el('div', { className: 'ins-why', hidden: !open.has(i.id) });
+      const why = h('div', { className: 'ins-why', hidden: !open.has(i.id) });
       if (open.has(i.id)) why.replaceChildren(open.get(i.id));
-      const btn = el('button', { type: 'button', className: 'ins-ask', textContent: 'Why', hidden: !i.unit });
+      const btn = h('button', { type: 'button', className: 'ins-ask', textContent: 'Why', hidden: !i.unit });
       btn.addEventListener('click', async () => {
         if (!why.hidden) { why.hidden = true; open.delete(i.id); return; }
         why.hidden = false;
         why.textContent = 'Reading…';
         const r = await explain(i.unit);
-        const node = r ? renderWhy(r) : el('p', { textContent: 'The explanation could not be read.' });
+        const node = r ? renderWhy(r) : h('p', { textContent: 'The explanation could not be read.' });
         open.set(i.id, node);
         why.replaceChildren(node);
       });
-      return el('li', { className: `ins-row ins-${i.severity} ins-${i.state}` },
-        el('span', { className: 'ins-badge', textContent: i.rule, title: i.ruleName }),
-        el('strong', { textContent: i.who }),
-        el('span', { className: 'ins-detail', textContent: ` ${i.detail}` }),
-        el('span', { className: 'ins-since', textContent: ` ${i.state === 'firing' ? 'since' : 'resolved, first seen'} ${clock(i.since)}` }),
-        el('span', { className: 'ins-badge ins-rule', textContent: 'Rule-derived' }), btn, why);
+      return h('li', { className: `ins-row ins-${i.severity} ins-${i.state}` },
+        h('span', { className: 'ins-badge', textContent: i.rule, title: i.ruleName }),
+        h('strong', { textContent: i.who }),
+        h('span', { className: 'ins-detail', textContent: ` ${i.detail}` }),
+        h('span', { className: 'ins-since', textContent: ` ${i.state === 'firing' ? 'since' : 'resolved, first seen'} ${clock(i.since)}` }),
+        h('span', { className: 'ins-badge ins-rule', textContent: 'Rule-derived' }), btn, why);
     }));
   }
 
@@ -107,16 +99,16 @@ export function createInsightStrip() {
 }
 
 export function createWhyPanel() {
-  const body = el('div', { className: 'why-body' });
-  const root = el('details', { className: 'dt-why', open: true },
-    el('summary', {}, 'Why did this unit fail? ', el('span', { className: 'ins-badge ins-rule', textContent: 'Rule-derived' })), body);
+  const body = h('div', { className: 'why-body' });
+  const root = h('details', { className: 'dt-why', open: true },
+    h('summary', {}, 'Why did this unit fail? ', h('span', { className: 'ins-badge ins-rule', textContent: 'Rule-derived' })), body);
   let unit = '';
   let seq = 0;
   const p = poller(async () => {
     const my = ++seq;
     const r = await explain(unit);
     if (my !== seq) return;
-    body.replaceChildren(r ? renderWhy(r) : el('p', { textContent: 'The explanation could not be read.' }));
+    body.replaceChildren(r ? renderWhy(r) : h('p', { textContent: 'The explanation could not be read.' }));
   });
   return {
     el: root,

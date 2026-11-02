@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The replay view: scrub a past window of unit positions on the lab map, with
 // the events of that window listed beside it. Where units stood is
 // operator-only, so signed out this paints a sign-in state and never asks for
@@ -7,27 +8,18 @@ import {
   fetchAll, summary, clock, MAX_POSITION_PAGES, MAX_EVENT_PAGES, TRAIL_MS,
 } from './replay.js';
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 const DOT = 5;
 
 function action(text, run) {
-  const b = el('button', { type: 'button', textContent: text });
+  const b = h('button', { type: 'button', textContent: text });
   b.addEventListener('click', run);
   return b;
 }
 
 // host: { statuses, order(), operator(), api(method, path, body, extra) }
 export function initReplay(host) {
-  const root = el('section', { className: 'rp' });
+  const root = h('section', { className: 'rp' });
   root.setAttribute('aria-label', 'Replay');
   let mounted = false;
   let token = 0;
@@ -47,14 +39,14 @@ export function initReplay(host) {
 
   function showState(...kids) {
     stop();
-    root.replaceChildren(el('div', { className: 'rp-state' }, ...kids));
+    root.replaceChildren(h('div', { className: 'rp-state' }, ...kids));
     ui = null;
   }
 
   function paintAuth() {
     showState(
-      el('h2', { textContent: 'Sign in to replay' }),
-      el('p', {}, 'Where units stood is operator-only. ', el('a', { href: '/signin', textContent: 'Sign in' }), '.'));
+      h('h2', { textContent: 'Sign in to replay' }),
+      h('p', {}, 'Where units stood is operator-only. ', h('a', { href: '/signin', textContent: 'Sign in' }), '.'));
   }
 
   async function load() {
@@ -64,7 +56,7 @@ export function initReplay(host) {
     const until = ui && ui.end.value ? new Date(ui.end.value).getTime() : Date.now();
     const since = until - windowOf(sel.window).ms;
     const current = () => mounted && my === token;
-    if (!ui) showState(el('p', { textContent: 'Reading the recorded positions...' }));
+    if (!ui) showState(h('p', { textContent: 'Reading the recorded positions...' }));
     else ui.sum.textContent = 'Reading the recorded positions...';
     const [pos, evs, pl] = await Promise.all([
       fetchAll(host.api, cursor => positionsQuery({ since, until, cursor, limit: 5000 }), 'samples', MAX_POSITION_PAGES, current),
@@ -75,7 +67,7 @@ export function initReplay(host) {
     if (pl && pl.ok && Array.isArray(pl.data)) places = pl.data;
     if (pos.status === 401 || evs.status === 401) { paintAuth(); return; }
     if (pos.error) {
-      showState(el('h2', { textContent: 'Could not read the replay.' }), el('p', { textContent: pos.error }),
+      showState(h('h2', { textContent: 'Could not read the replay.' }), h('p', { textContent: pos.error }),
         action('Try again', () => load()));
       return;
     }
@@ -91,8 +83,8 @@ export function initReplay(host) {
   }
 
   function select(label, name, options, value, onChange) {
-    const s = el('select', { name, 'aria-label': label });
-    for (const [v, text] of options) s.append(el('option', { value: v, textContent: text }));
+    const s = h('select', { name, 'aria-label': label });
+    for (const [v, text] of options) s.append(h('option', { value: v, textContent: text }));
     s.value = value;
     s.addEventListener('change', onChange);
     return s;
@@ -111,11 +103,11 @@ export function initReplay(host) {
     const windowSel = select('Window', 'window', WINDOWS.map(w => [w.id, w.label]), sel.window, () => { sel = { ...sel, window: windowSel.value }; load(); });
     if (sel.unit && !data.tracks.has(sel.unit)) sel = { ...sel, unit: '' };
     const unitSel = select('Unit', 'unit', [['', 'Whole fleet'], ...[...data.tracks.keys()].sort().map(id => [id, nameOf(id)])], sel.unit, () => setUnit(unitSel.value));
-    const end = el('input', { type: 'datetime-local', name: 'end', value: prevEnd, title: 'End of the window; empty means now' });
+    const end = h('input', { type: 'datetime-local', name: 'end', value: prevEnd, title: 'End of the window; empty means now' });
     end.setAttribute('aria-label', 'Window end');
     end.addEventListener('change', () => load());
     const reload = action('Reload', () => load());
-    const canvas = el('canvas', { className: 'rp-map', width: 960, height: 640, tabIndex: 0 });
+    const canvas = h('canvas', { className: 'rp-map', width: 960, height: 640, tabIndex: 0 });
     canvas.setAttribute('role', 'img');
     canvas.addEventListener('click', onPick);
     const play = action('Play', () => toggle());
@@ -125,22 +117,22 @@ export function initReplay(host) {
       b.dataset.speed = String(s);
       return b;
     });
-    const scrub = el('input', { type: 'range', className: 'rp-scrub', min: 0, max: data.until - data.since, step: 100, value: 0 });
+    const scrub = h('input', { type: 'range', className: 'rp-scrub', min: 0, max: data.until - data.since, step: 100, value: 0 });
     scrub.setAttribute('aria-label', 'Replay position');
     scrub.addEventListener('input', () => { time = data.since + Number(scrub.value); paint(); });
     ui = {
       windowSel, unitSel, end, play, speeds, scrub,
-      title: el('h2', { textContent: 'Replay' }), sum: el('p', { className: 'rp-sum' }),
-      clock: el('output', { className: 'rp-clock' }),
-      canvas, warn: el('p', { className: 'rp-warn', role: 'status' }),
-      events: el('ol', { className: 'rp-events', 'aria-label': 'Events at this moment' }),
-      evHead: el('h3', { textContent: 'Events' }),
+      title: h('h2', { textContent: 'Replay' }), sum: h('p', { className: 'rp-sum' }),
+      clock: h('output', { className: 'rp-clock' }),
+      canvas, warn: h('p', { className: 'rp-warn', role: 'status' }),
+      events: h('ol', { className: 'rp-events', 'aria-label': 'Events at this moment' }),
+      evHead: h('h3', { textContent: 'Events' }),
     };
-    ui.bar = el('div', { className: 'rp-bar' }, windowSel, end, reload, unitSel);
-    ui.transport = el('div', { className: 'rp-transport', role: 'group', 'aria-label': 'Playback' }, play, ...speeds, ui.clock);
-    const side = el('aside', { className: 'rp-side' }, ui.evHead, ui.events);
+    ui.bar = h('div', { className: 'rp-bar' }, windowSel, end, reload, unitSel);
+    ui.transport = h('div', { className: 'rp-transport', role: 'group', 'aria-label': 'Playback' }, play, ...speeds, ui.clock);
+    const side = h('aside', { className: 'rp-side' }, ui.evHead, ui.events);
     root.replaceChildren(ui.title, ui.sum, ui.bar, ui.warn,
-      el('div', { className: 'rp-body' }, el('div', { className: 'rp-stage' }, canvas, ui.transport, scrub), side));
+      h('div', { className: 'rp-body' }, h('div', { className: 'rp-stage' }, canvas, ui.transport, scrub), side));
   }
 
   function paintControls() {
@@ -162,10 +154,10 @@ export function initReplay(host) {
     paintControls();
     const shown = eventsUpTo(data.events, time, 14, sel.unit);
     ui.events.replaceChildren(...(shown.length
-      ? shown.map(e => el('li', { className: `sev-${e.severity}` },
-        el('time', { textContent: clock(e.ms) }), ' ', el('b', { textContent: nameOf(e.unit) }), ` ${e.kind}`,
+      ? shown.map(e => h('li', { className: `sev-${e.severity}` },
+        h('time', { textContent: clock(e.ms) }), ' ', h('b', { textContent: nameOf(e.unit) }), ` ${e.kind}`,
         e.pos ? ` at ${Math.round(e.pos.x)}, ${Math.round(e.pos.z)}` : ''))
-      : [el('li', { className: 'rp-none', textContent: data.eventsError ? 'Unavailable.' : 'No events yet at this moment.' })]));
+      : [h('li', { className: 'rp-none', textContent: data.eventsError ? 'Unavailable.' : 'No events yet at this moment.' })]));
     ui.canvas.setAttribute('aria-label', `Replay map at ${clock(time)}. ${summary(data.tracks, data.events, data.since, data.until)}`);
     draw();
   }
@@ -269,7 +261,7 @@ export function initReplay(host) {
       mounted = true;
       data = null;
       into.append(root);
-      showState(el('p', { textContent: 'Reading the recorded positions...' }));
+      showState(h('p', { textContent: 'Reading the recorded positions...' }));
       load();
       addEventListener('resize', onResize);
     },

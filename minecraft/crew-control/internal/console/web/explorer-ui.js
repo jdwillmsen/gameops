@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The event explorer screen. explorer.js holds the logic; this file fetches
 // and paints. Signed in, the history comes from the server and a live tail
 // streams new rows; signed out, the same filter runs over the public feed the
@@ -9,15 +10,6 @@ import {
   toggleIn, fromPublic, filterAndSort, mergeRows, nextSort, tailsToTop, detailText, matchRow, sortRows,
 } from './explorer.js';
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-') || k === 'role') e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 const clock = iso => {
   const d = new Date(iso);
@@ -32,7 +24,7 @@ const localInput = iso => {
 
 // host: { statuses, order(), state(), operator(), api(method, path, body), sync() }
 export function initExplorer(host) {
-  const root = el('section', { className: 'ex' });
+  const root = h('section', { className: 'ex' });
   root.setAttribute('aria-label', 'Event explorer');
   let mounted = false;
   let filter = emptyFilter();
@@ -174,55 +166,55 @@ export function initExplorer(host) {
   }
 
   function build() {
-    parts.search = el('input', { type: 'search', placeholder: 'Search text, unit, kind, task', 'aria-label': 'Search events' });
+    parts.search = h('input', { type: 'search', placeholder: 'Search text, unit, kind, task', 'aria-label': 'Search events' });
     parts.search.addEventListener('input', () => {
       clearTimeout(parts.debounce);
       parts.debounce = setTimeout(() => change({ ...filter, q: parts.search.value.trim() }), 250);
     });
-    parts.range = el('select', { 'aria-label': 'Time range' }, ...RANGES.map(r => el('option', { value: r.id, textContent: r.id ? `Last ${r.label}` : 'All time' })), el('option', { value: 'custom', textContent: 'Custom' }));
+    parts.range = h('select', { 'aria-label': 'Time range' }, ...RANGES.map(r => h('option', { value: r.id, textContent: r.id ? `Last ${r.label}` : 'All time' })), h('option', { value: 'custom', textContent: 'Custom' }));
     parts.range.addEventListener('change', () => {
       if (parts.range.value === 'custom') { parts.custom.hidden = false; return; }
       change({ ...filter, range: parts.range.value, since: '', until: '' });
     });
-    parts.from = el('input', { type: 'datetime-local', 'aria-label': 'From' });
-    parts.to = el('input', { type: 'datetime-local', 'aria-label': 'To' });
+    parts.from = h('input', { type: 'datetime-local', 'aria-label': 'From' });
+    parts.to = h('input', { type: 'datetime-local', 'aria-label': 'To' });
     const apply = () => change({ ...filter, range: '', since: parts.from.value ? new Date(parts.from.value).toISOString() : '', until: parts.to.value ? new Date(parts.to.value).toISOString() : '' });
     parts.from.addEventListener('change', apply);
     parts.to.addEventListener('change', apply);
-    parts.custom = el('span', { className: 'ex-custom', hidden: true }, parts.from, ' to ', parts.to);
-    parts.unit = el('select', { 'aria-label': 'Add unit filter' });
+    parts.custom = h('span', { className: 'ex-custom', hidden: true }, parts.from, ' to ', parts.to);
+    parts.unit = h('select', { 'aria-label': 'Add unit filter' });
     parts.unit.addEventListener('change', () => { if (parts.unit.value) change({ ...filter, unit: toggleIn(filter.unit, parts.unit.value) }); });
-    parts.kind = el('select', { 'aria-label': 'Add kind filter' }, el('option', { value: '', textContent: 'Kind...' }), ...KINDS.map(k => el('option', { value: k, textContent: k })));
+    parts.kind = h('select', { 'aria-label': 'Add kind filter' }, h('option', { value: '', textContent: 'Kind...' }), ...KINDS.map(k => h('option', { value: k, textContent: k })));
     parts.kind.addEventListener('change', () => { if (parts.kind.value) change({ ...filter, kind: toggleIn(filter.kind, parts.kind.value) }); });
-    parts.sev = el('span', { className: 'ex-sevs', role: 'group', 'aria-label': 'Severity' }, ...SEVERITIES.map(s => {
-      const b = el('button', { type: 'button', className: 'ex-sev ' + s.id, title: s.label }, el('span', { className: 'ico', textContent: s.icon, 'aria-hidden': 'true' }), s.label);
+    parts.sev = h('span', { className: 'ex-sevs', role: 'group', 'aria-label': 'Severity' }, ...SEVERITIES.map(s => {
+      const b = h('button', { type: 'button', className: 'ex-sev ' + s.id, title: s.label }, h('span', { className: 'ico', textContent: s.icon, 'aria-hidden': 'true' }), s.label);
       b.dataset.id = s.id;
       b.addEventListener('click', () => change({ ...filter, severity: toggleIn(filter.severity, s.id) }));
       return b;
     }));
-    parts.chips = el('div', { className: 'ex-chips', 'aria-label': 'Active filters' });
-    parts.live = el('button', { type: 'button', className: 'ex-live' });
+    parts.chips = h('div', { className: 'ex-chips', 'aria-label': 'Active filters' });
+    parts.live = h('button', { type: 'button', className: 'ex-live' });
     parts.live.addEventListener('click', () => (paused ? resume() : (paused = true, paintBar())));
-    parts.count = el('span', { className: 'ex-count', role: 'status' });
-    parts.link = el('button', { type: 'button', textContent: 'Copy link', title: 'Copy a link to this filter' });
+    parts.count = h('span', { className: 'ex-count', role: 'status' });
+    parts.link = h('button', { type: 'button', textContent: 'Copy link', title: 'Copy a link to this filter' });
     parts.link.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(location.href); note('Link copied.'); } catch { note('Copy the address bar to share this view.'); }
     });
-    parts.reset = el('button', { type: 'button', textContent: 'Clear' });
+    parts.reset = h('button', { type: 'button', textContent: 'Clear' });
     parts.reset.addEventListener('click', () => change(emptyFilter()));
-    parts.views = el('select', { 'aria-label': 'Saved views' });
+    parts.views = h('select', { 'aria-label': 'Saved views' });
     parts.views.addEventListener('change', () => {
       const v = views.find(x => x.id === parts.views.value);
       if (v) change(readFilter(new URLSearchParams([...new URLSearchParams(v.query)].map(([k, x]) => ['f.' + k, x]))));
     });
-    parts.name = el('input', { type: 'text', placeholder: 'View name', maxLength: 60, 'aria-label': 'View name' });
-    parts.save = el('button', { type: 'button', textContent: 'Save view' });
+    parts.name = h('input', { type: 'text', placeholder: 'View name', maxLength: 60, 'aria-label': 'View name' });
+    parts.save = h('button', { type: 'button', textContent: 'Save view' });
     parts.save.addEventListener('click', () => { const n = parts.name.value.trim(); if (n) { saveView(n); parts.name.value = ''; } });
-    parts.del = el('button', { type: 'button', textContent: 'Delete' });
+    parts.del = h('button', { type: 'button', textContent: 'Delete' });
     parts.del.addEventListener('click', () => { if (parts.views.value) removeView(parts.views.value); });
-    parts.hint = el('span', { className: 'ex-hint' });
-    parts.saved = el('span', { className: 'ex-saved' }, parts.views, parts.del, parts.name, parts.save, parts.hint);
-    parts.note = el('span', { className: 'ex-note', role: 'status' });
+    parts.hint = h('span', { className: 'ex-hint' });
+    parts.saved = h('span', { className: 'ex-saved' }, parts.views, parts.del, parts.name, parts.save, parts.hint);
+    parts.note = h('span', { className: 'ex-note', role: 'status' });
     parts.grid = createTable({
       label: 'Events',
       className: 'ex-table',
@@ -239,7 +231,7 @@ export function initExplorer(host) {
         { key: 'at', label: 'Time', sortable: true, className: 'ex-time', text: r => clock(r.at) },
         {
           key: 'severity', label: 'Level', sortable: true, className: 'ex-level', sig: r => r.severity,
-          node: r => { const sev = severityOf(r.severity); return [el('span', { className: 'ico', textContent: sev.icon, 'aria-hidden': 'true' }), sev.label]; },
+          node: r => { const sev = severityOf(r.severity); return [h('span', { className: 'ico', textContent: sev.icon, 'aria-hidden': 'true' }), sev.label]; },
         },
         { key: 'unit', label: 'Unit', sortable: true, text: r => { const name = (host.statuses.get(r.unit) || {}).name; return name ? `${name} (${r.unit})` : r.unit; } },
         { key: 'kind', label: 'Kind', sortable: true, text: r => r.kind },
@@ -247,14 +239,14 @@ export function initExplorer(host) {
       ],
     });
     parts.table = parts.grid.el;
-    parts.more = el('button', { type: 'button', className: 'ex-more', textContent: 'Load more' });
+    parts.more = h('button', { type: 'button', className: 'ex-more', textContent: 'Load more' });
     parts.more.addEventListener('click', () => load(true));
     parts.empty = parts.grid.note;
     root.replaceChildren(
-      el('div', { className: 'ex-bar' }, parts.search, parts.range, parts.custom, parts.unit, parts.kind, parts.sev),
-      el('div', { className: 'ex-bar' }, parts.chips, parts.reset, parts.link),
-      el('div', { className: 'ex-bar' }, parts.live, parts.count, parts.note, parts.saved),
-      el('div', { className: 'ex-scroll' }, parts.table, parts.empty, parts.more),
+      h('div', { className: 'ex-bar' }, parts.search, parts.range, parts.custom, parts.unit, parts.kind, parts.sev),
+      h('div', { className: 'ex-bar' }, parts.chips, parts.reset, parts.link),
+      h('div', { className: 'ex-bar' }, parts.live, parts.count, parts.note, parts.saved),
+      h('div', { className: 'ex-scroll' }, parts.table, parts.empty, parts.more),
     );
   }
 
@@ -262,7 +254,7 @@ export function initExplorer(host) {
     const ids = host.order();
     const have = parts.unit.options.length - 1;
     if (have !== ids.length) {
-      parts.unit.replaceChildren(el('option', { value: '', textContent: 'Unit...' }), ...ids.map(id => el('option', { value: id, textContent: (host.statuses.get(id) || {}).name || id })));
+      parts.unit.replaceChildren(h('option', { value: '', textContent: 'Unit...' }), ...ids.map(id => h('option', { value: id, textContent: (host.statuses.get(id) || {}).name || id })));
     }
     parts.unit.value = '';
     parts.kind.value = '';
@@ -273,7 +265,7 @@ export function initExplorer(host) {
     parts.to.value = localInput(filter.until);
     for (const b of parts.sev.children) b.setAttribute('aria-pressed', String(filter.severity.includes(b.dataset.id)));
     parts.chips.replaceChildren(...chips(filter).map(c => {
-      const b = el('button', { type: 'button', className: 'ex-chip', textContent: c.label + ' ×', title: 'Remove filter' });
+      const b = h('button', { type: 'button', className: 'ex-chip', textContent: c.label + ' ×', title: 'Remove filter' });
       b.addEventListener('click', () => change(dropChip(filter, c)));
       return b;
     }));
@@ -291,7 +283,7 @@ export function initExplorer(host) {
   }
 
   function paintViews() {
-    parts.views.replaceChildren(el('option', { value: '', textContent: views.length ? 'Saved views...' : 'No saved views' }), ...views.map(v => el('option', { value: v.id, textContent: v.name })));
+    parts.views.replaceChildren(h('option', { value: '', textContent: views.length ? 'Saved views...' : 'No saved views' }), ...views.map(v => h('option', { value: v.id, textContent: v.name })));
   }
 
   // The pos is the operator's: the public feed never carries it.

@@ -1,16 +1,8 @@
+import { h } from './kit/dom.js';
 // The "Why" panel body: the explainer's answer as sentences, the chain of
 // events behind each, and the rule that produced it. Everything here is
 // derived by fixed rules, and the panel says so.
 
-function el(tag, props = {}, ...kids) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k.includes('-')) e.setAttribute(k, v);
-    else e[k] = v;
-  }
-  e.append(...kids);
-  return e;
-}
 
 // The unexplained bucket is a row like any other, never a footnote: a
 // failure no rule covers is shown as such and given no guessed cause.
@@ -38,17 +30,17 @@ export function countText(n) {
 }
 
 export function renderWhy(result) {
-  const box = el('div', { className: 'why' });
+  const box = h('div', { className: 'why' });
   const rows = whyRows(result);
   for (const r of rows) {
-    const line = el('li', { className: `why-row why-${r.kind}` });
-    line.append(el('span', { className: 'why-text', textContent: r.count ? `${r.sentence} (${countText(r.count)})` : r.sentence }));
-    if (r.rule) line.append(' ', el('span', { className: 'why-badge', textContent: `Rule-derived: ${r.rule}`, title: 'Derived by a fixed rule, not a model' }));
+    const line = h('li', { className: `why-row why-${r.kind}` });
+    line.append(h('span', { className: 'why-text', textContent: r.count ? `${r.sentence} (${countText(r.count)})` : r.sentence }));
+    if (r.rule) line.append(' ', h('span', { className: 'why-badge', textContent: `Rule-derived: ${r.rule}`, title: 'Derived by a fixed rule, not a model' }));
     if (r.chain.length) {
       const label = r.kind === 'unexplained' ? 'events' : 'chain';
-      line.append(el('div', { className: 'why-chain', textContent: `${label}: ${r.chain.map(id => `#${id}`).join(' → ')}` }));
+      line.append(h('div', { className: 'why-chain', textContent: `${label}: ${r.chain.map(id => `#${id}`).join(' → ')}` }));
     }
-    box.append(el('ul', { className: 'why-list' }, line));
+    box.append(h('ul', { className: 'why-list' }, line));
   }
   return box;
 }

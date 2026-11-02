@@ -1,3 +1,4 @@
+import { h } from '/static/kit/dom.js';
 // The ops-console shell around the camera: roster, wall, event feed, radar,
 // palette, toasts and status bar. console.js owns the stream, the session and
 // the focused camera; this file owns everything that scales with the fleet.
@@ -18,14 +19,9 @@ import { sortCell, markSort } from '/static/kit/table.js';
 
 const $ = id => document.getElementById(id);
 
-function el(tag, props = {}, ...kids) {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-}
 
 const roleSuffix = s => (statusRole(s) ? ` (${statusRole(s)})` : '');
-const roleChip = s => (statusRole(s) ? [' ', el('span', { className: 'role ' + s.role, textContent: statusRole(s) })] : []);
+const roleChip = s => (statusRole(s) ? [' ', h('span', { className: 'role ' + s.role, textContent: statusRole(s) })] : []);
 
 const PREFS = 'crew-console-prefs';
 function loadPrefs() {
@@ -98,9 +94,9 @@ export function initOps(host) {
   function bar(value, max, kind) {
     const known = typeof value === 'number';
     const pct = known ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
-    const b = el('span', { className: `meter ${kind}` + (known && value <= 6 ? ' low' : '') });
+    const b = h('span', { className: `meter ${kind}` + (known && value <= 6 ? ' low' : '') });
     b.title = known ? `${Math.round(value)} / ${max}` : 'unknown';
-    b.append(el('i'));
+    b.append(h('i'));
     b.firstChild.style.width = pct + '%';
     return b;
   }
@@ -118,7 +114,7 @@ export function initOps(host) {
       save();
       renderRoster();
     };
-    const head = el('tr', {}, ...(op ? [el('th')] : []), ...cols.map(([key, label]) => {
+    const head = h('tr', {}, ...(op ? [h('th')] : []), ...cols.map(([key, label]) => {
       const th = sortCell({ key, label, onSort: resort, arrows: ['^', 'v'] });
       th.dataset.sort = key;
       markSort(th, prefs.sort === key, prefs.desc ? 'desc' : 'asc');
@@ -127,30 +123,30 @@ export function initOps(host) {
     const idx = new Map(host.order().map((id, i) => [id, i + 1]));
     const body = rows.map(s => {
       const al = alertsOf(s);
-      const tr = el('tr', { className: [worst(al), !s.online ? 'offline' : '', s.id === host.state().unit ? 'cur' : ''].join(' ') });
+      const tr = h('tr', { className: [worst(al), !s.online ? 'offline' : '', s.id === host.state().unit ? 'cur' : ''].join(' ') });
       tr.dataset.unit = s.id;
       if (op) {
-        const cb = el('input', { type: 'checkbox', checked: picked.has(s.id) });
+        const cb = h('input', { type: 'checkbox', checked: picked.has(s.id) });
         cb.setAttribute('aria-label', `Select ${s.name || s.id}`);
         cb.addEventListener('click', ev => ev.stopPropagation());
         cb.addEventListener('change', () => { if (cb.checked) picked.add(s.id); else picked.delete(s.id); renderRoster(); });
-        tr.append(el('td', {}, cb));
+        tr.append(h('td', {}, cb));
       }
-      const nameCell = el('td', { className: 'nm', textContent: s.name || s.id });
+      const nameCell = h('td', { className: 'nm', textContent: s.name || s.id });
       if (op && host.detail) {
         // A row click focuses the camera, so the second destination gets its
         // own explicit affordance rather than a hidden double-click.
-        const b = el('button', { type: 'button', className: 'dt-open', textContent: 'detail', title: `Open detail for ${s.name || s.id}` });
+        const b = h('button', { type: 'button', className: 'dt-open', textContent: 'detail', title: `Open detail for ${s.name || s.id}` });
         b.addEventListener('click', ev => { ev.stopPropagation(); host.detail(s.id); });
         nameCell.append(' ', b);
       }
       tr.append(
-        el('td', { className: 'num', textContent: String(idx.get(s.id)) }),
+        h('td', { className: 'num', textContent: String(idx.get(s.id)) }),
         nameCell,
-        el('td', {}, bar(s.health, 20, 'hp')),
-        el('td', {}, bar(s.hunger, 20, 'food')),
-        el('td', { className: 'task', textContent: taskLine(s) }),
-        el('td', { className: 'al', textContent: al.length ? al.map(a => a.text).join(', ') : '' }),
+        h('td', {}, bar(s.health, 20, 'hp')),
+        h('td', {}, bar(s.hunger, 20, 'food')),
+        h('td', { className: 'task', textContent: taskLine(s) }),
+        h('td', { className: 'al', textContent: al.length ? al.map(a => a.text).join(', ') : '' }),
       );
       tr.addEventListener('click', () => host.focus(s.id));
       tr.tabIndex = 0;
@@ -164,7 +160,7 @@ export function initOps(host) {
     const had = box.contains(document.activeElement) ? document.activeElement : null;
     const hadHead = had && had.closest('th[data-sort]');
     const keep = had && (hadHead ? `th[data-sort="${hadHead.dataset.sort}"] button` : had.dataset.unit ? `tr[data-unit="${had.dataset.unit}"]` : '');
-    box.replaceChildren(el('thead', {}, head), el('tbody', {}, ...body));
+    box.replaceChildren(h('thead', {}, head), h('tbody', {}, ...body));
     // Rebuilding drops keyboard focus; put it back on the equivalent header or row.
     if (keep) box.querySelector(keep)?.focus();
     const sel = $('roster-sel');
@@ -186,16 +182,16 @@ export function initOps(host) {
     const pg = pageOf(order, budget(), wallPage);
     wallPage = pg.page;
 
-    const bar = el('div', { className: 'wallbar' }, el('span', { className: 'lbl', textContent: 'Live feeds' }));
+    const bar = h('div', { className: 'wallbar' }, h('span', { className: 'lbl', textContent: 'Live feeds' }));
     for (const b of budgetsFor(order.length)) {
-      const btn = el('button', { type: 'button', textContent: budgetLabel(b), title: b === 0 ? 'Status cards only, no cameras' : `${b} cameras at a time` });
+      const btn = h('button', { type: 'button', textContent: budgetLabel(b), title: b === 0 ? 'Status cards only, no cameras' : `${b} cameras at a time` });
       btn.setAttribute('aria-pressed', String(budget() === b));
       btn.addEventListener('click', () => { prefs.budget = b; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); });
       bar.append(btn);
     }
-    bar.append(el('span', { className: 'lbl', textContent: 'Quality' }));
+    bar.append(h('span', { className: 'lbl', textContent: 'Quality' }));
     for (const q of WALL_QUALITY_CHOICES) {
-      const btn = el('button', { type: 'button', textContent: wallQualityLabel(q), title: q === 'auto' ? `Follow the frame rate; now ${wallQuality()}` : `${wallQualityLabel(q)} quality on every live feed` });
+      const btn = h('button', { type: 'button', textContent: wallQualityLabel(q), title: q === 'auto' ? `Follow the frame rate; now ${wallQuality()}` : `${wallQualityLabel(q)} quality on every live feed` });
       btn.setAttribute('aria-pressed', String(prefs.quality === q));
       btn.addEventListener('click', () => { prefs.quality = q; eased = 0; easedQuality = ''; wallPage = 0; save(); host.setView('wall'); });
       bar.append(btn);
@@ -203,23 +199,23 @@ export function initOps(host) {
     const shed = [];
     if (eased) shed.push(`${eased} live`);
     if (easedQuality) shed.push(`${easedQuality} quality`);
-    if (shed.length) bar.append(el('span', { className: 'pg', textContent: `Reduced to ${shed.join(' and ')}: low frame rate`, title: 'The page could not keep up, pick a budget or quality to try again' }));
+    if (shed.length) bar.append(h('span', { className: 'pg', textContent: `Reduced to ${shed.join(' and ')}: low frame rate`, title: 'The page could not keep up, pick a budget or quality to try again' }));
     if (pg.pages > 1) {
-      const prev = el('button', { type: 'button', textContent: '<', title: 'Previous page (,)' });
-      const next = el('button', { type: 'button', textContent: '>', title: 'Next page (.)' });
+      const prev = h('button', { type: 'button', textContent: '<', title: 'Previous page (,)' });
+      const next = h('button', { type: 'button', textContent: '>', title: 'Next page (.)' });
       prev.addEventListener('click', () => wallStep(-1));
       next.addEventListener('click', () => wallStep(1));
-      bar.append(prev, el('span', { className: 'pg', textContent: `${pg.page + 1} / ${pg.pages}` }), next);
+      bar.append(prev, h('span', { className: 'pg', textContent: `${pg.page + 1} / ${pg.pages}` }), next);
     }
-    const grid = el('div', { className: 'wallgrid' });
+    const grid = h('div', { className: 'wallgrid' });
     for (const id of pg.ids) {
-      const tile = el('div', { className: 'tile' + (pg.live ? '' : ' card') });
+      const tile = h('div', { className: 'tile' + (pg.live ? '' : ' card') });
       tile.dataset.unit = id;
-      if (pg.live) tile.append(el('iframe', { src: wallSrc(id, wallQuality()), title: id }));
-      const cover = el('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
+      if (pg.live) tile.append(h('iframe', { src: wallSrc(id, wallQuality()), title: id }));
+      const cover = h('button', { type: 'button', className: 'cover', title: 'Focus this unit' });
       cover.setAttribute('aria-label', `Focus ${id}`);
       cover.addEventListener('click', () => host.focus(id));
-      tile.append(cover, el('div', { className: 'label' }), el('div', { className: 'fx' }), el('div', { className: 'info' }));
+      tile.append(cover, h('div', { className: 'label' }), h('div', { className: 'fx' }), h('div', { className: 'info' }));
       grid.append(tile);
     }
     stage.append(bar, grid);
@@ -256,14 +252,14 @@ export function initOps(host) {
       tile.classList.toggle('crit', worst(al) === 'crit');
       tile.classList.toggle('warn', worst(al) === 'warn');
       tile.querySelector('.label').textContent = `${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
-      tile.querySelector('.fx').replaceChildren(...[...worldChips(s), ...effectChips(s)].map(c => el('span', { className: 'fxchip' + (c.harmful ? ' bad' : ''), textContent: c.label })));
+      tile.querySelector('.fx').replaceChildren(...[...worldChips(s), ...effectChips(s)].map(c => h('span', { className: 'fxchip' + (c.harmful ? ' bad' : ''), textContent: c.label })));
       const info = tile.querySelector('.info');
       if (tile.classList.contains('card')) {
         info.replaceChildren(
-          el('div', { className: 'big', textContent: s.name || s.id }, ...roleChip(s)),
-          el('div', {}, bar(s.health, 20, 'hp'), bar(s.hunger, 20, 'food')),
-          el('div', { className: 'task', textContent: taskLine(s) }),
-          el('div', { className: 'al', textContent: al.map(a => a.text).join(', ') }),
+          h('div', { className: 'big', textContent: s.name || s.id }, ...roleChip(s)),
+          h('div', {}, bar(s.health, 20, 'hp'), bar(s.hunger, 20, 'food')),
+          h('div', { className: 'task', textContent: taskLine(s) }),
+          h('div', { className: 'al', textContent: al.map(a => a.text).join(', ') }),
         );
       }
     }
@@ -282,13 +278,13 @@ export function initOps(host) {
     const s = host.statuses.get(pin);
     if (box.dataset.unit !== pin) {
       box.dataset.unit = pin;
-      const swap = el('button', { type: 'button', className: 'cover', title: 'Swap with the main view' });
+      const swap = h('button', { type: 'button', className: 'cover', title: 'Swap with the main view' });
       swap.addEventListener('click', () => { const was = host.state().unit; host.focus(pin); pin = was; renderPip(); });
-      const close = el('button', { type: 'button', className: 'x', textContent: 'x', title: 'Unpin (p)' });
+      const close = h('button', { type: 'button', className: 'x', textContent: 'x', title: 'Unpin (p)' });
       close.addEventListener('click', () => { pin = ''; renderPip(); });
       // The pinned tile is the one the viewer is watching closely, so it never
       // shares the wall's economy.
-      box.replaceChildren(el('iframe', { src: wallSrc(pin, 'high'), title: 'pinned ' + pin }), swap, el('div', { className: 'label' }), close);
+      box.replaceChildren(h('iframe', { src: wallSrc(pin, 'high'), title: 'pinned ' + pin }), swap, h('div', { className: 'label' }), close);
     }
     box.querySelector('.label').textContent = `pin ${s.name || s.id}${roleSuffix(s)}  ${badge(s)}`;
     box.classList.toggle('crit', worst(alertsOf(s)) === 'crit');
@@ -317,14 +313,14 @@ export function initOps(host) {
     const box = $('feed');
     const rows = filterEvents(feed, { unit: feedFilter.unit ? host.state().unit : '', level: prefs.level }).slice(-120);
     const atEnd = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
-    if (!feedView.render(rows, () => el('li', { className: 'empty', textContent: 'no events yet' }))) return;
+    if (!feedView.render(rows, () => h('li', { className: 'empty', textContent: 'no events yet' }))) return;
     if (atEnd) box.scrollTop = box.scrollHeight;
   }
   const feedView = createFeedView($('feed'), e => {
-    const li = el('li', { className: `ev ${e.level}` },
-      el('time', { textContent: timeText(e.at) }),
-      el('b', { textContent: e.name || e.unit }),
-      el('span', { textContent: e.text }));
+    const li = h('li', { className: `ev ${e.level}` },
+      h('time', { textContent: timeText(e.at) }),
+      h('b', { textContent: e.name || e.unit }),
+      h('span', { textContent: e.text }));
     li.addEventListener('click', () => host.focus(e.unit));
     return li;
   });
@@ -415,7 +411,7 @@ export function initOps(host) {
     if (c.dead) bits.push(`${c.dead} dead`);
     if (c.offline) bits.push(`${c.offline} offline`);
     const sb = $('sb-fleet');
-    sb.replaceChildren(...bits.map(t => el('span', { textContent: t })));
+    sb.replaceChildren(...bits.map(t => h('span', { textContent: t })));
     const a = $('sb-alerts');
     a.textContent = c.alerts ? `${c.alerts} alert${c.alerts === 1 ? '' : 's'}` : 'all clear';
     a.className = c.alerts ? 'bad' : 'good';
@@ -491,9 +487,9 @@ export function initOps(host) {
 
   function openPalette(seed) {
     closeOverlay();
-    const input = el('input', { type: 'text', placeholder: 'Type a command or a unit name', value: seed, autocomplete: 'off', spellcheck: false });
+    const input = h('input', { type: 'text', placeholder: 'Type a command or a unit name', value: seed, autocomplete: 'off', spellcheck: false });
     input.setAttribute('aria-label', 'Command palette');
-    const ul = el('ul', { role: 'listbox' });
+    const ul = h('ul', { role: 'listbox' });
     const items = paletteItems();
     let shown = [];
     let at = 0;
@@ -501,11 +497,11 @@ export function initOps(host) {
       shown = rankItems(items, input.value);
       at = Math.min(at, Math.max(0, shown.length - 1));
       ul.replaceChildren(...(shown.length ? shown.map((it, i) => {
-        const li = el('li', { className: i === at ? 'on' : '' }, el('span', { textContent: it.label }), el('em', { textContent: it.hint || '' }));
+        const li = h('li', { className: i === at ? 'on' : '' }, h('span', { textContent: it.label }), h('em', { textContent: it.hint || '' }));
         li.setAttribute('role', 'option');
         li.addEventListener('mousedown', ev => { ev.preventDefault(); run(it); });
         return li;
-      }) : [el('li', { className: 'empty', textContent: 'no match' })]));
+      }) : [h('li', { className: 'empty', textContent: 'no match' })]));
     };
     const run = it => { closeOverlay(); it.run(); };
     input.addEventListener('input', () => { at = 0; draw(); });
@@ -526,11 +522,11 @@ export function initOps(host) {
 
   function openHelp() {
     closeOverlay();
-    const dl = el('dl', {});
-    for (const [k, d] of KEYS) dl.append(el('dt', {}, el('kbd', { textContent: k })), el('dd', { textContent: d }));
+    const dl = h('dl', {});
+    for (const [k, d] of KEYS) dl.append(h('dt', {}, h('kbd', { textContent: k })), h('dd', { textContent: d }));
     const dialog = openDialog({
       label: 'Keyboard', class: 'help',
-      content: [el('h2', { textContent: 'Keyboard' }), dl],
+      content: [h('h2', { textContent: 'Keyboard' }), dl],
       onClose: () => { if (overlay === dialog) overlay = null; },
     });
     overlay = dialog;

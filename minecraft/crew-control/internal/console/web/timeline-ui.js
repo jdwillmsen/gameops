@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The timeline screen: one swim lane per unit over a chosen window, and a
 // job's steps in the order they ran. timeline.js holds the logic; this file
 // paints it. Both views carry positions in their event details, so they are
@@ -24,11 +25,6 @@ const MARK_PATH = {
 };
 const MARK_WORD = { failed: 'task failed', died: 'died', stuck: 'stuck' };
 
-function el(tag, props = {}, ...kids) {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-}
 
 function svg(tag, attrs = {}, ...kids) {
   const e = document.createElementNS(SVG, tag);
@@ -67,53 +63,53 @@ export function initTimeline(host) {
   let jobLoad = null; // { id, state, job, rows, ... }
   const seen = [];
 
-  const root = el('section', { className: 'cc-root tl' });
+  const root = h('section', { className: 'cc-root tl' });
   root.setAttribute('data-theme', 'dark');
   root.setAttribute('aria-label', 'Timeline');
 
   const tabs = ['units', 'job'].map(m => {
-    const b = el('button', { type: 'button', textContent: m === 'units' ? 'Units' : 'Job' });
+    const b = h('button', { type: 'button', textContent: m === 'units' ? 'Units' : 'Job' });
     b.addEventListener('click', () => setMode(m));
     return [m, b];
   });
-  const tabBox = el('div', { className: 'tl-group', role: 'group' }, ...tabs.map(t => t[1]));
+  const tabBox = h('div', { className: 'tl-group', role: 'group' }, ...tabs.map(t => t[1]));
   tabBox.setAttribute('aria-label', 'Timeline kind');
 
   const presets = PRESETS.map(([label, ms]) => {
-    const b = el('button', { type: 'button', textContent: label });
+    const b = h('button', { type: 'button', textContent: label });
     b.addEventListener('click', () => { span = ms; load(); });
     return [ms, b];
   });
-  const presetBox = el('div', { className: 'tl-group', role: 'group' }, ...presets.map(p => p[1]));
+  const presetBox = h('div', { className: 'tl-group', role: 'group' }, ...presets.map(p => p[1]));
   presetBox.setAttribute('aria-label', 'Window');
 
   const btn = (text, title, fn) => {
-    const b = el('button', { type: 'button', textContent: text, title });
+    const b = h('button', { type: 'button', textContent: text, title });
     b.setAttribute('aria-label', title);
     b.addEventListener('click', fn);
     return b;
   };
-  const nav = el('div', { className: 'tl-group', role: 'group' },
+  const nav = h('div', { className: 'tl-group', role: 'group' },
     btn('←', 'Earlier window', () => shift(-1)),
     btn('−', 'Zoom out', () => zoom(2, 0.5)),
     btn('+', 'Zoom in', () => zoom(0.5, 0.5)),
     btn('→', 'Later window', () => shift(1)),
     btn('Now', 'Reload ending now', () => load()));
 
-  const jobSelect = el('select');
+  const jobSelect = h('select');
   jobSelect.setAttribute('aria-label', 'Job');
   jobSelect.addEventListener('change', () => { host.state().job = jobSelect.value; host.sync(); loadJob(); });
 
-  const note = el('span', { className: 'tl-note', role: 'status' });
-  const bar = el('div', { className: 'tl-bar' }, tabBox, presetBox, jobSelect, nav, note);
+  const note = h('span', { className: 'tl-note', role: 'status' });
+  const bar = h('div', { className: 'tl-bar' }, tabBox, presetBox, jobSelect, nav, note);
 
-  const legend = el('ul', { className: 'tl-legend' });
-  const body = el('div', { className: 'tl-body' });
-  const side = el('aside', { className: 'tl-side', hidden: true });
+  const legend = h('ul', { className: 'tl-legend' });
+  const body = h('div', { className: 'tl-body' });
+  const side = h('aside', { className: 'tl-side', hidden: true });
   side.setAttribute('aria-label', 'Events');
-  const tip = el('div', { className: 'tl-tip', hidden: true });
+  const tip = h('div', { className: 'tl-tip', hidden: true });
   tip.setAttribute('role', 'tooltip');
-  root.append(bar, legend, el('div', { className: 'tl-main' }, body, side), tip);
+  root.append(bar, legend, h('div', { className: 'tl-main' }, body, side), tip);
 
   // ---- loading ----
 
@@ -168,7 +164,7 @@ export function initTimeline(host) {
     if (!host.operator()) {
       legend.replaceChildren();
       side.hidden = true;
-      body.replaceChildren(el('p', { className: 'tl-empty', textContent: 'Sign in as an operator to see the timeline.' }));
+      body.replaceChildren(h('p', { className: 'tl-empty', textContent: 'Sign in as an operator to see the timeline.' }));
       note.textContent = '';
       return;
     }
@@ -187,19 +183,19 @@ export function initTimeline(host) {
   }
 
   function legendFor(templates, markKinds) {
-    const items = templates.map(t => el('li', {}, el('span', { className: 'tl-sw', style: `background:${colorFor(t, seen)}` }), t || 'task'));
+    const items = templates.map(t => h('li', {}, h('span', { className: 'tl-sw', style: `background:${colorFor(t, seen)}` }), t || 'task'));
     for (const k of markKinds) {
       const s = svg('svg', { width: 12, height: 12, viewBox: '-6 -6 12 12', 'aria-hidden': 'true' }, svg('path', { d: MARK_PATH[k], fill: k === 'failed' ? 'none' : 'currentColor', stroke: 'currentColor', 'stroke-width': 1.6 }));
-      items.push(el('li', {}, s, MARK_WORD[k]));
+      items.push(h('li', {}, s, MARK_WORD[k]));
     }
-    items.push(el('li', {}, el('span', { className: 'tl-sw tl-sw-off' }), 'offline'), el('li', {}, el('span', { className: 'tl-sw tl-sw-dead' }), 'dead'),
-      el('li', {}, el('span', { className: 'tl-sw tl-sw-dash' }), 'cancelled or outcome unknown'));
+    items.push(h('li', {}, h('span', { className: 'tl-sw tl-sw-off' }), 'offline'), h('li', {}, h('span', { className: 'tl-sw tl-sw-dead' }), 'dead'),
+      h('li', {}, h('span', { className: 'tl-sw tl-sw-dash' }), 'cancelled or outcome unknown'));
     legend.replaceChildren(...items);
   }
 
   function paintChart() {
     if (!fetched) {
-      body.replaceChildren(el('p', { className: 'tl-empty', textContent: 'loading…' }));
+      body.replaceChildren(h('p', { className: 'tl-empty', textContent: 'loading…' }));
       return;
     }
     setNote();
@@ -356,14 +352,14 @@ export function initTimeline(host) {
   // screen, so this list is where a bar's events open.
   function openEvents(title, events, item) {
     selected = item;
-    const rows = [...events].sort((p, q) => Date.parse(p.at) - Date.parse(q.at)).map(e => el('li', { className: `tl-ev tl-ev-${e.severity}` },
-      el('time', { textContent: clock(Date.parse(e.at), true) }), el('b', { textContent: e.kind.replace(/_/g, ' ') }), el('span', { textContent: eventText(e) })));
-    const close = el('button', { type: 'button', textContent: 'Close', className: 'tl-close' });
+    const rows = [...events].sort((p, q) => Date.parse(p.at) - Date.parse(q.at)).map(e => h('li', { className: `tl-ev tl-ev-${e.severity}` },
+      h('time', { textContent: clock(Date.parse(e.at), true) }), h('b', { textContent: e.kind.replace(/_/g, ' ') }), h('span', { textContent: eventText(e) })));
+    const close = h('button', { type: 'button', textContent: 'Close', className: 'tl-close' });
     close.addEventListener('click', closeEvents);
-    const kids = [el('h3', { textContent: title }), close, rows.length ? el('ul', {}, ...rows) : el('p', { textContent: 'No events in this window.' })];
+    const kids = [h('h3', { textContent: title }), close, rows.length ? h('ul', {}, ...rows) : h('p', { textContent: 'No events in this window.' })];
     const jobId = item && item.job;
     if (jobId) {
-      const open = el('button', { type: 'button', textContent: 'Open this job' });
+      const open = h('button', { type: 'button', textContent: 'Open this job' });
       open.addEventListener('click', () => { host.state().job = jobId; mode = 'job'; host.sync(); paint(); loadJob(); });
       kids.push(open);
     }
@@ -396,8 +392,8 @@ export function initTimeline(host) {
     const list = sortedJobs();
     const ids = list.map(j => j.id);
     if (want && !ids.includes(want) && jobLoad && jobLoad.job && jobLoad.id === want) list.push(jobLoad.job);
-    const opts = list.map(j => el('option', { value: j.id, textContent: `${(j.spec && j.spec.template) || j.kind} · ${j.state} · ${clock(Date.parse(j.created), true)}` }));
-    if (!opts.length) opts.push(el('option', { value: '', textContent: 'no jobs' }));
+    const opts = list.map(j => h('option', { value: j.id, textContent: `${(j.spec && j.spec.template) || j.kind} · ${j.state} · ${clock(Date.parse(j.created), true)}` }));
+    if (!opts.length) opts.push(h('option', { value: '', textContent: 'no jobs' }));
     jobSelect.replaceChildren(...opts);
     jobSelect.value = want || (list[0] ? list[0].id : '');
   }
@@ -442,7 +438,7 @@ export function initTimeline(host) {
     if (!j || j.state !== 'ready') {
       note.textContent = '';
       const text = !j ? 'No job selected.' : j.state === 'loading' ? 'loading…' : j.state === 'missing' ? 'Job not found.' : 'Could not load that job.';
-      body.replaceChildren(el('p', { className: 'tl-empty', textContent: text }));
+      body.replaceChildren(h('p', { className: 'tl-empty', textContent: text }));
       return;
     }
     note.textContent = [j.failure ? `could not load some units (${j.failure.error})` : '', j.truncated ? 'busy units show only their newest events' : '', `${j.count} events`].filter(Boolean).join(' · ');
@@ -450,12 +446,12 @@ export function initTimeline(host) {
     const t0 = timed.length ? Math.min(...timed.map(r => r.start)) : 0;
     const t1 = timed.length ? Math.max(...timed.map(r => r.end ?? Math.min(Date.now(), j.range[1]))) : 1;
     const total = Math.max(1, t1 - t0);
-    const head = el('tr', {}, ...['#', 'Step', 'Unit', 'Task', 'Outcome', 'Started', 'Took', 'Timeline'].map(h => el('th', { textContent: h, scope: 'col' })));
+    const head = h('tr', {}, ...['#', 'Step', 'Unit', 'Task', 'Outcome', 'Started', 'Took', 'Timeline'].map(col => h('th', { textContent: col, scope: 'col' })));
     const rows = j.rows.map((r, i) => {
       const outcome = r.outcome || r.state;
       const word = r.outcome ? OUTCOME_WORD[r.outcome] || r.outcome : r.state;
       const end = r.start == null ? null : (r.end ?? Math.min(Date.now(), j.range[1]));
-      const tr = el('tr', { className: `tl-job-row tl-o-${outcome}`, tabIndex: 0 });
+      const tr = h('tr', { className: `tl-job-row tl-o-${outcome}`, tabIndex: 0 });
       tr.setAttribute('aria-label', `${r.key}, ${word}`);
       const bar = svg('svg', { class: 'tl-job-bar', width: 240, height: 14, viewBox: '0 0 240 14', 'aria-hidden': 'true' });
       if (r.start != null) {
@@ -467,7 +463,7 @@ export function initTimeline(host) {
         if (outcome === 'failed') bar.append(svg('path', { d: MARK_PATH.failed, transform: `translate(${Math.min(232, x0 + w)} 7)`, fill: 'none', stroke: '#f0efec', 'stroke-width': 2 }));
       }
       const cells = [String(i + 1), r.key, r.unit, r.template || '', r.reason ? `${word}: ${r.reason}` : word, r.start == null ? '' : clock(r.start, false), r.start == null ? '' : duration(end - r.start)];
-      tr.append(...cells.map(c => el('td', { textContent: c })), el('td', {}, bar));
+      tr.append(...cells.map(c => h('td', { textContent: c })), h('td', {}, bar));
       const open = () => openEvents(`${r.key} on ${r.unit || 'no unit'}`, r.events, { job: '' });
       tr.addEventListener('click', open);
       tr.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); } });
@@ -475,8 +471,8 @@ export function initTimeline(host) {
     });
     const used = [...new Set(j.rows.map(r => r.template).filter(Boolean))];
     legendFor(used, ['failed']);
-    const table = el('table', { className: 'tl-job' }, el('thead', {}, head), el('tbody', {}, ...rows));
-    const summary = el('p', { className: 'tl-job-sum', textContent: `${(j.job.spec && j.job.spec.template) || j.job.kind} · ${j.job.state}${j.job.reason ? ` (${j.job.reason})` : ''} · ${j.rows.length} steps${timed.length ? ` · ${duration(total)} start to finish` : ''}` });
+    const table = h('table', { className: 'tl-job' }, h('thead', {}, head), h('tbody', {}, ...rows));
+    const summary = h('p', { className: 'tl-job-sum', textContent: `${(j.job.spec && j.job.spec.template) || j.job.kind} · ${j.job.state}${j.job.reason ? ` (${j.job.reason})` : ''} · ${j.rows.length} steps${timed.length ? ` · ${duration(total)} start to finish` : ''}` });
     body.replaceChildren(summary, table);
   }
 

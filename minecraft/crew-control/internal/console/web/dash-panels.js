@@ -1,3 +1,4 @@
+import { h } from './kit/dom.js';
 // The panel contract. A panel type is
 //   { type, title, about, size: { w, h },
 //     query(ctx) -> model,            // pure, JSON-safe; ctx = { data, units, filter, now }
@@ -17,11 +18,6 @@ import { healthShare, windowSamples, throughput, outcomes, taskDurations, durati
 const MAX_BARS = 12;
 const pct = v => `${Math.round(v)}%`;
 const secs = v => (v == null ? '-' : v < 90 ? `${Math.round(v)} s` : `${Math.round(v / 60)} min`);
-const el = (tag, props = {}, ...kids) => {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-};
 const clock = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
 // Charts redraw lazily, so a wrapper only forwards the model.
@@ -44,7 +40,7 @@ const lineChart = (opts, to = m => m) => (host, { height }) => {
 // so instead and keeps the last drawing out of sight.
 const barChart = opts => (host, { height }) => {
   const chart = new BarChart(host, { registry: createRegistry(), height: opts.horizontal ? 'auto' : height, ...opts });
-  const none = el('p', { className: 'db-empty', textContent: `${opts.title}: no data in this window yet.`, hidden: true });
+  const none = h('p', { className: 'db-empty', textContent: `${opts.title}: no data in this window yet.`, hidden: true });
   chart.root.after(none);
   return {
     update: m => {
@@ -216,21 +212,21 @@ export const PANELS = {
       }),
     }),
     create: host => {
-      const body = el('tbody');
-      const root = el('figure', { className: 'cc-root cc-panel db-table' },
-        el('header', { className: 'cc-head' }, el('div', { className: 'cc-titles' }, el('h3', { className: 'cc-title', textContent: 'Unit status' }))),
-        el('div', { className: 'db-scroll' }, el('table', {}, el('caption', { className: 'cc-sr', textContent: 'Unit status' }),
-          el('thead', {}, el('tr', {}, ...['Unit', 'State', 'Health', 'Hunger', 'Task'].map(t => el('th', { scope: 'col', textContent: t, className: t === 'Health' || t === 'Hunger' ? 'cc-num' : '' })))), body)));
+      const body = h('tbody');
+      const root = h('figure', { className: 'cc-root cc-panel db-table' },
+        h('header', { className: 'cc-head' }, h('div', { className: 'cc-titles' }, h('h3', { className: 'cc-title', textContent: 'Unit status' }))),
+        h('div', { className: 'db-scroll' }, h('table', {}, h('caption', { className: 'cc-sr', textContent: 'Unit status' }),
+          h('thead', {}, h('tr', {}, ...['Unit', 'State', 'Health', 'Hunger', 'Task'].map(t => h('th', { scope: 'col', textContent: t, className: t === 'Health' || t === 'Hunger' ? 'cc-num' : '' })))), body)));
       host.append(root);
       const tone = { working: 'good', idle: 'good', dead: 'critical', offline: 'serious', stuck: 'warning' };
       return {
         update: m => {
-          body.replaceChildren(...m.rows.map(r => el('tr', {},
-            el('th', { scope: 'row', textContent: r.name }),
-            el('td', {}, statusChip(tone[r.state], STATE_LABEL[r.state])),
-            el('td', { className: 'cc-num', textContent: r.hp == null ? '-' : String(r.hp) }),
-            el('td', { className: 'cc-num', textContent: r.food == null ? '-' : String(r.food) }),
-            el('td', { textContent: r.task || '-' }))));
+          body.replaceChildren(...m.rows.map(r => h('tr', {},
+            h('th', { scope: 'row', textContent: r.name }),
+            h('td', {}, statusChip(tone[r.state], STATE_LABEL[r.state])),
+            h('td', { className: 'cc-num', textContent: r.hp == null ? '-' : String(r.hp) }),
+            h('td', { className: 'cc-num', textContent: r.food == null ? '-' : String(r.food) }),
+            h('td', { textContent: r.task || '-' }))));
         },
         destroy: () => root.remove(),
       };
@@ -246,18 +242,18 @@ export const PANELS = {
         .map(e => ({ seq: e.seq, level: e.level, who: e.name || e.unit, text: e.text, ago: ago(now - Date.parse(e.at)) })),
     }),
     create: host => {
-      const list = el('ul', { className: 'db-events' });
-      const empty = el('p', { className: 'db-empty', textContent: 'No warnings in this window.' });
-      const root = el('figure', { className: 'cc-root cc-panel db-table' },
-        el('header', { className: 'cc-head' }, el('div', { className: 'cc-titles' }, el('h3', { className: 'cc-title', textContent: 'Recent alerts' }))),
-        el('div', { className: 'db-scroll' }, list, empty));
+      const list = h('ul', { className: 'db-events' });
+      const empty = h('p', { className: 'db-empty', textContent: 'No warnings in this window.' });
+      const root = h('figure', { className: 'cc-root cc-panel db-table' },
+        h('header', { className: 'cc-head' }, h('div', { className: 'cc-titles' }, h('h3', { className: 'cc-title', textContent: 'Recent alerts' }))),
+        h('div', { className: 'db-scroll' }, list, empty));
       host.append(root);
       return {
         update: m => {
           empty.hidden = m.rows.length > 0;
-          list.replaceChildren(...m.rows.map(r => el('li', {},
+          list.replaceChildren(...m.rows.map(r => h('li', {},
             statusChip(r.level === 'crit' ? 'critical' : 'warning', r.level === 'crit' ? 'Critical' : 'Warning'),
-            el('b', { textContent: r.who }), ' ', r.text, el('span', { className: 'db-ago', textContent: ` ${r.ago} ago` }))));
+            h('b', { textContent: r.who }), ' ', r.text, h('span', { className: 'db-ago', textContent: ` ${r.ago} ago` }))));
         },
         destroy: () => root.remove(),
       };
