@@ -63,6 +63,8 @@ type Snapshot struct {
 	// Armour is every worn piece in helmet, chest, legs, boots order, the
 	// empty slots left out.
 	Armour []ArmourPiece `json:"armour,omitempty"`
+	// Env is the day phase, biome and rain as the server announced them.
+	Env Env `json:"env"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -74,6 +76,7 @@ type Tracker struct {
 
 	inv       [inventorySize]stackRef
 	armour    [armourSlots]stackRef
+	env       envState
 	itemNames map[int32]string
 	effects   map[int32]Effect
 	uniqueID  string
@@ -92,6 +95,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	t.self = runtimeID
 	t.inv = [inventorySize]stackRef{}
 	t.armour = [armourSlots]stackRef{}
+	t.env = envState{}
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
@@ -159,7 +163,14 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		t.s.Creative = p.GameType == gameTypeCreative
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
+		// The old dimension's columns would answer for the new one.
+		t.env.biomes = nil
 	default:
+		if t.applyEnvLocked(pk) {
+			// Chunks arrive all the time and say nothing of the unit's own
+			// pose, so they do not move UpdatedAt.
+			return
+		}
 		if !t.applyInventoryLocked(pk) {
 			return
 		}
@@ -208,6 +219,7 @@ func (t *Tracker) Reset() {
 	t.self = 0
 	t.inv = [inventorySize]stackRef{}
 	t.armour = [armourSlots]stackRef{}
+	t.env = envState{}
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
@@ -229,6 +241,7 @@ func (t *Tracker) Snapshot() Snapshot {
 	s.Inventory = t.inventoryLocked()
 	s.Chest = t.chestLocked()
 	s.Armour = t.armourLocked()
+	s.Env = t.envLocked()
 	s.Effects = t.effectsLocked()
 	s.UniqueID = t.uniqueID
 	return s

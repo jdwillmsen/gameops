@@ -325,7 +325,13 @@ in ticks (negative means it does not expire; a logout forgets them all), and
 is the one its record in the world save is filed under. An inventory or
 armour item that can wear out carries `durability_pct`, 0 to 100 of its wear
 left; it is absent for an item that cannot wear out and for a stack whose
-damage the unit cannot read, so absent means unknown, not full. Once the unit
+damage the unit cannot read, so absent means unknown, not full. `env` is what
+the server told the unit of the world: `day_phase` (dawn from tick 22200,
+day from 0, dusk from 12000, night from 13800; absent until the server has sent
+the time, and read from the clock as it runs between packets, frozen at the lock
+time while the day cycle is off), `biome` (a fixed list of names, else `other`;
+absent until the unit's column and the server's biome table are both known) and
+`raining`. Once the unit
 knows where it is, `threat` counts the `hostiles` (a fixed table of mob types)
 and `players` within 16 blocks, each capped at 9; it is counts alone, never a
 name, type or position, and other crew units count as players. It

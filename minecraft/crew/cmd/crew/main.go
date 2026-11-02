@@ -286,6 +286,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	gd := conn.GameData()
 	tracker.Spawn(gd.EntityRuntimeID, gd.PlayerPosition, gd.Yaw, gd.Pitch, gd.Dimension)
 	tracker.SetUniqueID(gd.EntityUniqueID)
+	tracker.SetClock(gd.Time, dayCycleOn(gd.GameRules), gd.DayCycleLockTime)
 	tracker.ItemNames(gd.Items)
 	world.Reset()
 	defer world.Reset()
