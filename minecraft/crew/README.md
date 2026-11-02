@@ -543,12 +543,16 @@ field. `session_id` (random per connection) is on `task_finished`,
 | `session_lost` | connection ended mid-task | `session ended`, `wire down` | runner |
 | `deposit_rejected` | server refused a chest transfer | `server rejected the deposit with status 6` | deposit, withdraw |
 | `no_pickup` | breaks yielded no item | `no pickup after 3 breaks` | mining skills |
-| `no_reachable_target` | nowhere to stand within reach | `no standing spot within reach of the chest` | chest, place, observe |
+| `no_reachable_target` | nowhere to stand within reach, or nothing of the kind to reach | `no standing spot within reach of the chest`, `no reachable stone in the area` | chest, place, observe |
 | `trap_climb_failed` | could not climb out of a trap | `climbing out of a trap: ...` | climb |
 | `inventory_desync` | inventory never showed the transfer | `inventory did not show the deposit within 40 ticks` | deposit, withdraw |
 | `chunk_not_loaded` | target chunk not loaded | `the chest's chunk is not loaded` | chest skills |
 | `no_path` | the pathfinder found no route | `haul gave up after repeated failures: ...: no path` | any walking skill |
-| `other` | anything not listed | `block did not break` | the fallback |
+| `placement_failed` | a block could not be put where the plan needs it | `bridging a missing stair floor: no solid neighbour to place against` | shaft, place |
+| `no_progress` | an action ran and changed nothing | `block did not break`, `no progress after 5 replans` | mining, climb, shaft |
+| `unit_died` | the unit died with the task running | `unit died` | runner |
+| `unsafe_nearby` | the task stood down for a hostile mob or a stranger | `a hostile mob is nearby` | repair |
+| `other` | anything not listed | `something nobody wrote a rule for` | the fallback |
 
 A reason that matches no rule is `other`; the rules are one table in
 `internal/task/reason.go`, checked by a test.
