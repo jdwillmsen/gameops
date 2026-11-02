@@ -5,7 +5,7 @@ integer so each cube's box-UV rectangle sits on the pixel grid.
 """
 from dataclasses import dataclass, replace
 
-from rig_common import TEXTURE, Part, pack  # noqa: F401
+from rig_common import TEXTURE, Part, collar_shape, pack  # noqa: F401
 BONES = ("body", "head", "tail", "front_left_leg", "front_right_leg", "back_left_leg", "back_right_leg")
 MANE = "mane"   # frames the head and turns with it
 MANE_BODY = "mane_chest"   # the bib and shoulder cape, which stay with the body
@@ -31,6 +31,7 @@ class CatParams:
     scale: float = 1.0
     tuft: int = 0   # length of a tail-end tuft past the tail; 0 for none
     mane: bool = False   # extra bone of boxes around the neck and shoulders, shown per variant
+    collar_z: int = 1   # how far behind the front of the chest the collar sits; clears a mane
 
 
 # Tiger: big, heavy and broad. Cheetah: slender, long-legged, small head, long tail, deep chest.
@@ -41,7 +42,7 @@ PARAMS = {
     # Lion: deep heavy chest on a lean rear, a head wider than tall, a tufted tail and a male mane.
     "lion": CatParams(body_w=11, body_h=11, body_len=22, chest_len=13, tuck=2, leg_len=9, leg_w=4,
                       head_w=10, head_h=8, head_d=8, tail_len=17, tail_w=2, tail_droop=15, head_rise=1,
-                      muzzle=(0.55, 0.45, 0.4), tuft=3, mane=True),
+                      muzzle=(0.55, 0.45, 0.4), tuft=3, mane=True, collar_z=5),
     # Black leopard: low, muscular and long, small head, very long tail.
     "black_leopard": CatParams(body_w=8, body_h=7, body_len=22, chest_len=10, tuck=0, leg_len=6, leg_w=3,
                                head_w=6, head_h=6, head_d=5, tail_len=24, tail_w=2, tail_droop=10),
@@ -62,7 +63,7 @@ def _sc(p: CatParams) -> CatParams:
 
 
 def bone_names(p: CatParams) -> tuple:
-    return BONES + ((MANE, MANE_BODY) if p.mane else ())
+    return BONES + ("collar",) + ((MANE, MANE_BODY) if p.mane else ())
 
 
 def pivots(p: CatParams) -> dict:
@@ -93,6 +94,8 @@ def _shapes(p: CatParams):
     out.append(("body", "chest", (-bw / 2, p.leg_len, -half), (bw, p.body_h, p.chest_len)))
     out.append(("body", "rear", (-bw / 2, p.leg_len + p.tuck, -half + p.chest_len),
                 (bw, p.body_h - p.tuck, rear_len)))
+
+    out.append(collar_shape(out[0][2], out[0][3], p.collar_z))
 
     pv = pivots(p)["head"]
     hw, hh, hd = p.head_w, p.head_h, p.head_d
@@ -140,12 +143,13 @@ def build(params: CatParams, identifier: str = "geometry.gameops.cat") -> dict:
     pv = pivots(p)
     bones = []
     parts = layout(params)
+    pv["collar"] = pv["body"]
     pv[MANE] = pv["head"]
     pv[MANE_BODY] = pv["body"]
     for bone in bone_names(p):
         entry = {"name": bone, "pivot": pv[bone]}
         # Head, tail, mane and rear legs ride on the body so a sitting pitch carries them down with it.
-        if bone in ("head", "tail", "back_left_leg", "back_right_leg", MANE_BODY):
+        if bone in ("head", "tail", "back_left_leg", "back_right_leg", MANE_BODY, "collar"):
             entry["parent"] = "body"
         if bone == MANE:
             entry["parent"] = "head"

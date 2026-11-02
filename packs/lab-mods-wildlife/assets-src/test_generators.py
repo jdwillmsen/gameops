@@ -19,6 +19,7 @@ import build_textures  # noqa: E402
 import bear_rig  # noqa: E402
 import cat_rig  # noqa: E402
 import hyena_rig  # noqa: E402
+import rig_common  # noqa: E402
 import generate  # noqa: E402
 from species import SPECIES  # noqa: E402
 
@@ -160,7 +161,7 @@ class Generators(unittest.TestCase):
         for sid in CATS:
             geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
             self.assertEqual(geo["description"]["identifier"], f"geometry.gameops.{sid}")
-            expected = list(cat_rig.BONES) + (["mane", "mane_chest"] if sid == "lion" else [])
+            expected = list(cat_rig.BONES) + ["collar"] + (["mane", "mane_chest"] if sid == "lion" else [])
             self.assertEqual([b["name"] for b in geo["bones"]], expected)
             self.assertEqual(geo["description"]["texture_width"], 128)
             client = json.loads(self.load(f"resource_pack/entity/{sid}.entity.json"))
@@ -526,6 +527,51 @@ class Generators(unittest.TestCase):
         hyena = re.search(r'"gameops:hyena": \{(.*?)\n  \},', main, re.S).group(1)
         for part in ('interval: 40', 'effect: "strength"', 'targets: ["self"]', 'range: 8'):
             self.assertIn(part, hyena)
+
+    def test_tamed_animals_wear_a_collar_on_the_neck_in_its_own_uv_region(self):
+        for s in SPECIES.values():
+            geo = json.loads(self.load(f"resource_pack/models/entity/{s.id}.geo.json"))["minecraft:geometry"][0]
+            bones = {b["name"]: b for b in geo["bones"]}
+            self.assertEqual(bones["collar"]["parent"], "body", s.id)
+            self.assertEqual(len(bones["collar"]["cubes"]), 1, s.id)
+            collar, chest = bones["collar"]["cubes"][0], bones["body"]["cubes"][0]
+            # It wraps the front of the chest, just behind the head, and is proud of it on every side.
+            self.assertLess(collar["origin"][0], chest["origin"][0], s.id)
+            self.assertLess(collar["origin"][1], chest["origin"][1], s.id)
+            self.assertGreater(collar["origin"][1] + collar["size"][1], chest["origin"][1] + chest["size"][1], s.id)
+            self.assertGreater(collar["origin"][2], chest["origin"][2], s.id)
+            self.assertLess(collar["origin"][2], chest["origin"][2] + chest["size"][2], s.id)
+            ent = build_behavior.entity_json(s)["minecraft:entity"]
+            prop = ent["description"]["properties"]["gameops:tamed"]
+            self.assertEqual((prop["type"], prop["default"], prop["client_sync"]), ("bool", False, True), s.id)
+            self.assertEqual(ent["events"]["gameops:on_tamed"]["set_property"], {"gameops:tamed": True}, s.id)
+            ctl = json.loads(self.load(f"resource_pack/render_controllers/{s.id}.render_controllers.json"))
+            rc = ctl["render_controllers"][f"controller.render.gameops.{s.id}"]
+            self.assertIn({"collar": "query.property('gameops:tamed')"}, rc["part_visibility"], s.id)
+
+    def test_collar_is_painted_and_only_in_free_texture_space(self):
+        for s in SPECIES.values():
+            layout = build_models.rig_layout(s)
+            collar = next(p for p in layout if p.name == "collar")
+            self.assertEqual(len([p for p in layout if p.name == "collar"]), 1)
+            w, h, d = collar.size
+            rect = (collar.uv[0], collar.uv[1], collar.uv[0] + 2 * d + 2 * w, collar.uv[1] + d + h)
+            for p in layout:
+                if p is collar:
+                    continue
+                other = (p.uv[0], p.uv[1], p.uv[0] + 2 * p.size[2] + 2 * p.size[0], p.uv[1] + p.size[2] + p.size[1])
+                self.assertFalse(rect[0] < other[2] and other[0] < rect[2] and rect[1] < other[3] and other[1] < rect[3],
+                                 f"{s.id} collar overlaps {p.name}")
+            for variant, path in build_textures.texture_names(s):
+                px = build_textures.paint(s, variant)
+                self.assertEqual(px, self.load(f"resource_pack/{path}.png"))
+
+    def test_collar_does_not_move_any_other_cube(self):
+        for s in SPECIES.values():
+            with_collar = {p.name: p.uv for p in build_models.rig_layout(s) if p.name != "collar"}
+            rig = build_models.RIGS[s.rig]
+            shapes = [x for x in rig._shapes(rig.PARAMS[s.id]) if x[1] != "collar"]
+            self.assertEqual(with_collar, {p.name: p.uv for p in rig_common.pack(shapes)}, s.id)
 
     def test_sitting_is_readable_from_script(self):
         for s in SPECIES.values():

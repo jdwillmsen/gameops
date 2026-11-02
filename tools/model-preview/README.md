@@ -4,7 +4,7 @@ Clips of the wildlife pack's models, rendered in the web Blockbench, for quick
 art review. Models only, no gameplay.
 
 ```
-tools/model-preview/render.sh [--animal tiger,lion] [--fast] [--out DIR] [--pack DIR]
+tools/model-preview/render.sh [--animal tiger,lion] [--fast] [--tamed] [--out DIR] [--pack DIR]
 tools/model-preview/render.test.sh     # smoke test: one animal, fast mode
 ```
 
@@ -13,7 +13,7 @@ layout) unless `--out` is given. Per animal and skin variant: a 360 degree
 `<animal>_<skin>.turntable.mp4`, one loop per pack animation
 (`walk`, `idle`, `sit`, `attack`), and one `<animal>.contact-sheet.png` (a row
 per variant: four turntable angles, then one frame per animation). Videos are
-never committed. `--fast` renders eight turntable frames and a short walk clip.
+never committed. `--fast` renders eight turntable frames and a short walk clip. `--tamed` shows the collar bone, which the game hides until `gameops:tamed` is set.
 
 ## How it works
 

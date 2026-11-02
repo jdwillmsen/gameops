@@ -8,6 +8,14 @@
           "*": "Material.default"
         }
       ],
+      "part_visibility": [
+        {
+          "*": true
+        },
+        {
+          "collar": "query.property('gameops:tamed')"
+        }
+      ],
       "arrays": {
         "textures": {
           "Array.skins": [

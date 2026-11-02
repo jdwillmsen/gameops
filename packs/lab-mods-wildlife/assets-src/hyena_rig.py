@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import rig_common
 from rig_common import Part, TEXTURE  # noqa: F401
 
-PARENTS = {"head": "body", "tail": "body", "back_left_leg": "body", "back_right_leg": "body"}
+PARENTS = {"collar": "body", "head": "body", "tail": "body", "back_left_leg": "body", "back_right_leg": "body"}
 
 
 @dataclass(frozen=True)
@@ -37,6 +37,7 @@ def pivots(p: HyenaParams) -> dict:
     x = p.body_w / 2 - p.leg_w / 2
     return {
         "body": [0, p.front_leg + p.front_h / 2, -half + 3],
+        "collar": [0, p.front_leg + p.front_h / 2, -half + 3],
         "head": [0, front_top - 2, -half + 1],
         "tail": [0, p.rear_leg + p.rear_h, half],
         "front_left_leg": [x, p.front_leg, -half + p.leg_w / 2],
@@ -61,6 +62,7 @@ def _shapes(p: HyenaParams) -> list:
     out.append(("head", "head", (-hw / 2, hy - hh / 2, pv["head"][2] - hd + 1), (hw, hh, hd)))
     mw, mh, md = p.muzzle
     out.append(("head", "muzzle", (-mw / 2, hy - hh / 2, pv["head"][2] - hd + 2 - md), (mw, mh, md)))
+    out.append(rig_common.collar_shape(out[0][2], out[0][3], 1))
     e = p.ear
     ear_z = pv["head"][2] - 3
     out.append(("head", "ear_right", (-hw / 2, hy + hh / 2, ear_z), (e, e, 1)))

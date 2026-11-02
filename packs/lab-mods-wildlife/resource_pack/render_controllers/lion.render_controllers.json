@@ -13,6 +13,9 @@
           "*": true
         },
         {
+          "collar": "query.property('gameops:tamed')"
+        },
+        {
           "mane": "query.variant == 0"
         },
         {

@@ -20,16 +20,17 @@ const VIEW = { width: 960, height: 720 };
 const FPS = 24;
 
 function parseArgs(argv) {
-  const o = { animal: [], fast: false, out: null, pack: path.resolve(here, "../../packs/lab-mods-wildlife"), chrome: process.env.CHROME ?? "/opt/google/chrome/chrome" };
+  const o = { animal: [], fast: false, tamed: false, out: null, pack: path.resolve(here, "../../packs/lab-mods-wildlife"), chrome: process.env.CHROME ?? "/opt/google/chrome/chrome" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => argv[++i] ?? die(`${a} needs a value`);
     if (a === "--animal") o.animal.push(...value().split(","));
     else if (a === "--fast") o.fast = true;
+    else if (a === "--tamed") o.tamed = true;
     else if (a === "--out") o.out = value();
     else if (a === "--pack") o.pack = path.resolve(value());
     else if (a === "--help" || a === "-h") {
-      console.log("usage: render.sh [--animal tiger,lion] [--fast] [--out DIR] [--pack DIR]");
+      console.log("usage: render.sh [--animal tiger,lion] [--fast] [--tamed] [--out DIR] [--pack DIR]");
       process.exit(0);
     } else throw new Error(`unknown argument ${a}`);
   }
@@ -49,12 +50,16 @@ function runId() {
 
 // Applies the render controller's part_visibility the way the game does for
 // one variant; anything beyond a plain `query.variant == N` is refused.
-function hiddenBones(rc, variant, name) {
+function hiddenBones(rc, variant, name, tamed) {
   const hidden = [];
   for (const entry of rc.part_visibility ?? []) {
     for (const [bone, cond] of Object.entries(entry)) {
       if (bone === "*" || cond === true) continue;
       if (cond === false) { hidden.push(bone); continue; }
+      if (/^query\.property\('gameops:tamed'\)$/.test(String(cond))) {
+        if (!tamed) hidden.push(bone);
+        continue;
+      }
       const m = /^query\.variant\s*==\s*(\d+)$/.exec(String(cond));
       if (!m) die(`${name}: unsupported part_visibility condition for ${bone}: ${cond}`);
       if (Number(m[1]) !== variant) hidden.push(bone);
@@ -63,7 +68,7 @@ function hiddenBones(rc, variant, name) {
   return hidden;
 }
 
-function loadAnimals(pack, filter) {
+function loadAnimals(pack, filter, tamed) {
   const rp = path.join(pack, "resource_pack");
   const animations = {};
   for (const f of fs.readdirSync(path.join(rp, "animations"))) Object.assign(animations, json(path.join(rp, "animations", f)).animations);
@@ -85,7 +90,7 @@ function loadAnimals(pack, filter) {
       if (!skins.length && Object.keys(d.textures).length > 1) die(`${name}: several textures but no skin array in the render controller`);
       const variant = skins.length ? skins.indexOf(key) : 0;
       if (variant < 0) die(`${name}: texture ${key} is not in the render controller's skin array`);
-      return { key, file: path.join(rp, `${tex}.png`), hidden: hiddenBones(rc, variant, name) };
+      return { key, file: path.join(rp, `${tex}.png`), hidden: hiddenBones(rc, variant, name, tamed) };
     });
     const layers = {};
     for (const [short, id] of Object.entries(d.animations)) {
@@ -195,7 +200,7 @@ const sha = (f) => crypto.createHash("sha1").update(fs.readFileSync(f)).digest("
 
 async function main() {
   const opt = parseArgs(process.argv.slice(2));
-  const animals = loadAnimals(opt.pack, opt.animal);
+  const animals = loadAnimals(opt.pack, opt.animal, opt.tamed);
   const id = runId();
   const out = path.resolve(opt.out ?? path.join(os.homedir(), "evidence/wildlife", id, "models"));
   fs.mkdirSync(out, { recursive: true });
