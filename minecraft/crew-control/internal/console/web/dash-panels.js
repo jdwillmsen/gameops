@@ -12,7 +12,7 @@ import { StatTile, statusChip } from './charts/spark.js';
 import { createRegistry } from './charts/series.js';
 import { alertsOf, ago } from './fleet.js';
 import { STATE_LABEL } from './overview.js';
-import { healthShare, windowSamples, throughput, outcomes, taskDurations, durationHistogram, median, stateOf } from './dash-data.js';
+import { healthShare, windowSamples, throughput, outcomes, taskDurations, durationHistogram, deathsByPhase, median, stateOf } from './dash-data.js';
 
 const MAX_BARS = 12;
 const pct = v => `${Math.round(v)}%`;
@@ -156,6 +156,17 @@ export const PANELS = {
     create: barChart({ title: 'Outcomes per unit', subtitle: 'done and failed in the window', horizontal: true, stacked: true }),
   },
 
+  'deaths-by-phase': {
+    title: 'Deaths by time of day',
+    about: 'Deaths in the window by the phase of day the unit was in when it was found dead. A unit with no clock counts as unknown.',
+    size: { w: 4, h: 2 },
+    query: ({ data, filter }) => {
+      const d = deathsByPhase(data.feed(), filter);
+      return { categories: d.categories.map(p => p[0].toUpperCase() + p.slice(1)), series: [{ key: 'deaths', name: 'Deaths', values: d.values }], total: d.total };
+    },
+    create: barChart({ title: 'Deaths by time of day', subtitle: 'deaths in the window, by phase of day', valueFormat: String, yFormat: v => (Number.isInteger(v) ? String(v) : '') }),
+  },
+
   'idle-time': {
     title: 'Idle time',
     about: 'Share of the time this page has watched each unit online that it had no task.',
@@ -268,6 +279,6 @@ export const PANELS = {
 export const PANEL_TYPES = new Set(Object.keys(PANELS));
 
 export function defaultLayout() {
-  const order = ['fleet-health', 'throughput', 'success-rate', 'alert-count', 'fleet-states', 'tasks-by-unit', 'unit-status', 'idle-time', 'hunger', 'task-durations', 'recent-events'];
+  const order = ['fleet-health', 'throughput', 'success-rate', 'alert-count', 'fleet-states', 'tasks-by-unit', 'deaths-by-phase', 'unit-status', 'idle-time', 'hunger', 'task-durations', 'recent-events'];
   return { panels: order.map((type, i) => ({ id: `p${i + 1}`, type, w: PANELS[type].size.w, h: PANELS[type].size.h })) };
 }

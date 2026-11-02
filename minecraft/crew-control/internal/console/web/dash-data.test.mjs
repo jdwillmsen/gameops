@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDashData, throughput, outcomes, taskDurations, durationHistogram, bucketMs, healthShare, median, pickUnits, windowSamples, stateOf } from './dash-data.js';
+import { createDashData, throughput, outcomes, taskDurations, durationHistogram, deathsByPhase, bucketMs, healthShare, median, pickUnits, windowSamples, stateOf } from './dash-data.js';
 
 const T0 = Date.parse('2026-10-26T12:00:00Z');
 const iso = s => new Date(T0 + s * 1000).toISOString();
@@ -105,4 +105,30 @@ test('health share and filters', () => {
   assert.deepEqual(pickUnits(list, F({ unit: 'b' })).map(u => u.id), ['b']);
   assert.equal(pickUnits(list, F()).length, 4);
   assert.deepEqual(windowSamples([{ t: T0 - 1 }, { t: T0 + 5 }], F()).length, 1);
+});
+
+test('deaths are counted by the phase they carry, in time order, with the rest as unknown', () => {
+  const feed = [
+    ev(1, 'a', 'died', { day_phase: 'night' }),
+    ev(2, 'b', 'died', { day_phase: 'night' }),
+    ev(3, 'a', 'died', { day_phase: 'dawn' }),
+    ev(4, 'a', 'respawned', { day_phase: 'night' }),
+    ev(5, 'c', 'died'),
+    ev(6, 'c', 'died', { day_phase: '<b>' }),
+    ev(-3600, 'a', 'died', { day_phase: 'day' }),
+  ];
+  const d = deathsByPhase(feed, F());
+  assert.deepEqual(d.categories, ['dawn', 'day', 'dusk', 'night', 'unknown']);
+  assert.deepEqual(d.values, [1, 0, 0, 2, 2]);
+  assert.equal(d.total, 5);
+  assert.equal(d.total, d.values.reduce((a, b) => a + b, 0));
+  assert.deepEqual(deathsByPhase(feed, F({ unit: 'b' })).values, [0, 0, 0, 1]);
+});
+
+test('no unknown bar while every death has a phase, and nothing to draw without deaths', () => {
+  const d = deathsByPhase([ev(1, 'a', 'died', { day_phase: 'dusk' })], F());
+  assert.deepEqual(d.categories, ['dawn', 'day', 'dusk', 'night']);
+  assert.deepEqual(d.values, [0, 0, 1, 0]);
+  const none = deathsByPhase([ev(1, 'a', 'task_done', { day_phase: 'dusk' })], F());
+  assert.deepEqual(none, { categories: [], values: [], total: 0, unknown: 0 });
 });

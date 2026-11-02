@@ -2,7 +2,7 @@
 // public view, so everything is built from the two things the stream already
 // carries: the once-a-second unit snapshot and the fleet event feed. The
 // windows are therefore what this page has watched, not stored history.
-import { mergeEvents, alertsOf, LOW } from './fleet.js';
+import { mergeEvents, alertsOf, LOW, PHASES } from './fleet.js';
 
 export const SAMPLE_MS = 5000;
 export const SAMPLE_CAP = 720; // one hour at SAMPLE_MS
@@ -170,6 +170,24 @@ export function durationHistogram(durations) {
     (d.outcome === 'done' ? done : failed)[i]++;
   }
   return { categories: DURATION_BUCKETS.map(b => b.label), done, failed };
+}
+
+// Deaths by the unit's own phase of day when it was found dead, from the
+// closed list the feed carries. A death with no clock, or any phase outside
+// the list, is counted apart as unknown rather than dropped, so the bars
+// always add up to the deaths in the window. An empty window has no
+// categories, which the panel reads as nothing to draw.
+export function deathsByPhase(feed, f) {
+  const counts = new Map([...PHASES, 'unknown'].map(p => [p, 0]));
+  for (const e of feed) {
+    if (e.kind !== 'died' || !inFilter(e, f)) continue;
+    const p = PHASES.includes(e.day_phase) ? e.day_phase : 'unknown';
+    counts.set(p, counts.get(p) + 1);
+  }
+  const unknown = counts.get('unknown');
+  const names = unknown ? [...PHASES, 'unknown'] : PHASES;
+  const total = names.reduce((n, p) => n + counts.get(p), 0);
+  return { categories: total ? names : [], values: total ? names.map(p => counts.get(p)) : [], total, unknown };
 }
 
 export const median = a => {
