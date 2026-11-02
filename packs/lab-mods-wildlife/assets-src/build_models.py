@@ -5,7 +5,7 @@ from species import Species
 
 # Every rig keeps the cat bone names, so one animation set serves all species.
 # One list for the animation file, the client entity files and their tests.
-ANIMATION_NAMES = ("walk", "sit", "idle", "attack", "baby")
+ANIMATION_NAMES = ("walk", "sit", "idle", "attack")
 ANIMATION_PREFIX = "animation.gameops.cat."
 
 SWING = "math.cos(query.modified_distance_moved * 24.0) * {amp} * query.modified_move_speed"
@@ -51,8 +51,6 @@ def animations() -> dict:
         "attack": {
             "head": {"rotation": [f"30.0 * {LUNGE}", 0, 0], "position": [0, 0, f"-3.0 * {LUNGE}"]},
         },
-        # A cub has a big head for its body; the whole model is also drawn at half size by the client entity.
-        "baby": {"head": {"scale": 1.4}},
     }
     return {
         "format_version": "1.8.0",

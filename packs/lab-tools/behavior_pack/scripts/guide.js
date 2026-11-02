@@ -66,7 +66,7 @@ const BASE_PAGES = [
     id: "life",
     title: "Cubs, drops and XP",
     body: [
-      `${Y}Cubs:${R} every wildlife animal has a cub form: half size, a big head, a third of the health, a token bite. It grows up on a timer (bears take longest) and feeding it its food speeds that up. Spawn one from the spawn menu with the Cub switch.`,
+      `${Y}Cubs:${R} every wildlife animal has a cub form: half size, a third of the health, a token bite. It grows up on a timer (bears take longest) and feeding it its food speeds that up. Spawn one from the spawn menu with the Cub switch.`,
       "",
       `${Y}Drops:${R} tiger beef and leather; cheetah rabbit and hide; lion mutton and leather; black leopard chicken, leather and bone; brown bear leather and salmon; hyena rotten flesh and bone.`,
       "",

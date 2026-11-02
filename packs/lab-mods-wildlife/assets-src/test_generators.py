@@ -84,7 +84,7 @@ class Generators(unittest.TestCase):
             self.assertEqual(ev["minecraft:entity_born"]["add"]["component_groups"], ["gameops:baby"])
             self.assertEqual(ev["gameops:grow_up"]["remove"]["component_groups"], ["gameops:baby"])
             client = json.loads(self.load(f"resource_pack/entity/{s.id}.entity.json"))["minecraft:client_entity"]["description"]
-            self.assertIn({"baby": "query.is_baby"}, client["scripts"]["animate"])
+            self.assertIn("query.is_baby", client["scripts"]["scale"])
 
     def test_species_table_has_six_animals(self):
         self.assertEqual(sorted(SPECIES), sorted(IDS))

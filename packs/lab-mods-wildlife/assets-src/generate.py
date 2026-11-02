@@ -38,7 +38,6 @@ def client_entity(s: Species) -> dict:
                         "walk", "idle",
                         {"sit": "query.is_sitting"},
                         {"attack": "variable.attack_time > 0"},
-                        {"baby": "query.is_baby"},
                     ],
                 },
                 "render_controllers": [f"controller.render.gameops.{s.id}"],
