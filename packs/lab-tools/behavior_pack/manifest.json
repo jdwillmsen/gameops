@@ -1,0 +1,50 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "gameops lab tools (behaviour)",
+    "description": "Guide, spawn and reset menus for the proving grounds",
+    "uuid": "6e464971-e096-4d86-9820-60fc50fed6c9",
+    "version": [
+      0,
+      0,
+      1
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      0
+    ]
+  },
+  "modules": [
+    {
+      "type": "script",
+      "description": "Lectern menus",
+      "language": "javascript",
+      "entry": "scripts/main.js",
+      "uuid": "445f3795-da5b-49c2-8182-fc012d8e12ea",
+      "version": [
+        0,
+        0,
+        1
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "uuid": "af5139eb-069f-49f6-a7c7-18f57a64ea67",
+      "version": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "module_name": "@minecraft/server",
+      "version": "2.0.0"
+    },
+    {
+      "module_name": "@minecraft/server-ui",
+      "version": "2.0.0"
+    }
+  ]
+}
