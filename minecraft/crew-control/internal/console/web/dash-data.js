@@ -3,6 +3,7 @@
 // carries: the once-a-second unit snapshot and the fleet event feed. The
 // windows are therefore what this page has watched, not stored history.
 import { mergeEvents, alertsOf, LOW } from './fleet.js';
+import { worldOf } from './world-compare.js';
 
 export const SAMPLE_MS = 5000;
 export const SAMPLE_CAP = 720; // one hour at SAMPLE_MS
@@ -34,9 +35,11 @@ export function createDashData() {
   let version = 0;
 
   function sample(list, now) {
-    const c = { t: now, total: list.length, working: 0, idle: 0, dead: 0, offline: 0, alerts: 0, healthy: 0 };
+    // online is the connected units per world, for the per-unit-hour rates.
+    const c = { t: now, total: list.length, working: 0, idle: 0, dead: 0, offline: 0, alerts: 0, healthy: 0, online: {} };
     for (const s of list) {
       c[stateOf(s)]++;
+      if (s.online) c.online[worldOf(s)] = (c.online[worldOf(s)] || 0) + 1;
       const a = alertsOf(s);
       if (a.length) c.alerts++;
       else c.healthy++;
@@ -156,7 +159,7 @@ export function taskDurations(feed, f) {
     else if (e.kind === 'task_done' || e.kind === 'task_failed') {
       const t0 = open.get(key);
       open.delete(key);
-      if (t0 != null && inFilter(e, f)) out.push({ unit: e.unit, secs: Math.max(0, (at(e) - t0) / 1000), outcome: e.kind === 'task_done' ? 'done' : 'failed' });
+      if (t0 != null && inFilter(e, f)) out.push({ unit: e.unit, secs: Math.max(0, (at(e) - t0) / 1000), outcome: e.kind === 'task_done' ? 'done' : 'failed', template: e.template });
     }
   }
   return out;

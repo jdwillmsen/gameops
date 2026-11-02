@@ -21,15 +21,19 @@ type Insight struct {
 	ID         int64
 	Rule       string
 	Unit       string
+	World      string
 	Severity   string
 	State      string
 	FirstSeen  time.Time
 	ResolvedAt time.Time
 	Evidence   []int64
 	Detail     string
+	// Attrs are the numbers behind a finding. They are refreshed on every
+	// evaluation without counting as a change, because they move constantly.
+	Attrs map[string]any
 }
 
-// Tracker is the firing/resolved state machine, keyed on (rule, unit) so a
+// Tracker is the firing/resolved state machine, keyed on (rule, unit, world) so a
 // condition that persists is one insight, not one per tick.
 type Tracker struct {
 	mu     sync.Mutex
@@ -53,11 +57,12 @@ func (t *Tracker) Apply(now time.Time, fs []Finding) (changed bool) {
 				in.Evidence, in.Detail, in.Severity = slices.Clone(f.Evidence), f.Detail, f.Severity
 				changed = true
 			}
+			in.Attrs = f.Attrs
 			continue
 		}
 		t.next++
-		t.live[k] = &Insight{ID: t.next, Rule: f.Rule, Unit: f.Unit, Severity: f.Severity, State: StateFiring,
-			FirstSeen: now, Evidence: slices.Clone(f.Evidence), Detail: f.Detail}
+		t.live[k] = &Insight{ID: t.next, Rule: f.Rule, Unit: f.Unit, World: f.World, Severity: f.Severity, State: StateFiring,
+			FirstSeen: now, Evidence: slices.Clone(f.Evidence), Detail: f.Detail, Attrs: f.Attrs}
 		changed = true
 	}
 	for k, in := range t.live {

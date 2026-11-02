@@ -21,6 +21,7 @@ type view struct {
 	ID         int64      `json:"id"`
 	Rule       string     `json:"rule"`
 	Unit       string     `json:"unit,omitempty"`
+	World      string     `json:"world,omitempty"`
 	Fleet      bool       `json:"fleet,omitempty"`
 	Severity   string     `json:"severity"`
 	State      string     `json:"state"`
@@ -31,6 +32,9 @@ type view struct {
 	// something to the signed-in event explorer, and keep the public view
 	// to the summary.
 	Evidence []int64 `json:"evidence,omitempty"`
+	// Attrs holds the numbers behind a finding. Detail never carries a count
+	// or a percentage, so the numbers are signed-in only as well.
+	Attrs map[string]any `json:"attrs,omitempty"`
 }
 
 // Mount registers GET /v1/insights. The summary is public, like unit status;
@@ -41,7 +45,7 @@ func (a *API) Mount(mux *http.ServeMux, g Gate) {
 		list := a.tracker.List()
 		out := make([]view, len(list))
 		for i, in := range list {
-			v := view{ID: in.ID, Rule: in.Rule, Unit: in.Unit, Fleet: in.Unit == "", Severity: in.Severity,
+			v := view{ID: in.ID, Rule: in.Rule, Unit: in.Unit, World: in.World, Fleet: in.Unit == "" && in.World == "", Severity: in.Severity,
 				State: in.State, FirstSeen: in.FirstSeen, Detail: in.Detail}
 			if !in.ResolvedAt.IsZero() {
 				t := in.ResolvedAt
@@ -49,6 +53,7 @@ func (a *API) Mount(mux *http.ServeMux, g Gate) {
 			}
 			if signed {
 				v.Evidence = in.Evidence
+				v.Attrs = in.Attrs
 			}
 			out[i] = v
 		}

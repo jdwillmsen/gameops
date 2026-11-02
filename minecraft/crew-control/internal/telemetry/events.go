@@ -40,10 +40,12 @@ type Event struct {
 	// the queue's id, which the history store keys on; the text alone cannot
 	// carry it.
 	Task string `json:"task,omitempty"`
-	// Template and Took describe a task event for the history store only: the
-	// public feed has no use for them. Took is how long the unit's own record
-	// says the task ran, zero when it is not known.
-	Template string        `json:"-"`
+	// Template is the task template a task event is about. The public feed
+	// carries it because its text already names it and the console groups
+	// by it; a reader maps it through its own closed list. Took is how long
+	// the unit's own record says the task ran, zero when it is not known,
+	// and is for the history store only.
+	Template string        `json:"template,omitempty"`
 	Took     time.Duration `json:"-"`
 	// Reason is the unit's own words for a failed task, untouched. Text carries
 	// it too, but trimmed and behind a prefix; the fleet metrics classify this.

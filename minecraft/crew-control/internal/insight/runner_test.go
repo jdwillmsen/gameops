@@ -139,3 +139,66 @@ func TestLoadKeepsTheNewestWhenThePageCapBites(t *testing.T) {
 		t.Fatalf("want the newest event last in oldest-first order, got first %v last %v", got[0].At, got[len(got)-1].At)
 	}
 }
+
+func TestAWorldInsightIsPublicButItsNumbersAreSignedInOnly(t *testing.T) {
+	tr := NewTracker()
+	tr.Apply(t0, []Finding{{Rule: RuleWorldDiverges, World: "fwb", Severity: SevWarn, Evidence: []int64{7}, Detail: "d", Attrs: map[string]any{"unit_hours": 3.5}}})
+	for _, signed := range []bool{false, true} {
+		mux := http.NewServeMux()
+		NewAPI(tr).Mount(mux, noGate{signed})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest("GET", "/v1/insights", nil))
+		var out struct {
+			Insights []struct {
+				World string         `json:"world"`
+				Unit  string         `json:"unit"`
+				Fleet bool           `json:"fleet"`
+				Attrs map[string]any `json:"attrs"`
+			}
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || len(out.Insights) != 1 {
+			t.Fatalf("body %s err %v", rec.Body, err)
+		}
+		in := out.Insights[0]
+		if in.World != "fwb" || in.Unit != "" || in.Fleet {
+			t.Errorf("signed=%v insight = %+v", signed, in)
+		}
+		if (in.Attrs != nil) != signed {
+			t.Errorf("signed=%v attrs=%v", signed, in.Attrs)
+		}
+	}
+}
+
+func TestOncePassesTheRostersWorldsToR6(t *testing.T) {
+	m := events.NewMemory()
+	now := t0.Add(3 * time.Hour)
+	worlds := map[string]string{}
+	var evs []events.Event
+	for w, rate := range map[string]int{"alpha": 40, "beta": 40, "gamma": 40, "delta": 4} {
+		u := w + "-1"
+		worlds[u] = w
+		for i := 0; i < rate; i++ {
+			e := stored(u, now.Add(-time.Hour).Add(time.Duration(i+1)*time.Hour/time.Duration(rate+2)), "task_done", "")
+			e.Payload = []byte(`{"template":"gather_and_deposit"}`)
+			evs = append(evs, e)
+		}
+	}
+	if err := m.Append(context.Background(), evs); err != nil {
+		t.Fatal(err)
+	}
+	tr := NewTracker()
+	r := NewRunner(m, tr)
+	r.Now = func() time.Time { return now }
+	r.Cfg.R6MinUnitHours = 0.9
+	r.Worlds = func() map[string]string { return worlds }
+	r.Once(context.Background())
+	var got []string
+	for _, in := range tr.List() {
+		if in.Rule == RuleWorldDiverges && in.State == StateFiring {
+			got = append(got, in.World)
+		}
+	}
+	if len(got) != 1 || got[0] != "delta" {
+		t.Fatalf("R6 insights = %v, want delta", got)
+	}
+}

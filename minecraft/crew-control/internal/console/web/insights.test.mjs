@@ -48,3 +48,11 @@ test('firing insights come first and resolved ones are capped', () => {
 });
 
 test('percent rounds', () => assert.equal(percent(0.505), '51%'));
+
+test('a world insight names the world, has no unit to explain, and carries no numbers', () => {
+  const rows = insightRows([{ id: 9, rule: 'R6', world: 'fwb', severity: 'warn', state: 'firing', first_seen: '2026-11-02T12:00:00Z', detail: 'gather_and_deposit completions per unit-hour is well below the other worlds for the last hour' }]);
+  assert.equal(rows[0].who, 'World fwb');
+  assert.equal(rows[0].unit, '', 'the Why button needs a unit, which a world finding has none of');
+  assert.equal(rows[0].ruleName, 'World diverges');
+  assert.doesNotMatch(rows[0].detail, /[0-9%]/);
+});

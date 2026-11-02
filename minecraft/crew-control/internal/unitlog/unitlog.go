@@ -38,6 +38,10 @@ const (
 	// KindRubberbanding is the server repeatedly overruling a unit's
 	// movement; the payload has the correction count and window only.
 	KindRubberbanding = "rubberbanding"
+	// KindOnline and KindOffline mark a unit's connection coming and going;
+	// the rules that need exposure time read them.
+	KindOnline  = "online"
+	KindOffline = "offline"
 )
 
 // Event carries no position by construction.

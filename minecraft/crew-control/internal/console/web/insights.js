@@ -6,6 +6,7 @@ export const RULE_NAMES = {
   R2: 'Throughput drop',
   R3: 'Long task',
   R4: 'Fleet-wide',
+  R6: 'World diverges',
 };
 
 export function percent(x) {
@@ -48,8 +49,8 @@ export function insightRows(list, maxResolved = 3) {
   const resolved = (list || []).filter(i => i.state !== 'firing').slice(0, maxResolved);
   return [...firing, ...resolved].map(i => ({
     id: i.id,
-    unit: i.fleet ? '' : i.unit,
-    who: i.fleet ? 'Fleet' : i.unit,
+    unit: i.fleet || i.world ? '' : i.unit,
+    who: i.world ? `World ${i.world}` : i.fleet ? 'Fleet' : i.unit,
     rule: i.rule,
     ruleName: RULE_NAMES[i.rule] || i.rule,
     severity: i.severity,

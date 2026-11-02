@@ -245,7 +245,12 @@ func main() {
 	go func() { poller.Run(ctx); close(pollDone) }()
 
 	insightDone := make(chan struct{})
-	go func() { insight.NewRunner(eventLog, insights).Run(ctx); close(insightDone) }()
+	go func() {
+		r := insight.NewRunner(eventLog, insights)
+		r.Worlds = func() map[string]string { return worldsOf(units) }
+		r.Run(ctx)
+		close(insightDone)
+	}()
 
 	recordDone := make(chan struct{})
 	go func() { recorder.Run(ctx); close(recordDone) }()
@@ -309,6 +314,16 @@ func recordGathering(now time.Time, ids []string, tracker *gather.Tracker, fleet
 			heatmap.AddYield(id, now, float64(p.X), float64(p.Z), g.Total())
 		}
 	}
+}
+
+// worldsOf maps each rostered unit to its world, for the rules that compare
+// worlds.
+func worldsOf(r roster.Roster) map[string]string {
+	out := map[string]string{}
+	for _, u := range r.Units() {
+		out[u.ID] = u.World
+	}
+	return out
 }
 
 // mountMetrics serves /metrics on the listener the cluster scrapes. It is

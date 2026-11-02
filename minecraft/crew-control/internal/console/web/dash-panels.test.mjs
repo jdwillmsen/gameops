@@ -52,3 +52,34 @@ test('a single point is padded so a line has a width', () => {
   const keep = { x: [1, 2], series: [] };
   assert.equal(twoPoints(keep), keep);
 });
+
+test('the world panel is on the Add menu, reads the filter, and is JSON-safe in every state', () => {
+  assert.ok(PANEL_TYPES.has('world-compare'));
+  assert.ok(!defaultLayout().panels.some(p => p.type === 'world-compare'), 'one lab has nothing to compare, so it is added on request');
+  assert.deepEqual(normalizeLayout({ panels: [{ id: 'p1', type: 'world-compare', w: 12, h: 4 }] }, PANEL_TYPES).panels.map(p => p.type), ['world-compare']);
+
+  const c = ctx();
+  const m = PANELS['world-compare'].query(c);
+  assert.equal(m.state, 'ready');
+  assert.deepEqual(m.worlds.map(w => w.world), ['lab'], 'units from a server that names no world are in the lab');
+  assert.equal(m.worlds[0].online, 3);
+  assert.ok(m.worlds[0].cells.every(x => x.delta === null), 'a lone world has no median to differ from');
+  assert.deepEqual(m.chart.categories, ['other'], 'a finished task with no template is counted as other');
+  assert.doesNotThrow(() => JSON.stringify(m));
+
+  const empty = createDashData();
+  assert.equal(PANELS['world-compare'].query({ data: empty, units: [], filter: c.filter, now: c.now }).state, 'loading');
+});
+
+test('a failure inside the comparison becomes an error state, not a blank panel', () => {
+  const broken = { data: { feed: () => { throw new Error('x'); }, samples: () => [] }, units: [unit('a')], filter: { unit: '', from: 0, to: 1 }, now: 1 };
+  const silence = console.error;
+  console.error = () => {};
+  try {
+    const m = PANELS['world-compare'].query(broken);
+    assert.equal(m.state, 'error');
+    assert.match(m.message, /^Could not compare the worlds\./);
+  } finally {
+    console.error = silence;
+  }
+});
