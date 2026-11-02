@@ -94,7 +94,7 @@ class Generators(unittest.TestCase):
                 self.assertEqual(rolled, groups)
                 for v in s.variants:
                     own = ev[f"gameops:set_variant_{v}"]
-                    self.assertEqual(own["add"]["component_groups"], [f"gameops:variant_{v}"])
+                    self.assertEqual(own["add"]["component_groups"], [f"gameops:variant_{v}", "gameops:baby"])
                     self.assertNotIn(f"gameops:variant_{v}", own["remove"]["component_groups"])
                     self.assertEqual(len(own["remove"]["component_groups"]), len(s.variants) - 1)
             else:

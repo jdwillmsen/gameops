@@ -446,7 +446,8 @@
       "gameops:set_variant_orange": {
         "add": {
           "component_groups": [
-            "gameops:variant_orange"
+            "gameops:variant_orange",
+            "gameops:baby"
           ]
         },
         "remove": {
@@ -458,7 +459,8 @@
       "gameops:set_variant_white": {
         "add": {
           "component_groups": [
-            "gameops:variant_white"
+            "gameops:variant_white",
+            "gameops:baby"
           ]
         },
         "remove": {

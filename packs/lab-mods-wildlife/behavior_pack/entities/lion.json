@@ -471,7 +471,8 @@
       "gameops:set_variant_male": {
         "add": {
           "component_groups": [
-            "gameops:variant_male"
+            "gameops:variant_male",
+            "gameops:baby"
           ]
         },
         "remove": {
@@ -483,7 +484,8 @@
       "gameops:set_variant_female": {
         "add": {
           "component_groups": [
-            "gameops:variant_female"
+            "gameops:variant_female",
+            "gameops:baby"
           ]
         },
         "remove": {

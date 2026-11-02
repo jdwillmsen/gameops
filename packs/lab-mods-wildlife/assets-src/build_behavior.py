@@ -155,14 +155,16 @@ def entity_json(s: Species) -> dict:
             {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]})
 
     # entity_born replaces entity_spawned, so a bred cub rolls its variant here; main.js then overrides it with
-    # its parent's through the set_variant events.
+    # its parent's through the set_variant events. Those re-add the baby group last, since a variant's health
+    # (alpha hyena) would otherwise replace the cub's.
     variant_roll, variant_events = [], {}
     if s.variants:
         variant_roll = [{"randomize": [
             {"weight": 1, "add": {"component_groups": [f"gameops:variant_{name}"]}} for name in s.variants]}]
         for name in s.variants:
             others = [f"gameops:variant_{o}" for o in s.variants if o != name]
-            variant_events[f"gameops:set_variant_{name}"] = event(add=[f"gameops:variant_{name}"], remove=others)
+            variant_events[f"gameops:set_variant_{name}"] = event(
+                add=[f"gameops:variant_{name}", "gameops:baby"], remove=others)
 
     w, h = s.box
     return {
