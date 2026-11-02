@@ -95,6 +95,36 @@ func TestWebsocketStreamsTheWorldAndEnforcesTheViewerCap(t *testing.T) {
 	}
 }
 
+func TestViewerStartsAtTheQualitysRadius(t *testing.T) {
+	for _, c := range []struct {
+		query string
+		want  int
+	}{
+		{"?q=low", 1},
+		{"?q=med", 2},
+		{"?q=high", 2},
+		{"?q=ultra", 2},
+		{"?r=1&q=med", 1},
+	} {
+		t.Run(c.query, func(t *testing.T) {
+			tr := belief.New(time.Now)
+			tr.Spawn(self, mgl32.Vec3{}, 0, 0, 0)
+			h := New(Options{Decoder: fakeDecoder{section: stoneOnFloor()}, Self: tr, MaxViewers: 1})
+			h.Spawn(self)
+			placeUnit(h, tr, 8, 8, 8)
+			h.Apply(subChunkPacket(0, 0, 0), &sink{})
+			h.Apply(subChunkPacket(3, 0, 0), &sink{})
+			srv := httptest.NewServer(Mount(okBase(), h))
+			defer srv.Close()
+
+			conn := dialQuery(t, srv, c.query)
+			if n := count(subChunkCounts(conn), 300*time.Millisecond); n != c.want {
+				t.Errorf("%q replayed %d chunks, want %d", c.query, n, c.want)
+			}
+		})
+	}
+}
+
 // subChunkCounts reads frames in the background and reports each sub-chunk
 // as it arrives; a timed-out Read would close the connection.
 func subChunkCounts(c *websocket.Conn) <-chan struct{} {
@@ -239,6 +269,10 @@ func TestMesherWorkerIsServed(t *testing.T) {
 
 func TestSkyModuleIsServed(t *testing.T) {
 	servedScript(t, "/v1/camera/sky.js", skyJS)
+}
+
+func TestQualityModuleIsServed(t *testing.T) {
+	servedScript(t, "/v1/camera/quality.js", qualityJS)
 }
 
 func servedScript(t *testing.T, path string, want []byte) {
