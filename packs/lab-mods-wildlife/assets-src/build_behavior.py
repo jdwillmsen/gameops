@@ -108,8 +108,22 @@ def entity_json(s: Species) -> dict:
         # on_sit also removes the active goals; priority 1 keeps lower-priority wandering from moving it.
         "minecraft:behavior.stay_while_sitting": {"priority": 1},
     }
+    # A cub: half-size hitbox, a third of the health, a token bite, and it grows up on its own timer (feeding
+    # it speeds that up). Adding the group is all it takes, so a console summon or a birth use the same event.
+    w0, h0 = s.box
+    baby = {
+        "minecraft:is_baby": {},
+        "minecraft:collision_box": {"width": round(w0 / 2, 2), "height": round(h0 / 2, 2)},
+        "minecraft:health": {"value": max(6, round(s.health / 3)), "max": max(6, round(s.health / 3))},
+        "minecraft:attack": {"damage": 1},
+        "minecraft:ageable": {
+            "duration": s.grow_seconds,
+            "feed_items": [s.tame_item],
+            "grow_up": {"event": "gameops:grow_up", "target": "self"},
+        },
+    }
     groups = {"gameops:wild": wild, "gameops:tamed": tamed, "gameops:tamed_active": active,
-              "gameops:sitting": sitting}
+              "gameops:sitting": sitting, "gameops:baby": baby}
     ability_events = {}
     if s.active_speed:
         ability_group_defs, ability_events = ability_groups(s)
@@ -165,6 +179,9 @@ def entity_json(s: Species) -> dict:
                                       props={SITTING_PROPERTY: True}),
                 "gameops:on_stand": event(add=["gameops:tamed_active"], remove=["gameops:sitting"],
                                         props={SITTING_PROPERTY: False}),
+                "gameops:as_baby": event(add=["gameops:baby"]),
+                "minecraft:entity_born": event(add=["gameops:baby"]),
+                "gameops:grow_up": event(remove=["gameops:baby"]),
                 **ability_events,
             },
         },

@@ -63,6 +63,21 @@ const BASE_PAGES = [
     ].join("\n"),
   },
   {
+    id: "life",
+    title: "Cubs, drops and XP",
+    body: [
+      `${Y}Cubs:${R} every wildlife animal has a cub form: half size, a big head, a third of the health, a token bite. It grows up on a timer (bears take longest) and feeding it its food speeds that up. Spawn one from the spawn menu with the Cub switch.`,
+      "",
+      `${Y}Drops:${R} tiger beef and leather; cheetah rabbit and hide; lion mutton and leather; black leopard chicken, leather and bone; brown bear leather and salmon; hyena rotten flesh and bone.`,
+      "",
+      `${Y}XP${R} is paid only when a player lands the last hit: tiger 8, cheetah 5, lion 7, leopard 6, bear 10, hyena 5.`,
+      "",
+      `${Y}Taming${R} shows hearts and a chime. The brown bear is drawn about a third larger than the cats' scale.`,
+      "",
+      "Coming: breeding with a litter size per species, a collar on tamed animals, animal armor.",
+    ].join("\n"),
+  },
+  {
     id: "stage0",
     title: "Stage 0 mobs",
     body: [

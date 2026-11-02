@@ -31,11 +31,16 @@ def client_entity(s: Species) -> dict:
                 "textures": textures,
                 "geometry": {"default": f"geometry.gameops.{s.id}"},
                 "animations": {n: build_models.ANIMATION_PREFIX + n for n in build_models.ANIMATION_NAMES},
-                "scripts": {"animate": [
-                    "walk", "idle",
-                    {"sit": "query.is_sitting"},
-                    {"attack": "variable.attack_time > 0"},
-                ]},
+                "scripts": {
+                    "scale": f"{s.adult_scale} * (query.is_baby ? 0.5 : 1.0)" if s.adult_scale != 1.0
+                    else "query.is_baby ? 0.5 : 1.0",
+                    "animate": [
+                        "walk", "idle",
+                        {"sit": "query.is_sitting"},
+                        {"attack": "variable.attack_time > 0"},
+                        {"baby": "query.is_baby"},
+                    ],
+                },
                 "render_controllers": [f"controller.render.gameops.{s.id}"],
                 "spawn_egg": {"base_color": s.egg[0], "overlay_color": s.egg[1]},
             },

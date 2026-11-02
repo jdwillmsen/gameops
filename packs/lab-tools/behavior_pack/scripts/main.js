@@ -2,7 +2,7 @@ import { world, system, BlockPermutation, SignSide } from "@minecraft/server";
 import { ActionFormData, ModalFormData, FormCancelationReason } from "@minecraft/server-ui";
 import {
   STAND_Y, stationAt, clampCount, spawnPoint, spawnEventFor, resetAreas, SPAWNABLE, DRAGON_TIERS, TELEPORTS,
-  inLab, penCenter, padAt, signs,
+  inLab, penCenter, padAt, signs, hasCubForm,
 } from "./logic.js";
 import { GUIDE_PAGES, PEN_NOTES, STATION_NOTES } from "./guide.js";
 
@@ -44,10 +44,17 @@ async function guideMenu(player) {
   if (back) await guideMenu(player);
 }
 
-function spawnOne(player, id, tier, index) {
+function spawnOne(player, id, tier, index, baby = false) {
   const dir = player.getViewDirection();
   const p = spawnPoint(player.location, dir, SPAWN_DISTANCE, index);
   const entity = player.dimension.spawnEntity(`gameops:${id}`, p);
+  if (baby && hasCubForm(id)) {
+    try {
+      entity.triggerEvent("gameops:as_baby");
+    } catch {
+      say(player, "this pack version has no cub form yet");
+    }
+  }
   const event = spawnEventFor(id, tier);
   if (event) {
     try {
@@ -65,14 +72,15 @@ async function spawnMenu(player, preset) {
     .title("Spawn")
     .dropdown("Mob", names, { defaultValueIndex: Math.max(0, SPAWNABLE.indexOf(preset ?? SPAWNABLE[0])) })
     .slider("How many", 1, 8, { valueStep: 1, defaultValue: 1 })
-    .dropdown("Dragon health (dragon only)", DRAGON_TIERS.map((t) => `${t} hp`), { defaultValueIndex: 1 });
+    .dropdown("Dragon health (dragon only)", DRAGON_TIERS.map((t) => `${t} hp`), { defaultValueIndex: 1 })
+    .toggle("Cub (wildlife animals only)", { defaultValue: false });
   const res = await show(form, player);
   if (res.canceled || !res.formValues) return;
-  const [mobIndex, countRaw, tierIndex] = res.formValues;
+  const [mobIndex, countRaw, tierIndex, baby] = res.formValues;
   const id = SPAWNABLE[mobIndex];
   const count = clampCount(countRaw);
-  for (let i = 0; i < count; i++) spawnOne(player, id, DRAGON_TIERS[tierIndex], i);
-  say(player, `spawned ${count} ${id.replace(/_/g, " ")} in front of you`);
+  for (let i = 0; i < count; i++) spawnOne(player, id, DRAGON_TIERS[tierIndex], i, baby === true);
+  say(player, `spawned ${count} ${baby && hasCubForm(id) ? "cub " : ""}${id.replace(/_/g, " ")} in front of you`);
 }
 
 function resetArea(player, area) {
@@ -273,7 +281,8 @@ function selfCheck() {
   try {
     new ModalFormData().title("t")
       .dropdown("m", ["a", "b"], { defaultValueIndex: 0 })
-      .slider("n", 1, 8, { valueStep: 1, defaultValue: 1 });
+      .slider("n", 1, 8, { valueStep: 1, defaultValue: 1 })
+      .toggle("b", { defaultValue: false });
     new ActionFormData().title("t").body("b").button("x");
     console.warn("gameops:tools forms ok");
   } catch (e) {

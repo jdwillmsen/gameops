@@ -17,9 +17,11 @@
         "walk": "animation.gameops.cat.walk",
         "sit": "animation.gameops.cat.sit",
         "idle": "animation.gameops.cat.idle",
-        "attack": "animation.gameops.cat.attack"
+        "attack": "animation.gameops.cat.attack",
+        "baby": "animation.gameops.cat.baby"
       },
       "scripts": {
+        "scale": "query.is_baby ? 0.5 : 1.0",
         "animate": [
           "walk",
           "idle",
@@ -28,6 +30,9 @@
           },
           {
             "attack": "variable.attack_time > 0"
+          },
+          {
+            "baby": "query.is_baby"
           }
         ]
       },

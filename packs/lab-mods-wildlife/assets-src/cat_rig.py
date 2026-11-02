@@ -76,8 +76,9 @@ def pivots(p: CatParams) -> dict:
         "tail": [0, top - p.tail_w, half - 1],
         "front_left_leg": [p.body_w / 2 - p.leg_w / 2, p.leg_len, -half + p.leg_w / 2],
         "front_right_leg": [-(p.body_w / 2 - p.leg_w / 2), p.leg_len, -half + p.leg_w / 2],
-        "back_left_leg": [p.body_w / 2 - p.leg_w / 2, p.leg_len, half - p.leg_w / 2],
-        "back_right_leg": [-(p.body_w / 2 - p.leg_w / 2), p.leg_len, half - p.leg_w / 2],
+        # The rear body is tucked up by `tuck`, so the hind legs are that much longer to meet it.
+        "back_left_leg": [p.body_w / 2 - p.leg_w / 2, p.leg_len + p.tuck, half - p.leg_w / 2],
+        "back_right_leg": [-(p.body_w / 2 - p.leg_w / 2), p.leg_len + p.tuck, half - p.leg_w / 2],
     }
 
 
@@ -125,7 +126,8 @@ def _shapes(p: CatParams):
 
     for bone in BONES[3:]:
         cx, _, cz = pivots(p)[bone]
-        out.append((bone, bone, (cx - p.leg_w / 2, 0, cz - p.leg_w / 2), (p.leg_w, p.leg_len, p.leg_w)))
+        height = p.leg_len + (p.tuck if bone.startswith("back") else 0)
+        out.append((bone, bone, (cx - p.leg_w / 2, 0, cz - p.leg_w / 2), (p.leg_w, height, p.leg_w)))
     return out
 
 

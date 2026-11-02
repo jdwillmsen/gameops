@@ -27,12 +27,17 @@ class Species:
     # player landed the last hit, so lava and falls cannot farm it.
     drops: tuple = ()
     xp: int = 0
+    # How much larger than the shared model the adult is drawn; the hitbox in `box` already includes it.
+    adult_scale: float = 1.0
+    # Seconds a cub takes to grow up; feeding it speeds that up.
+    grow_seconds: int = 900
 
 
 def _s(id, health, damage, speed, tame_item, prey, rivals, variants, ability, rig, box, egg,
-       active_speed=0.0, tired_speed=0.0, pounce=False, variant_health=(), drops=(), xp=0):
+       active_speed=0.0, tired_speed=0.0, pounce=False, variant_health=(), drops=(), xp=0,
+       adult_scale=1.0, grow_seconds=900):
     return Species(id, f"gameops_{id}", health, damage, speed, tame_item, prey, rivals, variants, ability, rig,
-                   box, egg, active_speed, tired_speed, pounce, variant_health, drops, xp)
+                   box, egg, active_speed, tired_speed, pounce, variant_health, drops, xp, adult_scale, grow_seconds)
 
 
 SMALL = ("rabbit", "chicken")
@@ -48,7 +53,8 @@ SPECIES = {s.id: s for s in (
     _s("black_leopard", 40, 6, 0.32, "chicken", SMALL, ("gameops_hyena",), (), "ambush", "cat",
        (0.9, 1.0), ("#26262c", "#6a6a74"), pounce=True, drops=(("chicken", 0, 1), ("leather", 0, 2), ("bone", 0, 1)), xp=6),
     _s("brown_bear", 80, 9, 0.25, "salmon", (), (), (), "guard", "bear",
-       (1.4, 1.5), ("#5a3a22", "#a07a50"), drops=(("leather", 1, 3), ("salmon", 0, 2)), xp=10),
+       (1.8, 1.95), ("#5a3a22", "#a07a50"), drops=(("leather", 1, 3), ("salmon", 0, 2)), xp=10,
+       adult_scale=1.3, grow_seconds=1800),
     _s("hyena", 30, 7, 0.32, "rotten_flesh", (),
        ("gameops_lion", "gameops_cheetah", "gameops_black_leopard"), ("regular", "alpha"), "pack", "hyena",
        (0.9, 1.0), ("#b59a62", "#3a2e1a"), variant_health=(("alpha", 40),),

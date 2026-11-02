@@ -19,8 +19,8 @@ fails if the committed files differ from a fresh run.
 
 These names are stable, because tamed pets saved in a world depend on them; never rename or remove one:
 
-- Component groups `gameops:wild`, `gameops:tamed`, `gameops:tamed_active`, `gameops:sitting`, and `gameops:ability_ready`, `gameops:ability_active`, `gameops:ability_tired` (tiger and cheetah only).
-- Events `gameops:on_tamed`, `gameops:on_sit`, `gameops:on_stand`, and `gameops:ability_ready`, `gameops:ability_active`, `gameops:ability_tired` (same two species).
+- Component groups `gameops:wild`, `gameops:tamed`, `gameops:tamed_active`, `gameops:sitting`, `gameops:baby`, and `gameops:ability_ready`, `gameops:ability_active`, `gameops:ability_tired` (tiger and cheetah only).
+- Events `gameops:on_tamed`, `gameops:on_sit`, `gameops:on_stand`, `gameops:as_baby`, `gameops:grow_up`, and `gameops:ability_ready`, `gameops:ability_active`, `gameops:ability_tired` (same two species).
 - Entity property `gameops:sitting` (bool), mirrored by the sit and stand events because script cannot read the sittable state.
 - Dynamic property `gameops:owner` (the owner's player id), written by script when the tame event fires. `minecraft:tameable` leaves with the wild group, so the owner cannot be read later. Pets tamed before this property existed have none: they keep every self and pet aura, but the lion roar and the bear guard have no owner to buff until the pet is tamed again.
 
@@ -99,6 +99,14 @@ black leopard chicken, leather and bone, brown bear leather and salmon, hyena ro
 experience only when a player landed the last hit (tiger 8, cheetah 5, lion 7, leopard 6, bear 10, hyena 5).
 Taming plays a burst of hearts and a chime. Drops come from `loot_tables/entities/<id>.json`, generated from
 `species.py`.
+
+## Cubs and size
+
+Every animal has a cub form: component group `gameops:baby` (half-size hitbox, a third of the health, a token
+bite, `minecraft:ageable` growing up on the species' `grow_seconds`, faster when fed its taming food), entered by
+the events `gameops:as_baby` (console or script) and `minecraft:entity_born` (breeding, planned) and left by
+`gameops:grow_up`. The client draws a cub at half scale with a larger head (animation `baby`). The brown bear is
+drawn at 1.3 times the shared scale as an adult, with a matching hitbox.
 
 ## Known gaps
 

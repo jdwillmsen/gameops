@@ -50,6 +50,42 @@ class Generators(unittest.TestCase):
             for _, lo, hi in s.drops:
                 self.assertTrue(0 <= lo <= hi, s.id)
 
+    def test_no_cat_has_a_gap_between_its_legs_and_its_body(self):
+        for sid in CATS:
+            geo = json.loads(self.load(f"resource_pack/models/entity/{sid}.geo.json"))["minecraft:geometry"][0]
+            cubes = [(b["name"], c) for b in geo["bones"] for c in b.get("cubes", [])]
+            bodies = [c for n, c in cubes if n == "body"]
+            for name, leg in cubes:
+                if "leg" not in name:
+                    continue
+                top = leg["origin"][1] + leg["size"][1]
+                z1, z2 = leg["origin"][2], leg["origin"][2] + leg["size"][2]
+                under = [b for b in bodies if b["origin"][2] < z2 and b["origin"][2] + b["size"][2] > z1]
+                self.assertTrue(any(abs(b["origin"][1] - top) < 0.01 for b in under), f"{sid} {name} floats below the body")
+
+    def test_the_bear_is_drawn_larger_than_the_shared_scale_and_has_a_matching_hitbox(self):
+        bear = json.loads(self.load("resource_pack/entity/brown_bear.entity.json"))["minecraft:client_entity"]["description"]
+        self.assertIn("1.3", bear["scripts"]["scale"])
+        tiger = json.loads(self.load("resource_pack/entity/tiger.entity.json"))["minecraft:client_entity"]["description"]
+        self.assertEqual(tiger["scripts"]["scale"], "query.is_baby ? 0.5 : 1.0")
+        self.assertGreater(SPECIES["brown_bear"].box[0], 1.4)
+
+    def test_every_animal_has_a_cub_form_that_grows_up(self):
+        for s in SPECIES.values():
+            doc = json.loads(self.load(f"behavior_pack/entities/{s.id}.json"))["minecraft:entity"]
+            baby = doc["component_groups"]["gameops:baby"]
+            self.assertIn("minecraft:is_baby", baby)
+            self.assertLess(baby["minecraft:collision_box"]["height"], s.box[1])
+            self.assertLess(baby["minecraft:health"]["value"], s.health)
+            self.assertEqual(baby["minecraft:ageable"]["grow_up"]["event"], "gameops:grow_up")
+            self.assertEqual(baby["minecraft:ageable"]["feed_items"], [s.tame_item])
+            ev = doc["events"]
+            self.assertEqual(ev["gameops:as_baby"]["add"]["component_groups"], ["gameops:baby"])
+            self.assertEqual(ev["minecraft:entity_born"]["add"]["component_groups"], ["gameops:baby"])
+            self.assertEqual(ev["gameops:grow_up"]["remove"]["component_groups"], ["gameops:baby"])
+            client = json.loads(self.load(f"resource_pack/entity/{s.id}.entity.json"))["minecraft:client_entity"]["description"]
+            self.assertIn({"baby": "query.is_baby"}, client["scripts"]["animate"])
+
     def test_species_table_has_six_animals(self):
         self.assertEqual(sorted(SPECIES), sorted(IDS))
         tiger = SPECIES["tiger"]

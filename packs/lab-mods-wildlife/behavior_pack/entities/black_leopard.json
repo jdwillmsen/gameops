@@ -214,6 +214,30 @@
         "minecraft:behavior.stay_while_sitting": {
           "priority": 1
         }
+      },
+      "gameops:baby": {
+        "minecraft:is_baby": {},
+        "minecraft:collision_box": {
+          "width": 0.45,
+          "height": 0.5
+        },
+        "minecraft:health": {
+          "value": 13,
+          "max": 13
+        },
+        "minecraft:attack": {
+          "damage": 1
+        },
+        "minecraft:ageable": {
+          "duration": 900,
+          "feed_items": [
+            "chicken"
+          ],
+          "grow_up": {
+            "event": "gameops:grow_up",
+            "target": "self"
+          }
+        }
       }
     },
     "components": {
@@ -324,6 +348,27 @@
         "remove": {
           "component_groups": [
             "gameops:sitting"
+          ]
+        }
+      },
+      "gameops:as_baby": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "minecraft:entity_born": {
+        "add": {
+          "component_groups": [
+            "gameops:baby"
+          ]
+        }
+      },
+      "gameops:grow_up": {
+        "remove": {
+          "component_groups": [
+            "gameops:baby"
           ]
         }
       }
