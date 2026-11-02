@@ -17,7 +17,7 @@ func wearOnly(slot int, p *int) [len(wearSlots)]*int {
 	return w
 }
 
-func attr(e Event, k string) string { return e.Attrs[k] }
+func attr(e Event, k string) any { return e.Attrs[k] }
 
 func TestWearBucketsAtTheThresholds(t *testing.T) {
 	for _, tc := range []struct {

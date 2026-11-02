@@ -23,6 +23,10 @@ const (
 	KindSession     = "session_error"
 	KindLowHunger   = "low_hunger"
 	KindLowHealth   = "low_health"
+	// KindEffectGained and KindEffectLost carry the closed effect name and
+	// the amplifier in the payload, never a duration.
+	KindEffectGained = "effect_gained"
+	KindEffectLost   = "effect_lost"
 )
 
 // Event carries no position by construction.

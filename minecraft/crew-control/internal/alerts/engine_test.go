@@ -469,3 +469,47 @@ func TestToolBreakingCanBeSnoozedAsAType(t *testing.T) {
 		t.Fatal("tool_breaking is not a known rule")
 	}
 }
+
+func withEffects(s telemetry.Status, names ...string) telemetry.Status {
+	s.Effects = names
+	return s
+}
+
+func TestHarmfulEffectFiresOnTheClosedHarmfulNamesOnly(t *testing.T) {
+	e := NewEngine(Defaults(), t0)
+	poll := func(sec int, s telemetry.Status) {
+		e.Poll(t0.Add(time.Duration(sec)*time.Second), []telemetry.Status{s}, states("a", "idle"))
+	}
+	poll(0, withEffects(st("a", true, nil, t0), "speed", "night_vision", "other"))
+	if find(e, "harmful_effect.a") != nil {
+		t.Fatal("fired on helpful or unknown effects")
+	}
+	poll(1, withEffects(st("a", true, nil, t0), "speed", "poison", "weakness"))
+	a := find(e, "harmful_effect.a")
+	if a == nil || a.State != StateFiring || a.Severity != SevWarn || a.Text != "harmful effect: poison, weakness" {
+		t.Fatalf("did not fire: %+v", a)
+	}
+	poll(2, withEffects(st("a", true, nil, t0), "speed", "poison", "weakness", "wither"))
+	if find(e, "harmful_effect.a").Text != "harmful effect: poison, weakness" {
+		t.Fatal("a firing alert was rewritten")
+	}
+	poll(3, withEffects(st("a", true, nil, t0), "speed"))
+	if find(e, "harmful_effect.a").State != StateResolved {
+		t.Fatal("clearing the effect did not resolve")
+	}
+	poll(4, withEffects(st("a", true, nil, t0), "slowness"))
+	poll(5, withEffects(st("a", false, nil, t0), "slowness"))
+	if find(e, "harmful_effect.a").State != StateResolved {
+		t.Fatal("an offline unit must not fire")
+	}
+}
+
+func TestEveryDocumentedHarmfulEffectFires(t *testing.T) {
+	for _, name := range []string{"poison", "wither", "fatal_poison", "levitation", "darkness", "weakness", "slowness", "mining_fatigue", "nausea", "blindness"} {
+		e := NewEngine(Defaults(), t0)
+		e.Poll(t0, []telemetry.Status{withEffects(st("a", true, nil, t0), name)}, states("a", "idle"))
+		if find(e, "harmful_effect.a") == nil {
+			t.Errorf("%s did not fire", name)
+		}
+	}
+}

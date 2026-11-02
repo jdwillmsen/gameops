@@ -519,10 +519,10 @@ func TestBornEventMapsToHistoryRow(t *testing.T) {
 
 func TestBornEventCarriesItsClosedAttributesInThePayload(t *testing.T) {
 	b := telemetry.Born{Event: telemetry.Event{Unit: "crew-01", At: time.Now(), Kind: "tool_worn", Level: "crit",
-		Text: "held worn: critical", Attrs: map[string]string{"slot": "held", "bucket": "critical"}}}
+		Text: "held worn: critical", Attrs: map[string]any{"slot": "held", "bucket": "critical", "amplifier": 2}}}
 	e, _ := bornEvent(b)
-	var p map[string]string
-	if err := json.Unmarshal(e.Payload, &p); err != nil || p["slot"] != "held" || p["bucket"] != "critical" || p["text"] != "held worn: critical" {
+	var p map[string]any
+	if err := json.Unmarshal(e.Payload, &p); err != nil || p["slot"] != "held" || p["bucket"] != "critical" || p["amplifier"] != float64(2) || p["text"] != "held worn: critical" {
 		t.Fatalf("payload: %s (%v)", e.Payload, err)
 	}
 }

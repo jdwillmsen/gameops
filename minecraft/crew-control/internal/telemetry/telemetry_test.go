@@ -857,7 +857,7 @@ func TestPollerKeepsLiveStateForTheDetailView(t *testing.T) {
 	}
 
 	raw, _ := json.Marshal(p.Snapshot()[0])
-	for _, leak := range []string{"inventory", "effects", "cobblestone", "speed", "4294967290"} {
+	for _, leak := range []string{"inventory", "cobblestone", "amplifier", "duration", "4294967290"} {
 		if strings.Contains(string(raw), leak) {
 			t.Errorf("the public status leaks %q: %s", leak, raw)
 		}
