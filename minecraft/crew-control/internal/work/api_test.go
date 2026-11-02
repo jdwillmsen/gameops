@@ -3,6 +3,7 @@ package work
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -188,6 +189,45 @@ func TestEventAcceptsReasonCodeAndSession(t *testing.T) {
 	}
 	if got, _ := r.store.Recent(ctx, "crew-01", 1); got[0].State != Failed || got[0].Reason != "no axe in inventory" {
 		t.Fatalf("%+v", got[0])
+	}
+}
+
+func TestUnitEventReachesTheHook(t *testing.T) {
+	r := newRig(t, NewMemory())
+	var gotUnit, gotBody string
+	r.api.OnUnitEvent = func(unit string, body []byte) error {
+		gotUnit, gotBody = unit, string(body)
+		if strings.Contains(gotBody, "bad") {
+			return errors.New("refused")
+		}
+		return nil
+	}
+	if resp := r.do(t, "POST", "/v1/units/crew-01/unit-events", `{"kind":"kit_failed"}`, nil); resp.StatusCode != 204 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	if gotUnit != "crew-01" || gotBody != `{"kind":"kit_failed"}` {
+		t.Fatalf("hook got %q %q", gotUnit, gotBody)
+	}
+	for name, c := range map[string]struct {
+		path, body string
+		hdr        map[string]string
+		want       int
+	}{
+		"refused by the hook": {"/v1/units/crew-01/unit-events", `bad`, nil, 400},
+		"too large":           {"/v1/units/crew-01/unit-events", strings.Repeat("a", 5000), nil, 413},
+		"no token":            {"/v1/units/crew-01/unit-events", `{}`, map[string]string{"Authorization": "Bearer nope"}, 401},
+		"unknown unit":        {"/v1/units/crew-99/unit-events", `{}`, nil, 404},
+	} {
+		if resp := r.do(t, "POST", c.path, c.body, c.hdr); resp.StatusCode != c.want {
+			t.Errorf("%s: status %d, want %d", name, resp.StatusCode, c.want)
+		}
+	}
+}
+
+func TestUnitEventWithNoHookIsDropped(t *testing.T) {
+	r := newRig(t, NewMemory())
+	if resp := r.do(t, "POST", "/v1/units/crew-01/unit-events", `{"kind":"kit_failed"}`, nil); resp.StatusCode != 204 {
+		t.Fatalf("status %d", resp.StatusCode)
 	}
 }
 
