@@ -3,7 +3,7 @@
 // operator-only, so signed out this paints a sign-in state and never asks for
 // a position. replay.js holds the logic; this file paints.
 import {
-  SPEEDS, WINDOWS, windowOf, buildTracks, frameAt, trailOf, advance, boundsOf, fit, eventsUpTo, withMs, positionsQuery, eventsQuery,
+  SPEEDS, WINDOWS, windowOf, buildTracks, phaseMarks, phaseAt, frameAt, trailOf, advance, boundsOf, fit, eventsUpTo, withMs, positionsQuery, eventsQuery,
   fetchAll, summary, clock, MAX_POSITION_PAGES, MAX_EVENT_PAGES, TRAIL_MS,
 } from './replay.js';
 
@@ -18,6 +18,15 @@ function el(tag, props = {}, ...kids) {
 }
 
 const DOT = 5;
+// Laid over the map's own background, so a dark theme stays dark and night
+// only deepens it. Dawn and dusk are told apart by hue, and the clock names
+// the phase for anyone who cannot see the difference.
+const PHASE_TINT = {
+  dawn: 'rgba(255,176,96,0.14)',
+  day: 'rgba(140,200,255,0.10)',
+  dusk: 'rgba(214,104,150,0.16)',
+  night: 'rgba(40,52,170,0.28)',
+};
 
 function action(text, run) {
   const b = el('button', { type: 'button', textContent: text });
@@ -82,7 +91,7 @@ export function initReplay(host) {
     const tracks = buildTracks(pos.rows);
     const events = evs.rows.map(withMs);
     // An events failure leaves the map usable; the list says why it is empty.
-    data = { tracks, events, since, until, truncated: pos.truncated || evs.truncated, eventsError: evs.error || '' };
+    data = { tracks, events, marks: phaseMarks(events), since, until, truncated: pos.truncated || evs.truncated, eventsError: evs.error || '' };
     time = since;
     colors = new Map([...tracks.keys()].sort().map((id, i) => [id, i]));
     playing = false;
@@ -156,7 +165,9 @@ export function initReplay(host) {
     if (data.truncated) notes.push('This range is larger than the view reads; the end of it is missing. Pick a shorter window.');
     if (data.eventsError) notes.push(`Events could not be read: ${data.eventsError}`);
     ui.warn.textContent = notes.join(' ');
-    ui.clock.textContent = `${clock(time)} (${((time - data.since) / 1000).toFixed(0)}s of ${((data.until - data.since) / 1000).toFixed(0)}s)`;
+    // The name beside the tint keeps the phase readable without the colour.
+    const phase = phaseAt(data.marks, time);
+    ui.clock.textContent = `${clock(time)} (${((time - data.since) / 1000).toFixed(0)}s of ${((data.until - data.since) / 1000).toFixed(0)}s)${phase ? ` · ${phase}` : ''}`;
     ui.scrub.value = String(time - data.since);
     ui.scrub.setAttribute('aria-valuetext', clock(time));
     paintControls();
@@ -166,7 +177,7 @@ export function initReplay(host) {
         el('time', { textContent: clock(e.ms) }), ' ', el('b', { textContent: nameOf(e.unit) }), ` ${e.kind}`,
         e.pos ? ` at ${Math.round(e.pos.x)}, ${Math.round(e.pos.z)}` : ''))
       : [el('li', { className: 'rp-none', textContent: data.eventsError ? 'Unavailable.' : 'No events yet at this moment.' })]));
-    ui.canvas.setAttribute('aria-label', `Replay map at ${clock(time)}. ${summary(data.tracks, data.events, data.since, data.until)}`);
+    ui.canvas.setAttribute('aria-label', `Replay map at ${clock(time)}${phase ? `, ${phase}` : ''}. ${summary(data.tracks, data.events, data.since, data.until)}`);
     draw();
   }
 
@@ -179,6 +190,11 @@ export function initReplay(host) {
     proj = fit(b, w, h);
     ctx.fillStyle = cs.getPropertyValue('--rp-bg').trim() || '#0b100c';
     ctx.fillRect(0, 0, w, h);
+    const phase = phaseAt(data.marks, time);
+    if (phase) {
+      ctx.fillStyle = PHASE_TINT[phase];
+      ctx.fillRect(0, 0, w, h);
+    }
     ctx.strokeStyle = 'rgba(200,212,200,0.18)';
     ctx.lineWidth = 1;
     ctx.font = '11px ui-monospace, monospace';

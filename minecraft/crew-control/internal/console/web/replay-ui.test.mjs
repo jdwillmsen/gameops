@@ -8,7 +8,8 @@ import { installDom, settle, byClass, one } from './graph/fake-dom.mjs';
 const dom = installDom();
 const { doc } = dom;
 const draws = [];
-const ctx = new Proxy({}, { get: (_, k) => (k === 'arc' ? (...a) => draws.push(a) : () => {}), set: () => true });
+const fills = [];
+const ctx = new Proxy({}, { get: (_, k) => (k === 'arc' ? (...a) => draws.push(a) : () => {}), set: (_, k, v) => { if (k === 'fillStyle') fills.push(v); return true; } });
 const realCreate = doc.createElement.bind(doc);
 doc.createElement = tag => {
   const e = realCreate(tag);
@@ -41,7 +42,7 @@ function answer(path) {
   }
   return ok({ events: [
     { id: 1, unit: 'crew-01', at: iso(500_000), kind: 'task_started', severity: 'info' },
-    { id: 2, unit: 'crew-02', at: iso(300_000), kind: 'died', severity: 'warn', pos: { x: 400, y: 64, z: -430 } },
+    { id: 2, unit: 'crew-02', at: iso(300_000), kind: 'died', severity: 'warn', pos: { x: 400, y: 64, z: -430 }, payload: { text: 'died', day_phase: 'night' } },
   ] });
 }
 
@@ -60,7 +61,7 @@ function page({ operator = { id: 'owner' } } = {}) {
   return { ui, calls, stage, live, mount: async () => { ui.mount(stage); await settle(); await settle(); } };
 }
 
-test.afterEach(() => { doc.body.children.length = 0; frames.length = 0; draws.length = 0; });
+test.afterEach(() => { doc.body.children.length = 0; frames.length = 0; draws.length = 0; fills.length = 0; });
 
 test('signed out: shows the sign-in note and asks the API for nothing', async () => {
   const p = page({ operator: null });
@@ -97,6 +98,23 @@ test('scrubbing moves the clock, the map and the event list', async () => {
   assert.equal(items.length, 2);
   assert.match(items[0].textContent, /crew-02 died at 400, -430/);
   assert.match(one(p.stage, 'rp-clock').textContent, /400s of 600s/);
+  p.ui.unmount();
+});
+
+test('the map is tinted by the phase a nearby event recorded, and named beside the clock', async () => {
+  const p = page();
+  await p.mount();
+  const scrub = one(p.stage, 'rp-scrub');
+  const tint = () => fills.filter(f => /^rgba\(40,52,170/.test(f)).length;
+  scrub.value = '300000';
+  scrub.dispatch('input');
+  assert.equal(tint(), 1);
+  assert.match(one(p.stage, 'rp-clock').textContent, /300s of 600s\) · night/);
+  fills.length = 0;
+  scrub.value = '50000';
+  scrub.dispatch('input');
+  assert.equal(tint(), 0, 'no tint where no event vouches for a phase');
+  assert.doesNotMatch(one(p.stage, 'rp-clock').textContent, /night/);
   p.ui.unmount();
 });
 
