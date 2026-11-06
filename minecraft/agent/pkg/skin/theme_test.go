@@ -1,7 +1,6 @@
 package skin
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"testing"
@@ -91,16 +90,37 @@ func TestBuildIsRandomPerNameAndConsistent(t *testing.T) {
 	}
 }
 
-func TestVariantsAppearAcrossNames(t *testing.T) {
-	for _, th := range []string{ThemeDotablaze, ThemeNeon} {
-		chests, builds := map[int]bool{}, map[int]bool{}
-		for i := range 60 {
-			sum := sha256.Sum256([]byte(fmt.Sprintf("bot-%d|theme|%s", i, th)))
-			chests[int(sum[11])%themeVariants] = true
-			builds[int(sum[9])%themeVariants] = true
+// Each variant must actually draw something different, or the per-name pick
+// changes nothing a player can see. The same look is painted with every
+// variant and the chest and head regions compared.
+func TestVariantsRenderDifferently(t *testing.T) {
+	l := look{skin: rgba{250, 222, 192, 255}, hair: rgba{40, 30, 20, 255}, accent: rgba{255, 120, 20, 255}}
+	region := func(draw func(px []byte, v int), v int, x, y, w, h int) string {
+		px := make([]byte, Width*Height*4)
+		draw(px, v)
+		var out []byte
+		for r := 0; r < h; r++ {
+			out = append(out, px[((y+r)*Width+x)*4:((y+r)*Width+x+w)*4]...)
 		}
-		if len(chests) != themeVariants || len(builds) != themeVariants {
-			t.Errorf("%s: variants never all drawn (%d chest, %d head)", th, len(chests), len(builds))
+		return string(out)
+	}
+	cases := map[string]struct {
+		draw       func(px []byte, v int)
+		x, y, w, h int
+	}{
+		"dotablaze chest": {func(px []byte, v int) { l.chest = v; chestEmblem(px, l, rgba{255, 214, 80, 255}) }, 20, 20, 8, 12},
+		"dotablaze head":  {func(px []byte, v int) { l.build = v; dotablazeHead(px, l, rgba{255, 214, 80, 255}) }, 32, 0, 32, 16},
+		"neon chest":      {func(px []byte, v int) { neonChest(px, l.accent, v) }, 20, 20, 8, 12},
+		"neon head":       {func(px []byte, v int) { l.build = v; neonHead(px, l, rgba{26, 28, 42, 255}) }, 32, 0, 32, 16},
+	}
+	for name, c := range cases {
+		seen := map[string]int{}
+		for v := range themeVariants {
+			r := region(c.draw, v, c.x, c.y, c.w, c.h)
+			if prev, dup := seen[r]; dup {
+				t.Errorf("%s: variants %d and %d render the same", name, prev, v)
+			}
+			seen[r] = v
 		}
 	}
 }
