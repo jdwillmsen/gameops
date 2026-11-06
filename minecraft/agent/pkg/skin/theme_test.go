@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-var allThemes = []string{ThemeDotablaze, ThemeNeon}
+var allThemes = []string{ThemeDotablaze, ThemeNeon, ThemeSheriff}
 
 func TestThemeSkinsAreValidAndOpaque(t *testing.T) {
 	for _, th := range allThemes {
@@ -38,7 +38,8 @@ func TestThemeIsDeterministicAndDistinct(t *testing.T) {
 				t.Errorf("%s/%s: two skins for one bot", th, name)
 			}
 			key := th + "/" + name
-			if other, dup := seen[a.Data]; dup {
+			// The sheriff is one fixed likeness, so only its ID varies by name.
+			if other, dup := seen[a.Data]; dup && th != ThemeSheriff {
 				t.Errorf("%s and %s share a skin", key, other)
 			}
 			seen[a.Data] = key
@@ -56,5 +57,16 @@ func TestUnknownThemeIsRefused(t *testing.T) {
 	}
 	if !KnownTheme(" Dotablaze ") {
 		t.Error("theme names should ignore case and padding")
+	}
+}
+
+func TestSheriffIsSlimAndOthersAreWide(t *testing.T) {
+	sh, _ := ForTheme("Dotablaze7321", ThemeSheriff)
+	if !sh.Slim || sh.ArmSize() != "slim" || sh.ResourcePatch() == "" {
+		t.Errorf("sheriff should use the slim model: %+v", sh)
+	}
+	nb, _ := ForTheme("Dotablaze7321", ThemeNeon)
+	if nb.Slim || nb.ArmSize() != "wide" || nb.ResourcePatch() != "" {
+		t.Errorf("neon should keep the default wide model: %+v", nb)
 	}
 }

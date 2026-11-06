@@ -53,7 +53,7 @@ func export(args []string) error {
 	name := fs.String("name", "", "unit name")
 	role := fs.String("role", "", "miner, chopper, hauler, shaft or warrior")
 	squad := fs.String("squad-role", "", "vanguard, striker or ranger (warriors)")
-	theme := fs.String("theme", "", "dotablaze or neon: an AFK-bot theme instead of a role outfit")
+	theme := fs.String("theme", "", "dotablaze, neon or sheriff: an AFK-bot theme instead of a role outfit")
 	out := fs.String("o", "", "output PNG")
 	_ = fs.Parse(args)
 	if *name == "" || *out == "" {
@@ -87,7 +87,7 @@ var roster = []skin.Persona{
 	{Role: "warrior", SquadRole: "vanguard"}, {Role: "warrior", SquadRole: "striker"}, {Role: "warrior", SquadRole: "ranger"},
 }
 
-var botThemes = []string{skin.ThemeDotablaze, skin.ThemeNeon}
+var botThemes = []string{skin.ThemeDotablaze, skin.ThemeNeon, skin.ThemeSheriff}
 
 func sheet(args []string) error {
 	fs := flag.NewFlagSet("sheet", flag.ExitOnError)

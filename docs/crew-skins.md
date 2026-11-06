@@ -46,6 +46,7 @@ mark):
 | Theme | Look | Used on |
 |---|---|---|
 | `dotablaze` | charcoal armour, ember trim, flame emblem, burning headband | FWB |
+| `sheriff` | one fixed likeness, not per-name: fair, blond, blue-eyed, slim arms, tan Class A shirt with a gold star and tie, green striped trousers, duty belt, campaign hat | FWB's second bot (Dotablaze7321) |
 | `neon` (default) | dark hooded jacket, glowing visor and light strips in a per-bot colour | every other server |
 
 Preview with `crewskin sheet -themes -names A,B,C -o themes.png`, export a
