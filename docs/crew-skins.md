@@ -52,3 +52,7 @@ mark):
 Preview with `crewskin sheet -themes -names A,B,C -o themes.png`, export a
 starting point with `crewskin export -name A -theme dotablaze -o A.png`, and
 override one bot by putting `<MC_USERNAME>.png` in its `SKIN_DIR`.
+
+Every AFK bot also gets its own build and outfit variants, picked from its
+name so they stay the same across restarts: wide or slim arms (the sheriff is
+always slim), one of three chest marks and one of three head pieces per theme.

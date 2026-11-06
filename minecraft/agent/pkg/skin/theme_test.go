@@ -1,7 +1,9 @@
 package skin
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"testing"
 )
 
@@ -60,13 +62,45 @@ func TestUnknownThemeIsRefused(t *testing.T) {
 	}
 }
 
-func TestSheriffIsSlimAndOthersAreWide(t *testing.T) {
+func TestSheriffIsSlim(t *testing.T) {
 	sh, _ := ForTheme("Dotablaze7321", ThemeSheriff)
 	if !sh.Slim || sh.ArmSize() != "slim" || sh.ResourcePatch() == "" {
 		t.Errorf("sheriff should use the slim model: %+v", sh)
 	}
-	nb, _ := ForTheme("Dotablaze7321", ThemeNeon)
-	if nb.Slim || nb.ArmSize() != "wide" || nb.ResourcePatch() != "" {
-		t.Errorf("neon should keep the default wide model: %+v", nb)
+}
+
+// Every other theme picks wide or slim per name, so a fleet shows both builds,
+// and each pick agrees with the arm size sent at login.
+func TestBuildIsRandomPerNameAndConsistent(t *testing.T) {
+	for _, th := range []string{ThemeDotablaze, ThemeNeon} {
+		slim, wide := 0, 0
+		for i := range 40 {
+			s, _ := ForTheme(fmt.Sprintf("bot-%d", i), th)
+			if s.Slim {
+				slim++
+			} else {
+				wide++
+			}
+			if (s.ArmSize() == "slim") != s.Slim || (s.ResourcePatch() != "") != s.Slim {
+				t.Fatalf("%s: arm size and resource patch disagree with Slim", th)
+			}
+		}
+		if slim == 0 || wide == 0 {
+			t.Errorf("%s: 40 bots gave %d slim, %d wide", th, slim, wide)
+		}
+	}
+}
+
+func TestVariantsAppearAcrossNames(t *testing.T) {
+	for _, th := range []string{ThemeDotablaze, ThemeNeon} {
+		chests, builds := map[int]bool{}, map[int]bool{}
+		for i := range 60 {
+			sum := sha256.Sum256([]byte(fmt.Sprintf("bot-%d|theme|%s", i, th)))
+			chests[int(sum[11])%themeVariants] = true
+			builds[int(sum[9])%themeVariants] = true
+		}
+		if len(chests) != themeVariants || len(builds) != themeVariants {
+			t.Errorf("%s: variants never all drawn (%d chest, %d head)", th, len(chests), len(builds))
+		}
 	}
 }

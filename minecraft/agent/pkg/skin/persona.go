@@ -68,6 +68,9 @@ type look struct {
 	// covers the outfit but not the face or the hands.
 	mark  int
 	glove bool
+	// build and chest pick the outfit variant a themed bot wears; both come
+	// from the name, so a bot keeps its look across restarts.
+	build, chest int
 }
 
 var skinTones = []rgba{
