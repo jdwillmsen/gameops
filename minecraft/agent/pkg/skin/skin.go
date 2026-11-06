@@ -41,6 +41,27 @@ type Skin struct {
 	Data   string
 	Width  int
 	Height int
+	// Slim selects the 3-pixel-wide arm model; the arm textures are laid out
+	// for it, so the client must be told or it stretches them over wide arms.
+	Slim bool
+}
+
+// ArmSize is the ClientData arm model name.
+func (s Skin) ArmSize() string {
+	if s.Slim {
+		return "slim"
+	}
+	return "wide"
+}
+
+// ResourcePatch is the base64 resource patch naming the built-in slim model,
+// or "" for the dialer's default (the wide model). Built-in geometry needs no
+// geometry data, only its name.
+func (s Skin) ResourcePatch() string {
+	if !s.Slim {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString([]byte(`{"geometry":{"default":"geometry.humanoid.customSlim"}}`))
 }
 
 // For builds a deterministic skin for an account name.

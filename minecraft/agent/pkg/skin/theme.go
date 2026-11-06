@@ -12,11 +12,15 @@ import (
 const (
 	ThemeDotablaze = "dotablaze"
 	ThemeNeon      = "neon"
+	// ThemeSheriff is a fixed likeness rather than a per-name look: tall-and-
+	// skinny, fair, blond, blue-eyed, in a county sheriff's Class A uniform.
+	ThemeSheriff = "sheriff"
 )
 
 var themes = map[string]func(px []byte, l look){
 	ThemeDotablaze: paintDotablaze,
 	ThemeNeon:      paintNeon,
+	ThemeSheriff:   paintSheriff,
 }
 
 // KnownTheme reports whether a theme name has a look of its own.
@@ -40,23 +44,31 @@ func ForTheme(name, theme string) (s Skin, ok bool) {
 	}
 	sum := sha256.Sum256([]byte(name + "|theme|" + theme))
 	l := lookFrom(sum)
-	if theme == ThemeDotablaze {
+	switch theme {
+	case ThemeDotablaze:
 		l.hair, l.accent = flameFrom(sum)
-	} else {
+	case ThemeSheriff:
+		l.skin, l.hair = rgba{250, 222, 192, 255}, rgba{226, 192, 96, 255}
+		l.accent, l.mark, l.glove = rgba{240, 200, 60, 255}, 5, false
+	default:
 		l.accent = hsv(float64(sum[4])/255*360, 0.85, 1)
 	}
+	slim := theme == ThemeSheriff
 
 	px := make([]byte, Width*Height*4)
 	body(px, l)
 	paintFaceMark(px, l)
 	paint(px, l)
-	paintHandMarks(px, l, theme)
+	if !slim {
+		paintHandMarks(px, l, theme)
+	}
 
 	return Skin{
 		ID:     fmt.Sprintf("%x-%s", sum[:8], theme),
 		Data:   base64.StdEncoding.EncodeToString(px),
 		Width:  Width,
 		Height: Height,
+		Slim:   slim,
 	}, true
 }
 
@@ -149,4 +161,65 @@ func paintNeon(px []byte, l look) {
 	head.paintFront(px, neon, 1, 4, 6, 1)
 	// The hood redraws the lower face, so its mark goes on afterwards.
 	paintFaceMark(px, l)
+}
+
+var (
+	slimRightArm = block{40, 16, 3, 12, 4}
+	slimLeftArm  = block{32, 48, 3, 12, 4}
+)
+
+// Sheriff: a county Class A uniform. Tan long-sleeved shirt with a dark tie,
+// a gold six-point star on the left breast, forest-green trousers with a black
+// stripe, a black duty belt with a brass buckle and a tan campaign hat over
+// blond hair, with blue eyes and slim arms.
+func paintSheriff(px []byte, l look) {
+	tan := rgba{196, 168, 118, 255}
+	green := rgba{52, 78, 54, 255}
+	black := rgba{24, 24, 28, 255}
+	gold := l.accent
+
+	for _, p := range []block{torso, slimRightArm, slimLeftArm} {
+		p.paint(px, tan)
+	}
+	for _, p := range []block{rightLeg, leftLeg} {
+		p.paint(px, green)
+		fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, black)
+		// The stripe runs down the outer seam, which is the first column of
+		// the front face on one leg and the last on the other.
+		x, y, _, _ := p.front()
+		fill(px, x, y, 1, p.h-2, black)
+		bx, by, _, _ := p.back()
+		fill(px, bx+p.w-1, by, 1, p.h-2, black)
+	}
+	for _, p := range []block{slimRightArm, slimLeftArm} {
+		fill(px, p.x, p.y+p.d+p.h-2, 2*(p.w+p.d), 2, l.skin)
+		x, y, _, _ := p.front()
+		fill(px, x, y+1, p.w, 3, green)
+		fill(px, x+1, y+2, 1, 1, gold)
+	}
+
+	torso.paintFront(px, darken(tan, 0.8), 2, 0, 4, 1)
+	torso.paintFront(px, black, 3, 1, 2, 1)
+	torso.paintFront(px, black, 3, 2, 2, 5)
+	torso.paintFront(px, darken(tan, 0.85), 1, 4, 2, 1)
+	for y, row := range []string{".X.", "XXX", ".X."} {
+		for x, c := range row {
+			if c == 'X' {
+				torso.paintFront(px, gold, 5+x-1, 2+y, 1, 1)
+			}
+		}
+	}
+	torso.paintFront(px, black, 0, 9, 8, 2)
+	torso.paintFront(px, gold, 3, 9, 2, 2)
+	torso.paintBack(px, black, 0, 9, 8, 2)
+	torso.paintBack(px, darken(tan, 0.85), 2, 1, 4, 1)
+
+	head.paintFront(px, rgba{60, 110, 200, 255}, 2, 4, 1, 1)
+	head.paintFront(px, rgba{60, 110, 200, 255}, 5, 4, 1, 1)
+	head.paintFront(px, darken(l.hair, 0.85), 1, 3, 2, 1)
+	head.paintFront(px, darken(l.hair, 0.85), 5, 3, 2, 1)
+
+	hatColour := rgba{170, 138, 88, 255}
+	helmet(px, hatColour, darken(hatColour, 0.6))
+	hat.paintFront(px, gold, 3, 2, 2, 1)
 }

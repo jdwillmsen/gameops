@@ -215,10 +215,12 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		TokenSource: ts,
 		Protocol:    proto,
 		ClientData: login.ClientData{
-			SkinID:          botSkin.ID,
-			SkinData:        botSkin.Data,
-			SkinImageWidth:  botSkin.Width,
-			SkinImageHeight: botSkin.Height,
+			SkinID:            botSkin.ID,
+			SkinData:          botSkin.Data,
+			SkinImageWidth:    botSkin.Width,
+			SkinImageHeight:   botSkin.Height,
+			ArmSize:           botSkin.ArmSize(),
+			SkinResourcePatch: botSkin.ResourcePatch(),
 		},
 	}
 

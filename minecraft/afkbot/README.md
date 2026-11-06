@@ -35,7 +35,7 @@ signed-in account, which the token cache already provides.
 | `MC_USERNAME` | yes | — | non-empty | Key the auth token caches under, **not** the gamertag the server shows |
 | `MC_PORT` | no | `19132` | 1–65535 | Server port; for a URL it fills in a missing port only |
 | `MC_VIEW_DISTANCE` | no | `12` | 1–64 | Chunk radius to request. The default is Bedrock's maximum tick-distance; the server grants what is asked for, so a smaller value holds proportionally less world ([why][radius]) |
-| `SKIN_THEME` | no | `neon` | `dotablaze`, `neon` | Generated look the bot joins with; each bot's colours and face mark come from `MC_USERNAME`. FWB uses `dotablaze`, every other server `neon` |
+| `SKIN_THEME` | no | `neon` | `dotablaze`, `neon`, `sheriff` | Generated look the bot joins with; each bot's colours and face mark come from `MC_USERNAME`. FWB uses `dotablaze` (its second bot `sheriff`), every other server `neon` |
 | `SKIN_DIR` | no | unset | directory | A 64x64 `<MC_USERNAME>.png` here replaces the generated look on the next join. Make a starting point with `go run ./minecraft/crew/cmd/crewskin export -name <name> -theme neon -o <name>.png` |
 | `AUTH_CACHE_DIR` | no | `/data/auth` | — | Where the Xbox Live token cache lives |
 | `RECONNECT_MIN_MS` | no | `5000` | 1–3600000 | Backoff floor |
