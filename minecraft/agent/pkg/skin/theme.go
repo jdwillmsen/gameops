@@ -23,10 +23,10 @@ var themes = map[string]func(px []byte, l look){
 	ThemeSheriff:   paintSheriff,
 }
 
-// KnownTheme reports whether a theme name has a look of its own.
 // themeVariants is how many head and chest variants each theme draws.
 const themeVariants = 3
 
+// KnownTheme reports whether a theme name has a look of its own.
 func KnownTheme(theme string) bool {
 	_, ok := themes[normaliseTheme(theme)]
 	return ok
