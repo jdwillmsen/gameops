@@ -104,3 +104,25 @@ func TestVariantsAppearAcrossNames(t *testing.T) {
 		}
 	}
 }
+
+// Painting an arm wide and projecting it to the slim layout must keep the
+// front face's first three columns, and the left side where slim expects it.
+func TestSlimArmsMovesFacesToTheSlimLayout(t *testing.T) {
+	px := make([]byte, Width*Height*4)
+	set := func(x, y int, v byte) { px[(y*Width+x)*4] = v }
+	get := func(x, y int) byte { return px[(y*Width+x)*4] }
+	set(44, 20, 1) // front, first column
+	set(46, 20, 2) // front, third column
+	set(48, 20, 3) // left side, first column
+	set(52, 20, 4) // back, first column
+	slimArms(px)
+	if get(44, 20) != 1 || get(46, 20) != 2 {
+		t.Error("front columns moved")
+	}
+	if get(47, 20) != 3 {
+		t.Errorf("left side should start at x+7, got %d", get(47, 20))
+	}
+	if get(51, 20) != 4 {
+		t.Errorf("back should start at x+11, got %d", get(51, 20))
+	}
+}
