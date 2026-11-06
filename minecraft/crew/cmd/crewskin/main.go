@@ -1,6 +1,7 @@
 // Command crewskin renders and exports unit skins.
 //
 //	crewskin export -name Agate -role miner -o Agate.png
+//	crewskin export -name Bot1 -theme dotablaze -o Bot1.png
 //	crewskin sheet -o roster.png [-names Agate,Basalt,...]
 //
 // export writes the 64x64 skin a unit would wear, which is the starting point
@@ -52,10 +53,22 @@ func export(args []string) error {
 	name := fs.String("name", "", "unit name")
 	role := fs.String("role", "", "miner, chopper, hauler, shaft or warrior")
 	squad := fs.String("squad-role", "", "vanguard, striker or ranger (warriors)")
+	theme := fs.String("theme", "", "dotablaze or neon: an AFK-bot theme instead of a role outfit")
 	out := fs.String("o", "", "output PNG")
 	_ = fs.Parse(args)
 	if *name == "" || *out == "" {
 		usage()
+	}
+	if *theme != "" {
+		s, ok := skin.ForTheme(*name, *theme)
+		if !ok {
+			return fmt.Errorf("no theme %q", *theme)
+		}
+		b, err := s.PNG()
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(*out, b, 0o644)
 	}
 	p := skin.Persona{Role: *role, SquadRole: *squad}
 	if !p.Known() {
@@ -74,22 +87,34 @@ var roster = []skin.Persona{
 	{Role: "warrior", SquadRole: "vanguard"}, {Role: "warrior", SquadRole: "striker"}, {Role: "warrior", SquadRole: "ranger"},
 }
 
+var botThemes = []string{skin.ThemeDotablaze, skin.ThemeNeon}
+
 func sheet(args []string) error {
 	fs := flag.NewFlagSet("sheet", flag.ExitOnError)
 	out := fs.String("o", "", "output PNG")
 	names := fs.String("names", "Agate,Basalt,Cobble", "unit names to draw per outfit")
 	scale := fs.Int("scale", 8, "pixel scale")
+	themed := fs.Bool("themes", false, "draw the AFK-bot themes instead of the role outfits")
 	_ = fs.Parse(args)
 	if *out == "" {
 		usage()
 	}
 	list := strings.Split(*names, ",")
 	const cellW, cellH = 40, 36
-	img := image.NewNRGBA(image.Rect(0, 0, cellW*len(list)*1, cellH*len(roster)))
+	rows := len(roster)
+	if *themed {
+		rows = len(botThemes)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, cellW*len(list), cellH*rows))
 	draw.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{40, 44, 52, 255}), image.Point{}, draw.Src)
-	for r, p := range roster {
+	for r := 0; r < rows; r++ {
 		for c, n := range list {
-			sk := skin.ForPersona(strings.TrimSpace(n), p)
+			var sk skin.Skin
+			if *themed {
+				sk, _ = skin.ForTheme(strings.TrimSpace(n), botThemes[r])
+			} else {
+				sk = skin.ForPersona(strings.TrimSpace(n), roster[r])
+			}
 			raw, err := skinPixels(sk)
 			if err != nil {
 				return err

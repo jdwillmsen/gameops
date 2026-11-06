@@ -36,3 +36,18 @@ Edit the exported 64x64 PNG, put it in the directory named by `SKIN_DIR` as
 to apply sooner). A file that is not a 64x64 PNG is logged and ignored. To
 change an outfit for everyone, edit `agent/pkg/skin/persona.go` and check the
 sheet first.
+
+## AFK bot themes
+
+AFK bots join with a themed skin instead of a flat colour. `SKIN_THEME` picks
+the look and `MC_USERNAME` the individual (skin tone, accent colour, face
+mark):
+
+| Theme | Look | Used on |
+|---|---|---|
+| `dotablaze` | charcoal armour, ember trim, flame emblem, burning headband | FWB |
+| `neon` (default) | dark hooded jacket, glowing visor and light strips in a per-bot colour | every other server |
+
+Preview with `crewskin sheet -themes -names A,B,C -o themes.png`, export a
+starting point with `crewskin export -name A -theme dotablaze -o A.png`, and
+override one bot by putting `<MC_USERNAME>.png` in its `SKIN_DIR`.

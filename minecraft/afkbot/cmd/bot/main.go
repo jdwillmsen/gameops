@@ -25,7 +25,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/presence"
-	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/skin"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
@@ -195,7 +195,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	// Without this the bot joins as a black silhouette under a SkinID
 	// regenerated every connect: Bedrock skins are uploaded by the client from
 	// its own installation, and a headless client has none.
-	botSkin := skin.For(cfg.Username)
+	botSkin := botSkinFor(cfg, log)
 	addr := cfg.Address()
 
 	// The server upgrades itself to Mojang's latest on restart, and a point
@@ -321,4 +321,20 @@ func jitter(d time.Duration) time.Duration {
 		return 0
 	}
 	return d/2 + time.Duration(rand.Int63n(int64(d/2)+1))
+}
+
+// botSkinFor picks the skin for a join: a hand-painted <username>.png in
+// SKIN_DIR first, then the deployment's theme.
+func botSkinFor(cfg config.Config, log *logging.Logger) skin.Skin {
+	custom, found, err := skin.Override(cfg.SkinDir, cfg.Username)
+	if err != nil {
+		log.Error("skin_override_invalid", logging.Fields{"error": err.Error()})
+	}
+	if found {
+		return custom
+	}
+	if themed, ok := skin.ForTheme(cfg.Username, cfg.SkinTheme); ok {
+		return themed
+	}
+	return skin.For(cfg.Username)
 }

@@ -105,8 +105,8 @@ directory.
 
 ## Shared packages are copied, not imported
 
-`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcdial`,
-`internal/mcproto` and `internal/skin` are copies of the agent's `pkg/`
+`internal/mcauth`, `internal/liveness`, `internal/logging`, `internal/mcdial`
+and `internal/mcproto` are copies of the agent's `pkg/`
 packages, each carrying a header saying so. **Fix bugs upstream first, then
 port them here.**
 
@@ -170,3 +170,9 @@ If they start changing often enough that porting is the bigger cost, that is
 the signal to revisit the import.
 
 [agent]: https://github.com/jdwillmsen/minecraft-server-agent
+
+### `skin` is imported now, not copied
+
+The repo is one module, so the bot imports `minecraft/agent/pkg/skin` and the
+copy is gone. The bot needed themes and per-bot overrides that the agent's
+package already had, and a second copy would have forked them.

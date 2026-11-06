@@ -344,3 +344,19 @@ func TestAddressForRakNetJoinsHostAndPort(t *testing.T) {
 		t.Errorf("Address() = %q, want example.invalid:19133", got)
 	}
 }
+
+func TestLoadSkinTheme(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.SkinTheme != "neon" {
+		t.Fatalf("default theme: %q, %v", cfg.SkinTheme, err)
+	}
+	t.Setenv("SKIN_THEME", " Dotablaze ")
+	if cfg, err = Load(); err != nil || cfg.SkinTheme != "dotablaze" {
+		t.Fatalf("dotablaze: %q, %v", cfg.SkinTheme, err)
+	}
+	t.Setenv("SKIN_THEME", "plaid")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "SKIN_THEME") {
+		t.Fatalf("unknown theme accepted or unnamed: %v", err)
+	}
+}
