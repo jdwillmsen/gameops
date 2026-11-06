@@ -16,6 +16,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/internal/presenceapi"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcaddr"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 )
 
 // Bedrock's maximum tick-distance, and the largest radius measured as granted
@@ -89,6 +90,12 @@ type Config struct {
 	ReconnectMinMs int
 	ReconnectMaxMs int
 
+	// SkinTheme is the generated look the bot joins with (dotablaze or neon).
+	// SkinDir holds hand-painted skins as <MC_USERNAME>.png; a file there
+	// replaces the generated look on the next join.
+	SkinTheme string
+	SkinDir   string
+
 	// Presence is the zero value, and the reconciler is off, unless
 	// PRESENCE_URL is set.
 	Presence Presence
@@ -147,6 +154,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	skinTheme := strings.ToLower(stringDefault("SKIN_THEME", skin.ThemeNeon))
+	if !skin.KnownTheme(skinTheme) {
+		return Config{}, fmt.Errorf("SKIN_THEME: unknown theme %q", skinTheme)
+	}
 
 	return Config{
 		Host:           host,
@@ -157,6 +168,8 @@ func Load() (Config, error) {
 		AuthCacheDir:   stringDefault("AUTH_CACHE_DIR", "/data/auth"),
 		ReconnectMinMs: reconnectMin,
 		ReconnectMaxMs: reconnectMax,
+		SkinTheme:      skinTheme,
+		SkinDir:        strings.TrimSpace(os.Getenv("SKIN_DIR")),
 		Presence:       presence,
 	}, nil
 }
