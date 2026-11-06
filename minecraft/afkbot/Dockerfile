@@ -2,8 +2,8 @@ FROM golang:1.27-bookworm@sha256:972b4110ba0f47539a975c31e52c64765e1ff19f2d74469
 WORKDIR /src
 
 COPY go.mod go.sum ./
-# Built from the repo root, where the one module's files live. The packages
-# shared with the agent are copies under internal/;
+# Built from the repo root, where the one module's files live. Most packages
+# shared with the agent are copies under internal/, and skin is imported;
 # minecraft/afkbot/docs/decisions.md has why.
 RUN go mod download
 
