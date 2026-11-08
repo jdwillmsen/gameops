@@ -10,7 +10,7 @@ moves). `tools/check-packs.sh` validates every folder.
 |---|---|---|---|
 | `lab-mods-stage0` | `gameops:training_dummy_brute`, `gameops:werewolf`, `gameops:ground_dragon` | 0.0.4 | First add-on; arena opponents and the ground dragon boss |
 | `lab-mods-wildlife` | `gameops:tiger`, `gameops:cheetah`, `gameops:lion`, `gameops:black_leopard`, `gameops:brown_bear`, `gameops:hyena` | 0.0.5 | Tamable wildlife; `policy.txt` selects the wildlife checker rules; generated from `assets-src/` |
-| `lab-tools` | none (adds the `gameops:guide_book` item) | 0.0.1 | Script and one item: lectern guide, spawn and reset menus, sign writer (`scriptevent gameops:signs`) and arena teleport pads for the proving-grounds world (`policy.txt` is `tools`); opens on lecterns at fixed coordinates and on a book in hand |
+| `lab-tools` | none (adds the `gameops:guide_book` item) | 0.0.2 | Script and one item: lectern guide, spawn and reset menus, sign writer (`scriptevent gameops:signs`) and arena teleport pads for the proving-grounds world (`policy.txt` is `tools`); opens on lecterns at fixed coordinates and on a book in hand |
 
 Keep this table current when a pack is added, split or versioned.
 

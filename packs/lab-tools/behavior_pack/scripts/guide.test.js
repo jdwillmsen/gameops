@@ -20,5 +20,5 @@ test("every pen species has a note naming its taming food", () => {
 });
 
 test("station notes exist for the non-pen lecterns", () => {
-  for (const k of ["safety", "arena", "supply"]) assert.ok(STATION_NOTES[k], k);
+  for (const k of ["safety", "arena", "supply", "breeding", "armor"]) assert.ok(STATION_NOTES[k], k);
 });
