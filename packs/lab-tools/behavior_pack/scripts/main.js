@@ -1,8 +1,8 @@
-import { world, system, BlockPermutation, SignSide } from "@minecraft/server";
+import { world, system, BlockPermutation, SignSide, ItemStack } from "@minecraft/server";
 import { ActionFormData, ModalFormData, FormCancelationReason } from "@minecraft/server-ui";
 import {
   STAND_Y, stationAt, clampCount, spawnPoint, spawnEventFor, resetAreas, SPAWNABLE, DRAGON_TIERS, TELEPORTS,
-  inLab, penCenter, padAt, signs, hasCubForm,
+  inLab, penCenter, padAt, signs, hasCubForm, ARMOR_ITEMS,
 } from "./logic.js";
 import { GUIDE_PAGES, PEN_NOTES, STATION_NOTES } from "./guide.js";
 
@@ -83,6 +83,18 @@ async function spawnMenu(player, preset) {
   say(player, `spawned ${count} ${baby && hasCubForm(id) ? "cub " : ""}${id.replace(/_/g, " ")} in front of you`);
 }
 
+// A reset must not eat a fitted armor item: drop it where the animal stood.
+function returnArmor(dim, entity) {
+  let tier = 0;
+  try {
+    tier = Number(entity.getProperty("gameops:armor") ?? 0);
+  } catch {
+    return;
+  }
+  const id = Object.keys(ARMOR_ITEMS).find((k) => ARMOR_ITEMS[k] === tier);
+  if (id) dim.spawnItem(new ItemStack(id, 1), entity.location);
+}
+
 function resetArea(player, area) {
   const dim = player.dimension;
   if (dim.id !== "minecraft:overworld") return { removed: 0, spawned: 0, failed: area.spawns.length };
@@ -92,6 +104,7 @@ function resetArea(player, area) {
     for (const e of dim.getEntities({ type })) {
       const { x, z } = e.location;
       if (inLab(e.location) && x >= area.box.x1 && x <= area.box.x2 && z >= area.box.z1 && z <= area.box.z2) {
+        returnArmor(dim, e);
         e.remove();
         removed++;
       }

@@ -125,3 +125,9 @@ test("the yard has a stall per species and the bay has four tigers", () => {
   assert.equal(stationAt(36, STAND_Y, 50).kind, "armor");
   assert.ok(TELEPORTS.some((t) => t.name === "Breeding yard") && TELEPORTS.some((t) => t.name === "Armor bay"));
 });
+
+test("a stall reset clears every wildlife type, so a stray cub goes too", () => {
+  const stall = resetAreas().find((a) => a.id === "stall_cheetah");
+  assert.ok(stall.types.includes("gameops:tiger"));
+  assert.equal(stall.spawns.every((x) => x.type === "gameops:cheetah"), true);
+});
