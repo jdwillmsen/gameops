@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   STAND_Y, STATIONS, PEN_SPECIES, ARENA_MOBS, SPAWNABLE, stationAt, clampCount, spawnPoint, spawnEventFor,
-  resetAreas, inBox, TELEPORTS, hasCubForm, inLab, penCenter, LAB_BOUNDS, SPECIES, PADS, padAt, signs, SIGN_LINE_MAX,
+  resetAreas, STALLS, ARMOR_TIGERS, inBox, TELEPORTS, hasCubForm, inLab, penCenter, LAB_BOUNDS, SPECIES, PADS, padAt, signs, SIGN_LINE_MAX,
 } from "./logic.js";
 
 test("stationAt finds a lectern only at its own spot and level", () => {
@@ -45,7 +45,7 @@ test("only the dragon takes a health event, and unknown tiers fall back", () => 
 
 test("reset areas cover every pen, the arena and the cage, and spawns sit inside their box", () => {
   const areas = resetAreas();
-  assert.equal(areas.length, PEN_SPECIES.length + 2);
+  assert.equal(areas.length, PEN_SPECIES.length + STALLS.length + 3);
   for (const a of areas) {
     assert.ok(a.spawns.length > 0, a.id);
     for (const s of a.spawns) assert.ok(inBox(a.box, s.x, s.z), `${a.id} spawn ${s.x},${s.z}`);
@@ -95,7 +95,7 @@ test("pads send a player to a spot that is not on a pad", () => {
 
 test("every sign fits a sign face and stands inside the lab", () => {
   const all = signs();
-  assert.ok(all.length >= 19);
+  assert.ok(all.length >= 27);
   const spots = all.map((s) => `${s.x},${s.z}`);
   assert.equal(new Set(spots).size, spots.length, "two signs on one spot");
   for (const s of all) {
@@ -116,4 +116,12 @@ test("species facts exist for every pen and name its taming food", () => {
 test("only the wildlife animals have a cub form", () => {
   for (const p of PEN_SPECIES) assert.ok(hasCubForm(p.id), p.id);
   for (const m of ARENA_MOBS) assert.ok(!hasCubForm(m.id), m.id);
+});
+
+test("the yard has a stall per species and the bay has four tigers", () => {
+  assert.deepEqual(STALLS.map((s) => s.id).sort(), PEN_SPECIES.map((p) => p.id).sort());
+  assert.equal(ARMOR_TIGERS.length, 4);
+  assert.equal(stationAt(-3, STAND_Y, 50).kind, "breeding");
+  assert.equal(stationAt(36, STAND_Y, 50).kind, "armor");
+  assert.ok(TELEPORTS.some((t) => t.name === "Breeding yard") && TELEPORTS.some((t) => t.name === "Armor bay"));
 });

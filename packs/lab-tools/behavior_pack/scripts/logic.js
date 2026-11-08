@@ -30,6 +30,15 @@ export const SPECIES = {
     ability: "Pack", short: "Stronger in a pack", sign: "Pack strength", variants: "regular or alpha (40 hp)" },
 };
 
+// The breeding yard: one open stall per species, two adults each. cx and cz are the stall centre.
+export const STALLS = [
+  { id: "tiger", cx: -31, cz: 43 }, { id: "cheetah", cx: -20, cz: 43 }, { id: "lion", cx: -9, cz: 43 },
+  { id: "black_leopard", cx: -31, cz: 57 }, { id: "brown_bear", cx: -20, cz: 57 }, { id: "hyena", cx: -9, cz: 57 },
+];
+
+// The armor bay: a control tiger and one per armor tier, standing on these platforms.
+export const ARMOR_TIGERS = [9, 17, 25, 33].map((x) => ({ x, z: 57 }));
+
 export const ARENA_MOBS = [
   { id: "training_dummy_brute", x: 42 },
   { id: "werewolf", x: 58 },
@@ -54,6 +63,8 @@ export const STATIONS = [
   { x: 0, z: 17, kind: "supply" },
   { x: -36, z: -9, kind: "safety" },
   { x: 34, z: -4, kind: "arena" },
+  { x: -3, z: 50, kind: "breeding" },
+  { x: 36, z: 50, kind: "armor" },
   ...PEN_SPECIES.map((p) => ({ x: p.cx + 3, z: p.cz + 9, kind: "pen", species: p.id })),
 ];
 
@@ -63,6 +74,8 @@ export const TELEPORTS = [
   { name: "Safety lab", x: -36, z: 0 },
   { name: "Boss arena (inside the dome)", x: 38, z: 0 },
   { name: "Supply room", x: 0, z: 19 },
+  { name: "Breeding yard", x: -20, z: 50 },
+  { name: "Armor bay", x: 10, z: 50 },
 ];
 
 export function stationAt(x, y, z) {
@@ -107,6 +120,22 @@ export function resetAreas() {
       type: `gameops:${p.id}`, x: p.cx - 2 + 3 * (i % 2) + 0.5, z: p.cz - 2 + 2 * Math.floor(i / 2) + 0.5,
     })),
   }));
+  for (const st of STALLS) {
+    areas.push({
+      id: `stall_${st.id}`,
+      name: `${st.id.replace(/_/g, " ")} stall`,
+      box: { x1: st.cx - 5, x2: st.cx + 5, z1: st.cz - 5, z2: st.cz + 5 },
+      types: [`gameops:${st.id}`],
+      spawns: [0, 1].map((i) => ({ type: `gameops:${st.id}`, x: st.cx - 1 + 2 * i + 0.5, z: st.cz - 2 + 0.5 })),
+    });
+  }
+  areas.push({
+    id: "armor_tigers",
+    name: "armor bay tigers",
+    box: { x1: 3, x2: 37, z1: 38, z2: 62 },
+    types: ["gameops:tiger"],
+    spawns: ARMOR_TIGERS.map((t) => ({ type: "gameops:tiger", x: t.x + 0.5, z: t.z + 0.5 })),
+  });
   areas.push({
     id: "arena",
     name: "boss arena",
@@ -129,7 +158,7 @@ export function resetAreas() {
 
 // The menus act only inside the world the pack was built for: a book in hand elsewhere (another
 // world that registers the pack by mistake, or the far side of a flat map) does nothing.
-export const LAB_BOUNDS = { x1: -70, x2: 90, z1: -80, z2: 35, y1: -64, y2: -20 };
+export const LAB_BOUNDS = { x1: -70, x2: 90, z1: -80, z2: 70, y1: -64, y2: -20 };
 
 export function inLab(loc, bounds = LAB_BOUNDS) {
   return loc.x >= bounds.x1 && loc.x <= bounds.x2 && loc.z >= bounds.z1 && loc.z <= bounds.z2
@@ -164,16 +193,24 @@ export function signs() {
     { x: -3, z: 4, rot: 8, lines: ["PROVING", "GROUNDS", "Add-on test", "world"] },
     { x: 3, z: 4, rot: 8, lines: ["HOW TO TEST", "Right-click a", "lectern or hold", "the Guide book"] },
     { x: -4, z: -12, rot: 0, lines: ["NORTH", "Wildlife", "preserve", "6 species"] },
-    { x: 4, z: 12, rot: 8, lines: ["SOUTH", "Supply room", "food, gear,", "eggs, books"] },
+    { x: 4, z: 12, rot: 8, lines: ["SOUTH", "Supply + yard", "food, gear,", "armor, eggs"] },
     { x: -12, z: 4, rot: 12, lines: ["WEST", "Safety lab", "two-player", "pet tests"] },
     { x: 12, z: -4, rot: 4, lines: ["EAST", "Boss arena", "glass dome", "3 bosses"] },
     { x: 23, z: -3, rot: 4, lines: ["BOSS ARENA", "Step on the", "lit pad to", "enter"] },
     { x: 33, z: 3, rot: 12, lines: ["EXIT", "Lit pad leaves", "the dome", ""] },
     { x: 36, z: 4, rot: 12, lines: ["TARGET TAG", "arena_warrior", "on = hunted", "Book: toggle"] },
     { x: -38, z: -9, rot: 12, lines: ["SAFETY LAB", "Blue pad: A", "Red pad: B", "Cage:lion+hyena"] },
-    { x: -10, z: 27, rot: 8, lines: ["FOOD", "taming foods", "for all six", "animals"] },
+    { x: -12, z: 27, rot: 8, lines: ["FOOD", "taming foods", "for all six", "animals"] },
+    { x: -10, z: 27, rot: 8, lines: ["MORE FOOD", "cooked meat", "bones, wheat", "milk"] },
     { x: -8, z: 27, rot: 8, lines: ["GEAR", "diamond set", "bow, apples", "totem"] },
-    { x: 4, z: 27, rot: 8, lines: ["EGGS + BOOKS", "spawn eggs", "guide books", "creative only"] },
+    { x: -6, z: 27, rot: 8, lines: ["WEAPONS", "sword tiers", "axe, trident", "bows"] },
+    { x: -4, z: 27, rot: 8, lines: ["ANIMAL ARMOR", "leather, iron", "diamond", "lead, saddle"] },
+    { x: -2, z: 27, rot: 8, lines: ["TOOLS", "elytra, rockets", "buckets, fence", "planks, wool"] },
+    { x: 6, z: 27, rot: 8, lines: ["EGGS + BOOKS", "spawn eggs", "guide books", "creative only"] },
+    { x: 8, z: 27, rot: 8, lines: ["VANILLA MOBS", "prey, rivals", "horse, wolf", "sheep, cow"] },
+    { x: 1, z: 35, rot: 8, lines: ["THE YARD", "West: breeding", "East: armor", "Roofs are open"] },
+    { x: -5, z: 51, rot: 8, lines: ["BREEDING", "Tame two of a", "kind, feed both", "Lectern: guide"] },
+    { x: 4, z: 48, rot: 12, lines: ["ARMOR BAY", "Fit horse armor", "Same hits on", "all four tigers"] },
   ];
   for (const p of PEN_SPECIES) {
     const f = SPECIES[p.id];

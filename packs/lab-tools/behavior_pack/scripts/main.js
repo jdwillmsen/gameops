@@ -110,7 +110,7 @@ function resetArea(player, area) {
 }
 
 async function resetMenu(player, only) {
-  const areas = resetAreas().filter((a) => !only || a.id === only);
+  const areas = resetAreas().filter((a) => !only || a.id.startsWith(only));
   let chosen = areas;
   if (!only) {
     const form = new ActionFormData().title("Reset").body("Clears the mobs in an area and puts the starting ones back.");
@@ -178,12 +178,16 @@ async function stationMenu(player, station) {
   if (station.kind === "pen") form.button("Reset this pen");
   if (station.kind === "arena") form.button("Arena tag").button("Reset the arena");
   if (station.kind === "safety") form.button("Safety checklist").button("Reset the rival cage");
+  if (station.kind === "breeding") form.button("Breeding guide").button("Reset the stalls");
+  if (station.kind === "armor") form.button("Armor guide").button("Reset the tigers");
   const res = await show(form, player);
   if (res.canceled) return;
   const label = ["Main menu", "Wildlife guide", ...(spawnId ? ["Spawn one here"] : []),
     ...(station.kind === "pen" ? ["Reset this pen"] : []),
     ...(station.kind === "arena" ? ["Arena tag", "Reset the arena"] : []),
-    ...(station.kind === "safety" ? ["Safety checklist", "Reset the rival cage"] : [])][res.selection];
+    ...(station.kind === "safety" ? ["Safety checklist", "Reset the rival cage"] : []),
+    ...(station.kind === "breeding" ? ["Breeding guide", "Reset the stalls"] : []),
+    ...(station.kind === "armor" ? ["Armor guide", "Reset the tigers"] : [])][res.selection];
   switch (label) {
     case "Main menu": return mainMenu(player);
     case "Wildlife guide": return openGuidePage(player, GUIDE_PAGES.find((p) => p.id === "wildlife"));
@@ -198,6 +202,10 @@ async function stationMenu(player, station) {
     case "Reset the arena": return resetMenu(player, "arena");
     case "Safety checklist": return openGuidePage(player, GUIDE_PAGES.find((p) => p.id === "checklist"));
     case "Reset the rival cage": return resetMenu(player, "rival_cage");
+    case "Breeding guide": return openGuidePage(player, GUIDE_PAGES.find((p) => p.id === "breeding"));
+    case "Reset the stalls": return resetMenu(player, "stall_");
+    case "Armor guide": return openGuidePage(player, GUIDE_PAGES.find((p) => p.id === "armor"));
+    case "Reset the tigers": return resetMenu(player, "armor_tigers");
     default: return undefined;
   }
 }
