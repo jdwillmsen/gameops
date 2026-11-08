@@ -125,7 +125,8 @@ export function resetAreas() {
       id: `stall_${st.id}`,
       name: `${st.id.replace(/_/g, " ")} stall`,
       box: { x1: st.cx - 5, x2: st.cx + 5, z1: st.cz - 5, z2: st.cz + 5 },
-      types: [`gameops:${st.id}`],
+      // any wildlife type: a cub that strayed in from the next stall must go too
+      types: PEN_SPECIES.map((p) => `gameops:${p.id}`),
       spawns: [0, 1].map((i) => ({ type: `gameops:${st.id}`, x: st.cx - 1 + 2 * i + 0.5, z: st.cz - 2 + 0.5 })),
     });
   }
@@ -186,6 +187,13 @@ export function padAt(loc) {
 
 // Standing signs the script writes on request (scriptevent gameops:signs). rot is the sign's facing:
 // 0 south, 4 west, 8 north, 12 east. Four lines of at most 15 characters each fit a sign face.
+// Armor property value -> the vanilla item that fits that tier (matches the wildlife pack's armor_tiers.js).
+export const ARMOR_ITEMS = {
+  "minecraft:leather_horse_armor": 1,
+  "minecraft:iron_horse_armor": 2,
+  "minecraft:diamond_horse_armor": 3,
+};
+
 export const SIGN_LINE_MAX = 15;
 
 export function signs() {
