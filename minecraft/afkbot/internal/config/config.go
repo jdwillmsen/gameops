@@ -8,6 +8,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -96,6 +97,12 @@ type Config struct {
 	SkinTheme string
 	SkinDir   string
 
+	// Facing is the yaw the bot holds once spawned, in Bedrock degrees (0
+	// south, 90 west, 180 north, 270 east). HasFacing is false when FACING is
+	// unset, and the bot keeps whatever rotation the server restored.
+	Facing    float32
+	HasFacing bool
+
 	// Presence is the zero value, and the reconciler is off, unless
 	// PRESENCE_URL is set.
 	Presence Presence
@@ -159,6 +166,11 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("SKIN_THEME: unknown theme %q", skinTheme)
 	}
 
+	facing, hasFacing, err := parseFacing(os.Getenv("FACING"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Host:           host,
 		Port:           port,
@@ -170,6 +182,8 @@ func Load() (Config, error) {
 		ReconnectMaxMs: reconnectMax,
 		SkinTheme:      skinTheme,
 		SkinDir:        strings.TrimSpace(os.Getenv("SKIN_DIR")),
+		Facing:         facing,
+		HasFacing:      hasFacing,
 		Presence:       presence,
 	}, nil
 }
@@ -310,4 +324,27 @@ func loadPresence() (Presence, error) {
 		Default: state,
 		PollMs:  pollMs,
 	}, nil
+}
+
+// parseFacing reads FACING: a compass point or a yaw in degrees. Empty means
+// no facing is held.
+func parseFacing(raw string) (yaw float32, set bool, err error) {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	switch raw {
+	case "":
+		return 0, false, nil
+	case "south":
+		return 0, true, nil
+	case "west":
+		return 90, true, nil
+	case "north":
+		return 180, true, nil
+	case "east":
+		return 270, true, nil
+	}
+	deg, perr := strconv.ParseFloat(raw, 32)
+	if perr != nil || math.IsNaN(deg) || deg < 0 || deg >= 360 {
+		return 0, false, fmt.Errorf("FACING: %q is not north, south, east, west or a yaw in [0, 360)", raw)
+	}
+	return float32(deg), true, nil
 }

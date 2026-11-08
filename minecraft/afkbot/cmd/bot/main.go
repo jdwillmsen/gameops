@@ -260,6 +260,14 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		return fmt.Errorf("request chunk radius: %w", err)
 	}
 
+	if cfg.HasFacing {
+		start := time.Now()
+		gd := conn.GameData()
+		go holdFacing(ctx, conn, gd.PlayerPosition, cfg.Facing, func() uint64 {
+			return uint64(time.Since(start) / (50 * time.Millisecond))
+		})
+	}
+
 	respawner := liveness.New(conn.GameData().EntityRuntimeID)
 
 	for {

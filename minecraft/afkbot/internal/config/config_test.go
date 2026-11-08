@@ -360,3 +360,28 @@ func TestLoadSkinTheme(t *testing.T) {
 		t.Fatalf("unknown theme accepted or unnamed: %v", err)
 	}
 }
+
+func TestParseFacing(t *testing.T) {
+	cases := []struct {
+		in   string
+		yaw  float32
+		set  bool
+		fail bool
+	}{
+		{"", 0, false, false},
+		{"west", 90, true, false},
+		{" North ", 180, true, false},
+		{"east", 270, true, false},
+		{"south", 0, true, false},
+		{"45.5", 45.5, true, false},
+		{"360", 0, false, true},
+		{"-1", 0, false, true},
+		{"up", 0, false, true},
+	}
+	for _, c := range cases {
+		yaw, set, err := parseFacing(c.in)
+		if (err != nil) != c.fail || yaw != c.yaw || set != c.set {
+			t.Errorf("parseFacing(%q) = %v, %v, %v", c.in, yaw, set, err)
+		}
+	}
+}
