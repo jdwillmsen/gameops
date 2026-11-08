@@ -260,15 +260,17 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		return fmt.Errorf("request chunk radius: %w", err)
 	}
 
+	gd := conn.GameData()
+	held := &pose{}
+	held.set(gd.PlayerPosition, gd.Pitch)
 	if cfg.HasFacing {
 		start := time.Now()
-		gd := conn.GameData()
-		go holdFacing(ctx, conn, gd.PlayerPosition, cfg.Facing, func() uint64 {
+		go holdFacing(ctx, conn, held, cfg.Facing, func() uint64 {
 			return uint64(time.Since(start) / (50 * time.Millisecond))
 		})
 	}
 
-	respawner := liveness.New(conn.GameData().EntityRuntimeID)
+	respawner := liveness.New(gd.EntityRuntimeID)
 
 	for {
 		if ctx.Err() != nil {
@@ -282,12 +284,15 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 			return fmt.Errorf("read: %w", err)
 		}
 
+		held.track(pk, gd.EntityRuntimeID)
+
 		// A dead bot holds no chunks, and nothing outside this loop can tell
 		// it is dead: the session stays open and the pod stays ready. Measured
 		// on the agent on 2026-09-08 before this was handled.
 		if handled, err := respawner.Handle(pk, conn); err != nil {
 			log.Error("respawn_failed", logging.Fields{"error": err.Error()})
 		} else if handled {
+			held.setPaused(respawner.Dead())
 			if respawner.Dead() {
 				log.Info("died", logging.Fields{"requesting_respawn": true})
 			} else {
