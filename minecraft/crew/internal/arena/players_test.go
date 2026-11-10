@@ -43,7 +43,7 @@ func TestOnlineNamesReadsOnlyTheLineAfterTheHeader(t *testing.T) {
 }
 
 func TestNonCrewIgnoresCrewNames(t *testing.T) {
-	got := NonCrew([]string{"Rusty", "Probe", "Steve99", "Slate"}, DefaultCrewNames)
+	got := NonCrew([]string{"Rusty", "Probe", "Steve99", "Slate", "Xeno", "Yarrow", "Zinc"}, DefaultCrewNames)
 	if !reflect.DeepEqual(got, []string{"Steve99"}) {
 		t.Errorf("NonCrew = %q, want [Steve99]", got)
 	}
