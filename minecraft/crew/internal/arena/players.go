@@ -7,19 +7,24 @@ import (
 	"strings"
 )
 
-// DefaultCrewNames are the twenty-two crew units and the probe client: the only
-// players a boss test may share the server with.
+// DefaultCrewNames are the crew lab's units and the probe client: the only
+// players a boss test may share the server with. It must list every unit the
+// jdw-deployments crew-lab chart runs on the lab (charts/crew-lab values.yaml);
+// a unit missing here is taken for a human and every fight refuses to start.
+// crew-23 plays on another server, so it is not here.
 var DefaultCrewNames = []string{
 	"Agate", "Basalt", "Cobble", "Dusty", "Ember", "Flint", "Gravel", "Hazel",
 	"Ingot", "Jasper", "Kettle", "Loam", "Marble", "Nugget", "Onyx", "Pebble",
-	"Quartz", "Rusty", "Slate", "Tinder", "Umber", "Vein", "Probe",
+	"Quartz", "Rusty", "Slate", "Tinder", "Umber", "Vein", "Xeno", "Yarrow",
+	"Zinc", "Probe",
 }
 
 // NotAloneError reports the non-crew players that made a boss test refuse.
 type NotAloneError struct{ Names []string }
 
 func (e *NotAloneError) Error() string {
-	return "arena: non-crew players are online: " + strings.Join(e.Names, ", ")
+	return "arena: non-crew players are online: " + strings.Join(e.Names, ", ") +
+		" (if these are crew units, add them to arena.DefaultCrewNames or --crew-names)"
 }
 
 // listAttempts bounds how often an unfinished `list` reply is re-read.
