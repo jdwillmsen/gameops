@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -92,6 +93,31 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 			return
 		case <-t.C:
 			send()
+		}
+	}
+}
+
+// logPoseEvent records what the server does to the bot's placement. It is the
+// only evidence of whether a facing is honoured: the bot cannot see itself, and
+// a seated bot has its rotation set by what it rides, not by what it reports.
+func logPoseEvent(log *logging.Logger, pk packet.Packet, runtimeID uint64, uniqueID int64) {
+	switch m := pk.(type) {
+	case *packet.MovePlayer:
+		if m.EntityRuntimeID == runtimeID {
+			log.Info("server_moved_bot", logging.Fields{
+				"x": m.Position[0], "y": m.Position[1], "z": m.Position[2],
+				"yaw": m.Yaw, "head_yaw": m.HeadYaw, "mode": m.Mode,
+			})
+		}
+	case *packet.CorrectPlayerMovePrediction:
+		log.Info("movement_corrected", logging.Fields{
+			"x": m.Position[0], "y": m.Position[1], "z": m.Position[2], "tick": m.Tick,
+		})
+	case *packet.SetActorLink:
+		if m.EntityLink.RiderEntityUniqueID == uniqueID {
+			log.Info("ride_link", logging.Fields{
+				"ridden": m.EntityLink.RiddenEntityUniqueID, "type": m.EntityLink.Type,
+			})
 		}
 	}
 }
