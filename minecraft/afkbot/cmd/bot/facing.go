@@ -138,6 +138,7 @@ func (l *poseLog) event(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 	case *packet.CorrectPlayerMovePrediction:
 		l.emit("movement_corrected", logging.Fields{
 			"x": m.Position[0], "y": m.Position[1], "z": m.Position[2], "tick": m.Tick,
+			"pitch": m.Rotation[0], "yaw": m.Rotation[1], "prediction_type": m.PredictionType,
 		})
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
