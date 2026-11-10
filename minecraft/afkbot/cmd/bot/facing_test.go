@@ -91,3 +91,20 @@ func TestSeatedBotNamesItsVehicleAndTurnsIt(t *testing.T) {
 		t.Fatalf("vehicle not cleared: %d", v)
 	}
 }
+
+func TestStaleRemovalDoesNotUnseatTheBot(t *testing.T) {
+	p := &pose{}
+	link := func(ridden int64, typ byte) packet.Packet {
+		return &packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 5, RiddenEntityUniqueID: ridden, Type: typ}}
+	}
+	p.track(link(9, protocol.EntityLinkRider), 1, 5)
+	p.track(link(10, protocol.EntityLinkRider), 1, 5)
+	p.track(link(9, protocol.EntityLinkRemove), 1, 5)
+	if _, _, _, v := p.get(); v != 10 {
+		t.Fatalf("vehicle = %d, want 10", v)
+	}
+	p.track(link(10, protocol.EntityLinkPassenger), 1, 5)
+	if _, _, _, v := p.get(); v != 0 {
+		t.Fatalf("a passenger seat set vehicle %d", v)
+	}
+}

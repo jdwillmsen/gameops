@@ -32,6 +32,14 @@ type pose struct {
 	vehicle int64
 }
 
+func (p *pose) clearVehicle(id int64) {
+	p.mu.Lock()
+	if p.vehicle == id {
+		p.vehicle = 0
+	}
+	p.mu.Unlock()
+}
+
 func (p *pose) setVehicle(id int64) {
 	p.mu.Lock()
 	p.vehicle = id
@@ -67,15 +75,23 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 		}
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
-			if m.EntityLink.Type == protocol.EntityLinkRemove {
-				p.setVehicle(0)
-			} else {
+			switch {
+			case m.EntityLink.Type == protocol.EntityLinkRider:
 				p.setVehicle(m.EntityLink.RiddenEntityUniqueID)
+			case m.EntityLink.Type == protocol.EntityLinkRemove:
+				// Only the ride the bot is on: a stale removal of an earlier
+				// vehicle must not unseat it from the new one.
+				p.clearVehicle(m.EntityLink.RiddenEntityUniqueID)
+			default:
+				// A passenger does not control its vehicle, so it has no
+				// rotation to claim.
+				p.setVehicle(0)
 			}
 		}
 	case *packet.Respawn:
 		if m.State == packet.RespawnStateReadyToSpawn && m.EntityRuntimeID == runtimeID {
 			p.set(m.Position, 0)
+			p.setVehicle(0)
 		}
 	}
 }
