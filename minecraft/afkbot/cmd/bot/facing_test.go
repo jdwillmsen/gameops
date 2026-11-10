@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
@@ -37,13 +38,13 @@ func TestHoldFacingReportsSpawnPositionWithYaw(t *testing.T) {
 
 func TestPoseTracksOnlyItsOwnPlayer(t *testing.T) {
 	p := &pose{}
-	p.track(&packet.MovePlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{1, 2, 3}}, 1)
-	if pos, _, _ := p.get(); pos != (mgl32.Vec3{}) {
+	p.track(&packet.MovePlayer{EntityRuntimeID: 2, Position: mgl32.Vec3{1, 2, 3}}, 1, 0)
+	if pos, _, _, _ := p.get(); pos != (mgl32.Vec3{}) {
 		t.Fatalf("another player moved the pose: %v", pos)
 	}
-	p.track(&packet.MovePlayer{EntityRuntimeID: 1, Position: mgl32.Vec3{4, 5, 6}, Pitch: 3}, 1)
-	p.track(&packet.Respawn{EntityRuntimeID: 1, State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{7, 8, 9}}, 1)
-	if pos, _, _ := p.get(); pos != (mgl32.Vec3{7, 8, 9}) {
+	p.track(&packet.MovePlayer{EntityRuntimeID: 1, Position: mgl32.Vec3{4, 5, 6}, Pitch: 3}, 1, 0)
+	p.track(&packet.Respawn{EntityRuntimeID: 1, State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{7, 8, 9}}, 1, 0)
+	if pos, _, _, _ := p.get(); pos != (mgl32.Vec3{7, 8, 9}) {
 		t.Fatalf("respawn did not move the pose: %v", pos)
 	}
 }
@@ -69,5 +70,24 @@ func TestPoseLogHoldsBackRepeats(t *testing.T) {
 	l.emit("movement_corrected", nil)
 	if l.held["movement_corrected"] != 2 {
 		t.Fatalf("held = %d, want 2", l.held["movement_corrected"])
+	}
+}
+
+func TestSeatedBotNamesItsVehicleAndTurnsIt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 4)}
+	p := &pose{}
+	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 5, RiddenEntityUniqueID: 9, Type: protocol.EntityLinkRider}}, 1, 5)
+	go holdFacing(ctx, r, p, 96, func() uint64 { return 0 })
+	pk := <-r.got
+	veh, ok := pk.ClientPredictedVehicle.Value()
+	rot, rok := pk.VehicleRotation.Value()
+	if !ok || veh != 9 || !rok || rot[1] != 96 || !pk.InputData.Load(packet.InputFlagClientPredictedVehicle) {
+		t.Fatalf("packet = %+v", pk)
+	}
+	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 5, RiddenEntityUniqueID: 9, Type: protocol.EntityLinkRemove}}, 1, 5)
+	if _, _, _, v := p.get(); v != 0 {
+		t.Fatalf("vehicle not cleared: %d", v)
 	}
 }
