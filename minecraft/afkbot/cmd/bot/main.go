@@ -262,6 +262,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 
 	gd := conn.GameData()
 	held := &pose{}
+	poseEvents := newPoseLog(log)
 	held.set(gd.PlayerPosition, gd.Pitch)
 	if cfg.HasFacing {
 		start := time.Now()
@@ -285,7 +286,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		}
 
 		held.track(pk, gd.EntityRuntimeID)
-		logPoseEvent(log, pk, gd.EntityRuntimeID, gd.EntityUniqueID)
+		poseEvents.event(pk, gd.EntityRuntimeID, gd.EntityUniqueID)
 
 		// A dead bot holds no chunks, and nothing outside this loop can tell
 		// it is dead: the session stays open and the pod stays ready. Measured
