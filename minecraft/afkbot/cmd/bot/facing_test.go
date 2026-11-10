@@ -61,3 +61,13 @@ func TestHoldFacingSendsNothingWhileDead(t *testing.T) {
 	case <-time.After(300 * time.Millisecond):
 	}
 }
+
+func TestPoseLogHoldsBackRepeats(t *testing.T) {
+	l := newPoseLog(nil)
+	l.last["movement_corrected"] = time.Now()
+	l.emit("movement_corrected", nil)
+	l.emit("movement_corrected", nil)
+	if l.held["movement_corrected"] != 2 {
+		t.Fatalf("held = %d, want 2", l.held["movement_corrected"])
+	}
+}
