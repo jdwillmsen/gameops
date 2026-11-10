@@ -64,7 +64,7 @@ func TestHoldFacingSendsNothingWhileDead(t *testing.T) {
 
 func TestPoseLogHoldsBackRepeats(t *testing.T) {
 	l := newPoseLog(nil)
-	l.last["movement_corrected"] = time.Now()
+	l.last["movement_corrected"] = time.Now().Add(time.Hour)
 	l.emit("movement_corrected", nil)
 	l.emit("movement_corrected", nil)
 	if l.held["movement_corrected"] != 2 {
