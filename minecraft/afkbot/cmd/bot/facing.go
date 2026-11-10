@@ -27,6 +27,15 @@ type pose struct {
 	pos    mgl32.Vec3
 	pitch  float32
 	paused bool
+	// vehicle is the unique ID of what the bot rides, or 0. A rider's rotation
+	// belongs to its vehicle, so the report has to name it and turn it.
+	vehicle int64
+}
+
+func (p *pose) setVehicle(id int64) {
+	p.mu.Lock()
+	p.vehicle = id
+	p.mu.Unlock()
 }
 
 func (p *pose) set(pos mgl32.Vec3, pitch float32) {
@@ -42,19 +51,27 @@ func (p *pose) setPaused(v bool) {
 	p.mu.Unlock()
 }
 
-func (p *pose) get() (pos mgl32.Vec3, pitch float32, paused bool) {
+func (p *pose) get() (pos mgl32.Vec3, pitch float32, paused bool, vehicle int64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.pos, p.pitch, p.paused
+	return p.pos, p.pitch, p.paused, p.vehicle
 }
 
 // track follows the server's placement of the bot from the packets that move
 // it.
-func (p *pose) track(pk packet.Packet, runtimeID uint64) {
+func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 	switch m := pk.(type) {
 	case *packet.MovePlayer:
 		if m.EntityRuntimeID == runtimeID {
 			p.set(m.Position, m.Pitch)
+		}
+	case *packet.SetActorLink:
+		if m.EntityLink.RiderEntityUniqueID == uniqueID {
+			if m.EntityLink.Type == protocol.EntityLinkRemove {
+				p.setVehicle(0)
+			} else {
+				p.setVehicle(m.EntityLink.RiddenEntityUniqueID)
+			}
 		}
 	case *packet.Respawn:
 		if m.State == packet.RespawnStateReadyToSpawn && m.EntityRuntimeID == runtimeID {
@@ -67,11 +84,15 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64) {
 // server gave it with that rotation, so the report never asks to move it.
 func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick func() uint64) {
 	send := func() {
-		pos, pitch, paused := p.get()
+		pos, pitch, paused, vehicle := p.get()
 		if paused {
 			return
 		}
-		_ = w.WritePacket(&packet.PlayerAuthInput{
+		flags := protocol.NewInputFlags(packet.InputFlagCount)
+		if vehicle != 0 {
+			flags.Set(packet.InputFlagClientPredictedVehicle)
+		}
+		pk := &packet.PlayerAuthInput{
 			Position:         pos,
 			Pitch:            pitch,
 			Yaw:              yaw,
@@ -81,8 +102,15 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 			InputMode:        packet.InputModeMouse,
 			InteractionModel: packet.InteractionModelCrosshair,
 			Tick:             tick(),
-			InputData:        protocol.NewInputFlags(packet.InputFlagCount),
-		})
+			InputData:        flags,
+		}
+		if vehicle != 0 {
+			// Seated: name the vehicle and give it the rotation, which is the
+			// one a rider's own yaw is overridden by.
+			pk.ClientPredictedVehicle = protocol.Option(vehicle)
+			pk.VehicleRotation = protocol.Option(mgl32.Vec2{pitch, yaw})
+		}
+		_ = w.WritePacket(pk)
 	}
 	send()
 	t := time.NewTicker(facingInterval)
@@ -106,12 +134,17 @@ type poseLog struct {
 	log  *logging.Logger
 	last map[string]time.Time
 	held map[string]int
+	// kinds remembers what each nearby actor is, so a ride link can say what
+	// the bot sits on. Bounded so a busy world cannot grow it without limit.
+	kinds map[int64]string
 }
+
+const maxPoseKinds = 4096
 
 const poseLogEvery = 2 * time.Second
 
 func newPoseLog(log *logging.Logger) *poseLog {
-	return &poseLog{log: log, last: map[string]time.Time{}, held: map[string]int{}}
+	return &poseLog{log: log, last: map[string]time.Time{}, held: map[string]int{}, kinds: map[int64]string{}}
 }
 
 func (l *poseLog) emit(kind string, f logging.Fields) {
@@ -140,10 +173,17 @@ func (l *poseLog) event(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 			"x": m.Position[0], "y": m.Position[1], "z": m.Position[2], "tick": m.Tick,
 			"pitch": m.Rotation[0], "yaw": m.Rotation[1], "prediction_type": m.PredictionType,
 		})
+	case *packet.AddActor:
+		if len(l.kinds) < maxPoseKinds {
+			l.kinds[m.EntityUniqueID] = m.EntityType
+		}
+	case *packet.RemoveActor:
+		delete(l.kinds, m.EntityUniqueID)
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
 			l.emit("ride_link", logging.Fields{
 				"ridden": m.EntityLink.RiddenEntityUniqueID, "type": m.EntityLink.Type,
+				"ridden_kind": l.kinds[m.EntityLink.RiddenEntityUniqueID],
 			})
 		}
 	}

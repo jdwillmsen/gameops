@@ -285,7 +285,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 			return fmt.Errorf("read: %w", err)
 		}
 
-		held.track(pk, gd.EntityRuntimeID)
+		held.track(pk, gd.EntityRuntimeID, gd.EntityUniqueID)
 		poseEvents.event(pk, gd.EntityRuntimeID, gd.EntityUniqueID)
 
 		// A dead bot holds no chunks, and nothing outside this loop can tell
