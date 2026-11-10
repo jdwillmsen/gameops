@@ -24,7 +24,7 @@ type NotAloneError struct{ Names []string }
 
 func (e *NotAloneError) Error() string {
 	return "arena: non-crew players are online: " + strings.Join(e.Names, ", ") +
-		" (if these are crew units, add them to arena.DefaultCrewNames or --crew-names)"
+		" (if these are crew units, add them to arena.DefaultCrewNames; --crew-names replaces the defaults, so list every crew unit in it)"
 }
 
 // listAttempts bounds how often an unfinished `list` reply is re-read.
