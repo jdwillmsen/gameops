@@ -30,6 +30,35 @@ type pose struct {
 	// vehicle is the unique ID of what the bot rides, or 0. A rider's rotation
 	// belongs to its vehicle, so the report has to name it and turn it.
 	vehicle int64
+	// ackTeleport is set when the server teleported the bot. The server
+	// ignores the bot's input, rotation included, until a report says the
+	// teleport was handled.
+	ackTeleport bool
+	nudge       chan struct{}
+}
+
+func newPose() *pose { return &pose{nudge: make(chan struct{}, 1)} }
+
+// takeTeleportAck returns whether a teleport is waiting to be acknowledged,
+// and clears it.
+func (p *pose) takeTeleportAck() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	v := p.ackTeleport
+	p.ackTeleport = false
+	return v
+}
+
+func (p *pose) markTeleport() {
+	p.mu.Lock()
+	p.ackTeleport = true
+	p.mu.Unlock()
+	if p.nudge != nil {
+		select {
+		case p.nudge <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (p *pose) clearVehicle(id int64) {
@@ -72,6 +101,9 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 	case *packet.MovePlayer:
 		if m.EntityRuntimeID == runtimeID {
 			p.set(m.Position, m.Pitch)
+			if m.Mode == packet.MoveModeTeleport {
+				p.markTeleport()
+			}
 		}
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
@@ -108,6 +140,9 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 		if vehicle != 0 {
 			flags.Set(packet.InputFlagClientPredictedVehicle)
 		}
+		if p.takeTeleportAck() {
+			flags.Set(packet.InputFlagHandledTeleport)
+		}
 		pk := &packet.PlayerAuthInput{
 			Position:         pos,
 			Pitch:            pitch,
@@ -136,6 +171,8 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			send()
+		case <-p.nudge:
 			send()
 		}
 	}

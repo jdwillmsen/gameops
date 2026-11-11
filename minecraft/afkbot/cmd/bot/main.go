@@ -261,7 +261,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	}
 
 	gd := conn.GameData()
-	held := &pose{}
+	held := newPose()
 	poseEvents := newPoseLog(log)
 	held.set(gd.PlayerPosition, gd.Pitch)
 	if cfg.HasFacing {

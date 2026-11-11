@@ -108,3 +108,29 @@ func TestStaleRemovalDoesNotUnseatTheBot(t *testing.T) {
 		t.Fatalf("a passenger seat set vehicle %d", v)
 	}
 }
+
+func TestTeleportIsAcknowledgedOnceAndReportedAtOnce(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
+	p := newPose()
+	p.set(mgl32.Vec3{1, 2, 3}, 0)
+	go holdFacing(ctx, r, p, 90, func() uint64 { return 1 })
+	first := <-r.got
+	if first.InputData.Load(packet.InputFlagHandledTeleport) {
+		t.Fatal("acknowledged a teleport that never happened")
+	}
+
+	p.track(&packet.MovePlayer{EntityRuntimeID: 5, Position: mgl32.Vec3{9, 9, 9}, Mode: packet.MoveModeTeleport}, 5, 1)
+	select {
+	case pk := <-r.got:
+		if !pk.InputData.Load(packet.InputFlagHandledTeleport) || pk.Position != (mgl32.Vec3{9, 9, 9}) {
+			t.Fatalf("teleport not acknowledged at the new position: %+v", pk)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("teleport waited for the next interval")
+	}
+	if p.takeTeleportAck() {
+		t.Fatal("acknowledgement not cleared after it was sent")
+	}
+}
