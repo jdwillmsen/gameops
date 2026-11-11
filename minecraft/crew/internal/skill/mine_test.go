@@ -240,3 +240,43 @@ func TestMineBlockCollectsDropsThatFallDownAHole(t *testing.T) {
 		t.Errorf("cobblestone = %d, want 3", got)
 	}
 }
+
+// A sapling falls from about one leaf in twenty: the skill must break through
+// the empty ones without the pickup wait a rarer drop would cost it.
+func TestChancyMineKeepsBreakingPastMissesWithoutLongWaits(t *testing.T) {
+	w := flatWorld(20)
+	w.fill("oak_leaves", 8, 1, 8, 12, 2, 12)
+	r := newRig(t, w, feetAt(2, 1, 2))
+	r.leafDropEvery = 10
+	// Leaves break in a few ticks by hand.
+	r.slowBreak, r.slowOnly = 4, "oak_leaves"
+	m := NewMineBlockWith(w, r.self, "oak_leaves", "oak_sapling", "", 2, 0, Chancy(ChancyMisses))
+	st, err := r.run(m, 6000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("oak_sapling"); got != 2 {
+		t.Errorf("saplings = %d, want 2", got)
+	}
+	if r.breaks < 20 {
+		t.Fatalf("broke %d leaves, want at least 20 for 2 saplings at 1 in 10", r.breaks)
+	}
+	// The ordinary 40-tick wait would put a leaf at about 48 ticks here.
+	if per := r.ticks / r.breaks; per > 40 {
+		t.Errorf("%d ticks per leaf: a leaf with no drop is waiting out the full pickup", per)
+	}
+}
+
+func TestChancyMineGivesUpAtItsOwnLimit(t *testing.T) {
+	w := flatWorld(20)
+	w.fill("oak_leaves", 9, 1, 9, 11, 2, 11)
+	r := newRig(t, w, feetAt(2, 1, 2))
+	m := NewMineBlockWith(w, r.self, "oak_leaves", "oak_sapling", "", 1, 0, Chancy(5))
+	st, err := r.run(m, 6000)
+	if st != Failed || err == nil || err.Error() != "no pickup after 5 breaks" {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if r.breaks != 5 {
+		t.Errorf("broke %d leaves, want 5", r.breaks)
+	}
+}

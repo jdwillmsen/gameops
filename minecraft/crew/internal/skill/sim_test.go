@@ -27,6 +27,7 @@ const (
 	idOakPlanks   = 20
 	idGlass       = 21
 	idTorch       = 22
+	idSapling     = 41
 	chestHash     = 3162850062
 	blockHash     = 777
 )
@@ -40,6 +41,7 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:oak_planks", RuntimeID: idOakPlanks},
 	{Name: "minecraft:glass", RuntimeID: idGlass},
 	{Name: "minecraft:torch", RuntimeID: idTorch},
+	{Name: "minecraft:oak_sapling", RuntimeID: idSapling},
 	{Name: "minecraft:wooden_pickaxe", RuntimeID: idWoodenPick},
 	{Name: "minecraft:iron_axe", RuntimeID: idAxe},
 	{Name: "minecraft:wooden_sword", RuntimeID: 300},
@@ -168,6 +170,10 @@ type rig struct {
 	chestClosed bool
 
 	refusePickups bool
+	// leafDropEvery makes every nth broken leaf block drop a sapling; zero
+	// means none do.
+	leafDropEvery int
+	leafBreaks    int
 	stallBreaks   bool
 	// slowBreak and slowPickup stand in for a loaded server: inputs it takes
 	// to finish a break, and age a drop must reach before it can be taken.
@@ -497,6 +503,11 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 		r.falls = append(r.falls, fall{at: pos, left: max(r.fallDelay, 4)})
 	}
 	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone, "gravel": idGravel, "coal_ore": idCoal}
+	if name == "oak_leaves" && r.leafDropEvery > 0 {
+		if r.leafBreaks++; r.leafBreaks%r.leafDropEvery == 0 {
+			drops[name] = idSapling
+		}
+	}
 	if item, ok := drops[name]; ok {
 		// An item falls to the first solid block under it.
 		y := pos.Y()
@@ -616,7 +627,7 @@ func (r *rig) onClick(p *packet.InventoryTransaction) {
 // click out of reach or a held stack that is not the one named.
 func (r *rig) onPlace(u *protocol.UseItemTransactionData) {
 	r.placeClicks++
-	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone", idOakPlanks: "oak_planks", idGlass: "glass", idTorch: "torch"}
+	blocks := map[int32]string{idDirt: "dirt", idCobblestone: "cobblestone", idOakPlanks: "oak_planks", idGlass: "glass", idTorch: "torch", idSapling: "oak_sapling"}
 	for name, id := range extraBlocks {
 		blocks[id] = name
 	}

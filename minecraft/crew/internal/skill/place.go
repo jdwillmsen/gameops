@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -139,7 +140,7 @@ func (p *Place) place(a Actuator) outcome {
 // confirm waits for the world to show the block, and on silence retries the
 // placement once before failing.
 func (p *Place) confirm(a Actuator) outcome {
-	if name, known := p.world.Block(p.target); known && name == p.item {
+	if name, known := p.world.Block(p.target); known && placedAs(p.item, name) {
 		p.placed = true
 		if p.log != nil {
 			// The item only: the target is a lab coordinate.
@@ -155,6 +156,13 @@ func (p *Place) confirm(a Actuator) outcome {
 		return next
 	}
 	return p.idle(a)
+}
+
+// placedAs says whether a block name is what placing an item makes. They are
+// the same for every item but a sapling, which a server that predates the
+// per-species block names still reports as plain "sapling".
+func placedAs(item, block string) bool {
+	return block == item || (strings.HasSuffix(item, "_sapling") && block == "sapling")
 }
 
 func (p *Place) idle(a Actuator) outcome {
