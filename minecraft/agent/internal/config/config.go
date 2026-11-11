@@ -68,7 +68,7 @@ type Config struct {
 	// ConsoleBridgeToken authenticates every bridge request as a bearer
 	// token; the bridge rejects anything else.
 	ConsoleBridgeToken string
-	// MCMonitorURL and BackupExporterURL are the Prometheus exposition
+	// JoinProbeURL and BackupExporterURL are the Prometheus exposition
 	// endpoints behind !online, !version and !backup. Both are optional:
 	// unset means those commands report themselves unconfigured rather than
 	// erroring, so an agent can run without the exporters.
@@ -76,7 +76,7 @@ type Config struct {
 	// Note the backup exporter serves /metrics.txt, not /metrics -- the full
 	// path belongs in the value, not assembled here, so a future exporter with
 	// a different path needs no code change.
-	MCMonitorURL      string
+	JoinProbeURL      string
 	BackupExporterURL string
 
 	// MapURL is the world map service's internal API, where !map reports
@@ -399,7 +399,7 @@ func Load() (Config, error) {
 		WikiEnabled:               wikiEnabled,
 		WikiBaseURL:               wikiBaseURL,
 		AnswerMaxPerMinute:        answerRateLimit,
-		MCMonitorURL:              stringDefault("MC_MONITOR_URL", ""),
+		JoinProbeURL:              stringDefault("JOIN_PROBE_URL", ""),
 		BackupExporterURL:         stringDefault("BACKUP_EXPORTER_URL", ""),
 		MapURL:                    mapURL,
 		MapToken:                  mapToken,

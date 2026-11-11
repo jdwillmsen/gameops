@@ -38,7 +38,7 @@ func TestBackupStateReadsAgeAndPolicy(t *testing.T) {
 				_, _ = w.Write([]byte(tc.body))
 			}))
 			defer srv.Close()
-			f := NewMetricsFacts(NewMetricsClient("", srv.URL, time.Second))
+			f := NewMetricsFacts(NewMetricsClient("", srv.URL, time.Second), nil)
 			f.now = func() time.Time { return now }
 
 			got, err := f.BackupState(context.Background())
@@ -55,7 +55,7 @@ func TestBackupStateReadsAgeAndPolicy(t *testing.T) {
 // Unconfigured is an error for a raw reading: a watcher must never compare
 // the player-facing "not configured" sentence as if it were a version.
 func TestRawReadingsRefuseWithoutTheirExporter(t *testing.T) {
-	f := NewMetricsFacts(NewMetricsClient("", "", time.Second))
+	f := NewMetricsFacts(NewMetricsClient("", "", time.Second), nil)
 	if v, err := f.CurrentVersion(context.Background()); err == nil || v != "" {
 		t.Errorf("CurrentVersion = (%q, %v), want an error", v, err)
 	}

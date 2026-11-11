@@ -78,7 +78,7 @@ func runServerWatcher(ctx context.Context, cfg config.Config, timeout time.Durat
 	if !outbox.Enabled() {
 		return
 	}
-	facts := adapters.NewMetricsFacts(adapters.NewMetricsClient(cfg.MCMonitorURL, cfg.BackupExporterURL, timeout))
+	facts := adapters.NewMetricsFacts(adapters.NewMetricsClient(cfg.JoinProbeURL, cfg.BackupExporterURL, timeout), nil)
 	if !facts.StatusEnabled() && !facts.BackupEnabled() {
 		return
 	}
