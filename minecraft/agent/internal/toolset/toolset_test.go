@@ -83,8 +83,8 @@ func toolNames(registry *tools.Registry) []string {
 // production always constructs a ServerInfo, so nil-checking it is not the
 // same question as asking whether its exporters exist.
 func TestServerInfoToolsFollowTheExporters(t *testing.T) {
-	metrics := func(monitorURL, backupURL string) plugin.ServerInfo {
-		return adapters.NewMetricsFacts(adapters.NewMetricsClient(monitorURL, backupURL, time.Second))
+	metrics := func(probeURL, backupURL string) plugin.ServerInfo {
+		return adapters.NewMetricsFacts(adapters.NewMetricsClient(probeURL, backupURL, time.Second), nil)
 	}
 
 	cases := []struct {
@@ -93,9 +93,9 @@ func TestServerInfoToolsFollowTheExporters(t *testing.T) {
 		want       []string
 	}{
 		{"neither exporter configured", metrics("", ""), nil},
-		{"only mc-monitor", metrics("http://monitor.invalid", ""), []string{"server_status", "server_version"}},
+		{"only the join probe", metrics("http://probe.invalid", ""), []string{"server_status", "server_version"}},
 		{"only the backup exporter", metrics("", "http://backup.invalid"), []string{"backup_status"}},
-		{"both", metrics("http://monitor.invalid", "http://backup.invalid"), []string{"server_status", "server_version", "backup_status"}},
+		{"both", metrics("http://probe.invalid", "http://backup.invalid"), []string{"server_status", "server_version", "backup_status"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

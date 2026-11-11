@@ -69,7 +69,28 @@ func (c *BridgeClient) OnlinePlayers(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-var listHeader = regexp.MustCompile(`There are (\d+)/\d+ players online:`)
+// PlayerCounts runs `list` and reads only its header: how many players are on
+// and how many the server allows. Unlike OnlinePlayers it does not need the
+// names to parse, so a log line landing where the names belong does not cost
+// a player asking !online their answer.
+func (c *BridgeClient) PlayerCounts(ctx context.Context) (online, max int, err error) {
+	resp, err := c.runCommand(ctx, "list")
+	if err != nil {
+		return 0, 0, fmt.Errorf("bridge: player counts: %w", err)
+	}
+	for _, line := range strings.Split(resp.Output, "\n") {
+		m := listHeader.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		online, _ = strconv.Atoi(m[1])
+		max, _ = strconv.Atoi(m[2])
+		return online, max, nil
+	}
+	return 0, 0, fmt.Errorf("bridge: player counts: %w", errNoListHeader)
+}
+
+var listHeader = regexp.MustCompile(`There are (\d+)/(\d+) players online:`)
 
 var (
 	errNoListHeader = errors.New("no \"There are N/M players online:\" line in the console output")

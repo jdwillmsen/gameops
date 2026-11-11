@@ -429,7 +429,7 @@ to the server's NetherNet port range as well as TCP to the signaling port.
 | `WIKI_BASE_URL` | `https://minecraft.wiki/api.php` | The wiki API `wiki_lookup` calls. Startup refuses any other value unless `WIKI_ALLOW_TEST_BASE_URL=true`, so a stray setting cannot point the agent at a host nobody chose |
 | `WIKI_ALLOW_TEST_BASE_URL` | `false` | Lets `WIKI_BASE_URL` name a test server. For tests and local fakes only; never set in production |
 | `ANSWER_MAX_PER_MINUTE` | `4` | Max `@server` answers a single actor may trigger per rolling minute, tracked separately from `COMMAND_RATE_LIMIT_PER_MINUTE` since one LLM call costs far more than one console command |
-| `MC_MONITOR_URL` | *(empty)* | mc-monitor Prometheus endpoint behind `!online`; unset reports the command unconfigured rather than erroring |
+| `JOIN_PROBE_URL` | *(empty)* | The join probe's `/metrics`, behind `!online`'s health half, `!version` and the version announcement; unset reports `!version` unconfigured and `!online` health as unavailable. Not mc-monitor's `export-for-prometheus`: it pings over RakNet only and reads unhealthy on a NetherNet server. `!online`'s player count comes from the console `list` |
 | `MAP_URL` | *(empty disables `!map`, the world-damage notice and player heads on the map)* | The world map service's internal API (its `INTERNAL_ADDR` listener, e.g. `http://<release>-map:9090`), where `!map` reports who typed a login code, where the agent reads the chunk count for "Warning joiners of a damaged world", and where it reports "Player heads for the map" |
 | `MAP_TOKEN` | *(required with `MAP_URL`)* | Bearer token for that API; the map's `INTERNAL_TOKEN`, at least 16 characters |
 | `MAP_PUBLIC_URL` | *(required with `MAP_URL`)* | The address players open in a browser, quoted in `!map` replies. A different listener from `MAP_URL` |
@@ -710,9 +710,9 @@ A tool whose backing capability is not configured is not offered to the
 model at all - not offered-but-erroring, not offered-but-answering
 "unconfigured". `knowledge_lookup`, `waypoint_lookup`, and `waypoint_list`
 need `PG_HOST`; `server_status` and `server_version` need
-`MC_MONITOR_URL`; `backup_status` needs its own `BACKUP_EXPORTER_URL`,
+`JOIN_PROBE_URL`; `backup_status` needs its own `BACKUP_EXPORTER_URL`,
 checked separately since the backup exporter is a different deployment
-from mc-monitor. `players_online` has no such gate - it rides
+from the join probe. `players_online` has no such gate - it rides
 `mc-console-bridge`, which every deployment already requires. `wiki_lookup`
 needs `WIKI_ENABLED=true`. Run with none of the optional variables set and
 `@server` answers with no tools at all, rather than spending a tool round
@@ -1128,7 +1128,7 @@ as a first-timer by the welcome on their next observed join, but operators,
 who heard of them when they were first seen, hear nothing more.
 
 Version and backup are read from the exporters behind `!version` and
-`!backup` every five minutes, so they need `MC_MONITOR_URL` and
+`!backup` every five minutes, so they need `JOIN_PROBE_URL` and
 `BACKUP_EXPORTER_URL` respectively. Each is announced once per change, not
 once per poll. The last value is kept in memory, and the first poll after
 the agent starts only records a baseline, so a restart never re-announces

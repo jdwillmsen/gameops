@@ -10,9 +10,10 @@ import (
 // Stats provides read-only server information commands.
 //
 // Two transports back these. !players asks the game console through
-// mc-console-bridge; !online, !version and !backup cannot be answered that way
-// at all -- Bedrock has no uptime or version console command and knows nothing
-// about backups -- so they read the mc-monitor and backup exporters instead.
+// mc-console-bridge; !version and !backup cannot be answered that way at all --
+// Bedrock has no version console command and knows nothing about backups -- so
+// they read the join probe and backup exporters instead. !online takes its
+// count from the console and its health from the join probe.
 type Stats struct{}
 
 // NewStats builds the stats plugin.

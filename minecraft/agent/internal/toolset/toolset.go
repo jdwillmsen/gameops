@@ -250,7 +250,7 @@ func Build(pctx *plugin.Context) (*tools.Registry, *CallerScoped) {
 		)
 	}
 
-	// The backup exporter is a separate deployment from mc-monitor, so it is
+	// The backup exporter is a separate deployment from the join probe, so it is
 	// separately absent.
 	if pctx.ServerInfo != nil && pctx.ServerInfo.BackupEnabled() {
 		list = append(list, tools.Tool{

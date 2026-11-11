@@ -15,16 +15,22 @@ import (
 //
 // These commands cannot be served from the console. Bedrock has no `uptime`
 // or `version` console command and knows nothing about backups, so the data
-// has to come from somewhere the console cannot reach. mc-monitor and the
-// backup exporter already publish exactly it, in-namespace and unauthenticated,
-// and Prometheus already scrapes both -- so reading them directly adds no
-// infrastructure and no dependency on the monitoring stack being healthy.
+// has to come from somewhere the console cannot reach. The join probe and the
+// backup exporter already publish exactly it, in-namespace and
+// unauthenticated, and Prometheus already scrapes both -- so reading them
+// directly adds no infrastructure and no dependency on the monitoring stack
+// being healthy.
+//
+// The join probe rather than the mc-monitor exporter: that exporter pings
+// over RakNet only, so on a server running NetherNet it reads unhealthy with
+// no version however well the server is doing. The probe dials what players
+// dial on either transport.
 //
 // Scraping the exporters rather than querying Prometheus is deliberate: a
 // player asking !backup while Prometheus is down should still get an answer,
 // because the thing they are asking about is fine.
 type MetricsClient struct {
-	mcMonitorURL string
+	joinProbeURL string
 	backupURL    string
 	timeout      time.Duration
 	http         *http.Client
@@ -34,9 +40,9 @@ type MetricsClient struct {
 // URL may be empty, in which case the commands backed by it report that they
 // are unconfigured rather than failing -- an agent deployed without the
 // exporters is degraded, not broken.
-func NewMetricsClient(mcMonitorURL, backupURL string, timeout time.Duration) *MetricsClient {
+func NewMetricsClient(joinProbeURL, backupURL string, timeout time.Duration) *MetricsClient {
 	return &MetricsClient{
-		mcMonitorURL: strings.TrimRight(mcMonitorURL, "/"),
+		joinProbeURL: strings.TrimRight(joinProbeURL, "/"),
 		backupURL:    strings.TrimRight(backupURL, "/"),
 		timeout:      timeout,
 		http:         &http.Client{},
