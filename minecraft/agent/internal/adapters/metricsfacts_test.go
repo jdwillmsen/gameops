@@ -87,7 +87,7 @@ func TestServerStatusReportsCountsHealthAndVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ServerStatus: %v", err)
 	}
-	if want := "5/20 players online, server accepting joins, running 1.26.60."; got != want {
+	if want := "5/20 players online, server passing its join check, running 1.26.60."; got != want {
 		t.Errorf("ServerStatus = %q, want %q", got, want)
 	}
 }
@@ -135,6 +135,10 @@ func TestServerStatusSaysSoWhenTheJoinCheckFails(t *testing.T) {
 	if !strings.Contains(got, "did not answer its last join check") || strings.Contains(got, "alerted") {
 		t.Errorf("ServerStatus = %q, want a failed join check without a claim about staff", got)
 	}
+	// The probe keeps its last version through a failure; that is history.
+	if !strings.Contains(got, "last seen running 1.26.60") {
+		t.Errorf("ServerStatus = %q, want the version marked as last seen", got)
+	}
 }
 
 // A pinned-protocol probe that the server answered and turned away is a
@@ -161,8 +165,8 @@ func TestServerStatusDegradesSourceBySource(t *testing.T) {
 		want    string
 	}{
 		{"probe down", failing(t).URL, counts{online: 3, max: 20}, "3/20 players online, server status unavailable."},
-		{"console down", serve(t, liveJoinProbe).URL, counts{err: errors.New("bridge timeout")}, "Server accepting joins, running 1.26.60."},
-		{"both down", failing(t).URL, counts{err: errors.New("bridge timeout")}, "Server status unavailable."},
+		{"console down", serve(t, liveJoinProbe).URL, counts{err: errors.New("bridge timeout")}, "Player count unavailable, server passing its join check, running 1.26.60."},
+		{"both down", failing(t).URL, counts{err: errors.New("bridge timeout")}, "Player count unavailable, server status unavailable."},
 		{"no probe configured", "", counts{online: 0, max: 20}, "0/20 players online, server status unavailable."},
 	}
 	for _, tc := range cases {

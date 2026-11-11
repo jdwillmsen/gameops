@@ -62,20 +62,40 @@ func (f *MetricsFacts) ServerStatus(ctx context.Context) (string, error) {
 		return notConfigured, nil
 	}
 
+	// Concurrent, so a console slow to answer `list` cannot spend the
+	// command's deadline before the probe has been read.
+	type count struct {
+		online, max int
+		err         error
+	}
+	counted := make(chan count, 1)
+	if f.players != nil {
+		go func() {
+			online, max, err := f.players.PlayerCounts(ctx)
+			counted <- count{online, max, err}
+		}()
+	}
+	probe, err := f.probe(ctx)
+
 	var parts []string
 	if f.players != nil {
-		if online, max, err := f.players.PlayerCounts(ctx); err == nil {
-			parts = append(parts, fmt.Sprintf("%d/%d players online", online, max))
+		if c := <-counted; c.err == nil {
+			parts = append(parts, fmt.Sprintf("%d/%d players online", c.online, c.max))
+		} else {
+			parts = append(parts, "player count unavailable")
 		}
 	}
 
-	probe, err := f.probe(ctx)
 	joinable, hasJoinable := first(probe, "mc_joinprobe_joinable")
+	passing := err == nil && hasJoinable && joinable.value == 1
 	switch {
 	case err != nil || !hasJoinable:
 		parts = append(parts, statusUnavailable)
-	case joinable.value == 1:
-		parts = append(parts, "server accepting joins")
+	case passing:
+		// "Passing", not "accepting joins": over NetherNet the probe reaches
+		// the signaling endpoint and stops before login, so a login fault
+		// further on would still pass it.
+		parts = append(parts, "server passing its join check")
 	case stageRefused(probe):
 		// It answered and turned the session away, which is a version skew
 		// rather than an outage; "did not answer" would send players looking
@@ -87,8 +107,14 @@ func (f *MetricsFacts) ServerStatus(ctx context.Context) (string, error) {
 		// calls anyone, so this does not claim that staff were told.
 		parts = append(parts, "server did not answer its last join check")
 	}
+	// The probe keeps the last version it saw through a failed attempt, so
+	// one read while it is failing is history, not what is running now.
 	if v := serverVersion(probe); v != "" {
-		parts = append(parts, "running "+v)
+		if passing {
+			parts = append(parts, "running "+v)
+		} else {
+			parts = append(parts, "last seen running "+v)
+		}
 	}
 
 	if len(parts) == 0 {
