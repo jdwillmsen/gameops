@@ -386,8 +386,8 @@ it sees one and walks to within 12 blocks. Then the gather runs as usual. If
 the ring covers the box without a sighting the task fails with `no <block>
 found in search area`. With `search` set `area` stays optional; when both are
 given `area` must lie inside `search`, and only sightings inside `area` count.
-`search` can start a few blocks outside the box, but a unit further than about
-48 blocks from it has nowhere loaded to walk and finds nothing.
+A unit more than 32 blocks from the box first hops toward it over loaded
+ground, failing with `cannot reach the search area` if those hops stall.
 
 `oak_sapling` is also a gather item: the unit breaks `oak_leaves` by hand (no
 tool) for the sapling that drops about one time in twenty. It tolerates 120

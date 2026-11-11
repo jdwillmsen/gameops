@@ -1,6 +1,8 @@
 package skill
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -137,5 +139,30 @@ func TestPlaceConfirmsASaplingUnderEitherBlockName(t *testing.T) {
 		if got := placedAs(tc.item, tc.block); got != tc.want {
 			t.Errorf("placedAs(%q, %q) = %v", tc.item, tc.block, got)
 		}
+	}
+}
+
+// A dead connection ends the planting at once; it is not one more cell to
+// skip, which would end the run as done.
+func TestPlantFailsOnADeadConnection(t *testing.T) {
+	w := flatWorld(14)
+	r := newRig(t, w, feetAt(1, 1, 2))
+	r.give(0, idSapling, 20)
+	r.failWriteAt = 40
+	st, err := r.run(NewPlant(w, r.self, "oak_sapling", groveArea(), 4, 20), 6000)
+	if st != Failed || !errors.Is(err, errWire) {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func TestPlantFailsOnACancelledRun(t *testing.T) {
+	w := flatWorld(14)
+	r := newRig(t, w, feetAt(1, 1, 2))
+	r.give(0, idSapling, 20)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	st, err := NewPlant(w, r.self, "oak_sapling", groveArea(), 4, 20).Step(ctx, r)
+	if st != Failed || !errors.Is(err, context.Canceled) {
+		t.Fatalf("status %v, err %v", st, err)
 	}
 }

@@ -106,6 +106,23 @@ func (p *Place) failed(err error) outcome {
 	return outcome{st: Failed, err: err}
 }
 
+// cellError marks a failure of this one placement: the spot cannot be reached,
+// is taken or was refused. A caller placing many blocks may go on to the next.
+// Anything else (a dead connection, a cancelled run) is not marked and ends
+// the work.
+type cellError struct{ err error }
+
+func (e cellError) Error() string { return e.err.Error() }
+func (e cellError) Unwrap() error { return e.err }
+
+func (p *Place) cellFailed(err error) outcome {
+	var te tickError
+	if errors.As(err, &te) {
+		return p.failed(err)
+	}
+	return p.failed(cellError{err})
+}
+
 // walk brings the eye within reach of the target.
 func (p *Place) walk(a Actuator) outcome {
 	arrived, st, err := p.ap.step(a)
@@ -114,7 +131,7 @@ func (p *Place) walk(a Actuator) outcome {
 		p.phase = plPlace
 		return next
 	case st == Failed:
-		return p.failed(err)
+		return p.cellFailed(err)
 	}
 	return outcome{st: Running}
 }
@@ -130,9 +147,12 @@ func (p *Place) place(a Actuator) outcome {
 		// ticking and try again until the wait says the answer is not
 		// coming.
 		if p.waited++; p.waited >= answerTicks {
-			return p.failed(fmt.Errorf("no answer to the move within %d ticks", answerTicks))
+			return p.cellFailed(fmt.Errorf("no answer to the move within %d ticks", answerTicks))
 		}
 		return p.idle(a)
+	}
+	if errors.Is(err, act.ErrOccupied) || errors.Is(err, act.ErrOutOfReach) || errors.Is(err, act.ErrNoSupport) || errors.Is(err, act.ErrNoItem) {
+		return p.cellFailed(err)
 	}
 	return p.failed(err)
 }
@@ -150,7 +170,7 @@ func (p *Place) confirm(a Actuator) outcome {
 	}
 	if p.waited++; p.waited >= confirmTicks {
 		if p.retried {
-			return p.failed(errors.New("the server did not confirm the placed block"))
+			return p.cellFailed(errors.New("the server did not confirm the placed block"))
 		}
 		p.retried, p.phase, p.waited = true, plPlace, 0
 		return next
@@ -168,7 +188,7 @@ func placedAs(item, block string) bool {
 func (p *Place) idle(a Actuator) outcome {
 	pose := a.Pose()
 	if err := a.Tick(act.Input{Yaw: pose.Yaw, Pitch: pose.Pitch}); err != nil {
-		return p.failed(err)
+		return p.failed(tickError{err})
 	}
 	return outcome{st: Running}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -42,6 +43,7 @@ const (
 	eScan explorePhase = iota
 	eApproach
 	eWalk
+	eTravel
 )
 
 // Explore finds a kind of block in the loaded world and brings the unit near
@@ -59,7 +61,9 @@ type Explore struct {
 	accept *Area
 
 	started bool
-	origin  protocol.BlockPos
+	// travelFails counts hops toward the box that could not be made.
+	travelFails int
+	origin      protocol.BlockPos
 	// points are the waypoints, a hop apart on a grid through the origin, that
 	// lie in the box. visited holds those walked to or ruled out, by grid
 	// index; arrived the cells the unit actually reached, which a next hop
@@ -85,8 +89,9 @@ func (e *Explore) Name() string { return "explore" }
 
 func (e *Explore) Ready(s belief.Snapshot) error { return overworld(s) }
 
-// Resume reads the surroundings again; the waypoints already visited stay
-// visited, since they are what the skill has learned.
+// Resume reads the surroundings again. The waypoints already visited stay
+// visited, since they are what the skill has learned; one the unit was still
+// walking to was never reached and stays to be tried.
 func (e *Explore) Resume() { e.phase, e.nav, e.sight = eScan, nil, nil }
 
 func clampToLab(a Area) Area {
@@ -112,6 +117,8 @@ func (e *Explore) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = e.approachStep(a)
 		case eWalk:
 			o = e.walkStep(a)
+		case eTravel:
+			o = e.travelStep(a)
 		}
 		if !o.again {
 			return o.st, o.err
@@ -123,6 +130,12 @@ func (e *Explore) scanStep(a Actuator) outcome {
 	p := a.Pose()
 	feet := cellOf(p.Feet)
 	if !e.started {
+		// A unit far from the box first travels to it: the rings are laid out
+		// from where the search starts.
+		if e.farFromBox(feet) {
+			e.phase = eTravel
+			return next
+		}
 		e.started = true
 		e.origin = feet
 		e.arrived = append(e.arrived, feet)
@@ -215,10 +228,10 @@ func (e *Explore) nextWaypoint(a Actuator) outcome {
 		if !ok {
 			return outcome{st: Failed, err: fmt.Errorf("no %s found in search area", e.block)}
 		}
-		e.visited[wp.idx] = true
-		stand, ok := e.standNearColumn(wp.cell, a.Pose())
+		stand, ok := e.standNearColumn(wp.cell, a.Pose(), true)
 		if !ok {
-			// Unloaded or unwalkable ground: the next waypoint may do.
+			// Unloaded or unwalkable ground: ruled out, and the next may do.
+			e.visited[wp.idx] = true
 			continue
 		}
 		e.target = wp
@@ -304,11 +317,13 @@ func (e *Explore) walkStep(a Actuator) outcome {
 	case Running:
 		return outcome{st: Running}
 	case Done:
+		e.visited[e.target.idx] = true
 		e.arrived = append(e.arrived, e.target.cell)
 		e.nav, e.phase = nil, eScan
 		return next
 	}
 	e.nav = nil
+	e.visited[e.target.idx] = true
 	if o := e.nextWaypoint(a); !o.again {
 		return o
 	}
@@ -334,13 +349,13 @@ func abs32(v int32) int32 {
 // standNearColumn finds a standable cell in or beside the waypoint's column,
 // at the height nearest the unit's own, or none when the ground there is not
 // loaded or is not walkable.
-func (e *Explore) standNearColumn(wp protocol.BlockPos, pose act.Pose) (protocol.BlockPos, bool) {
+func (e *Explore) standNearColumn(wp protocol.BlockPos, pose act.Pose, inBox bool) (protocol.BlockPos, bool) {
 	y0 := cellOf(pose.Feet).Y()
 	offs := []int32{0, 3, -3, exploreNudge, -exploreNudge}
 	for _, dx := range offs {
 		for _, dz := range offs {
 			x, z := wp.X()+dx, wp.Z()+dz
-			if x < e.box.Min.X() || x > e.box.Max.X() || z < e.box.Min.Z() || z > e.box.Max.Z() {
+			if inBox && (x < e.box.Min.X() || x > e.box.Max.X() || z < e.box.Min.Z() || z > e.box.Max.Z()) {
 				continue
 			}
 			if c, ok := e.groundAt(x, z, y0); ok {
@@ -373,4 +388,66 @@ func (e *Explore) groundAt(x, z, y0 int32) (protocol.BlockPos, bool) {
 		}
 	}
 	return protocol.BlockPos{}, false
+}
+
+// maxTravelFails is how many hops toward the box may fail before the search
+// gives up reaching it.
+const maxTravelFails = 4
+
+// toBox is the point of the box nearest the unit, and how far off it is.
+func (e *Explore) toBox(feet protocol.BlockPos) (protocol.BlockPos, float64) {
+	c := func(v, lo, hi int32) int32 { return max(lo, min(hi, v)) }
+	t := protocol.BlockPos{c(feet.X(), e.box.Min.X(), e.box.Max.X()), feet.Y(), c(feet.Z(), e.box.Min.Z(), e.box.Max.Z())}
+	return t, math.Sqrt(float64(sqDist(feet, t)))
+}
+
+func (e *Explore) farFromBox(feet protocol.BlockPos) bool {
+	_, d := e.toBox(feet)
+	return d > exploreHop
+}
+
+// travelStep hops toward the box over loaded ground, a hop at a time, trying
+// a shorter hop when the ground at the full one is not loaded or not walkable.
+func (e *Explore) travelStep(a Actuator) outcome {
+	feet := cellOf(a.Pose().Feet)
+	if e.nav == nil {
+		if !e.farFromBox(feet) {
+			e.phase = eScan
+			return next
+		}
+		t, d := e.toBox(feet)
+		for _, frac := range []float64{1, 0.75, 0.5, 0.25} {
+			l := math.Min(exploreHop, d) * frac
+			hop := protocol.BlockPos{feet.X() + int32(math.Round(float64(t.X()-feet.X())/d*l)), feet.Y(), feet.Z() + int32(math.Round(float64(t.Z()-feet.Z())/d*l))}
+			if stand, ok := e.standNearColumn(hop, a.Pose(), false); ok {
+				e.nav = newNavigator(e.world, stand, arriveSlack)
+				break
+			}
+		}
+		if e.nav == nil {
+			return e.travelStalled(a)
+		}
+	}
+	st, err := e.nav.step(a)
+	var te tickError
+	if errors.As(err, &te) {
+		return outcome{st: Failed, err: te.err}
+	}
+	switch st {
+	case Running:
+		return outcome{st: Running}
+	case Done:
+		e.nav, e.travelFails = nil, 0
+		e.phase = eScan
+		return next
+	}
+	e.nav = nil
+	return e.travelStalled(a)
+}
+
+func (e *Explore) travelStalled(a Actuator) outcome {
+	if e.travelFails++; e.travelFails >= maxTravelFails {
+		return outcome{st: Failed, err: errors.New("cannot reach the search area")}
+	}
+	return e.idle(a)
 }

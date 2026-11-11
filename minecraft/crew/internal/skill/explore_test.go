@@ -136,3 +136,53 @@ func TestExploreWaypointsStayInsideTheBoxAndTheLab(t *testing.T) {
 		})
 	}
 }
+
+// A walk cut short by a fight is not a visit: after Resume the waypoint is
+// tried again, or a box with one waypoint in it could never be searched.
+func TestExploreRetriesAWaypointItWasPulledAwayFrom(t *testing.T) {
+	w := simWorld{}
+	w.platform(0, 60, 19, 21)
+	w.fill("oak_log", 40, 1, 20, 40, 4, 20)
+	r, ww := exploreRig(t, w, 5, 1, 20)
+	box := Area{Min: protocol.BlockPos{0, 0, 20}, Max: protocol.BlockPos{40, 20, 20}}
+	e := NewExplore(ww, r.self, "oak_log", box, nil).(*Explore)
+	for i := 0; e.phase != eWalk; i++ {
+		if st, err := e.Step(t.Context(), r); st != Running || err != nil || i > 10 {
+			t.Fatalf("step %d: status %v, err %v, phase %v", i, st, err, e.phase)
+		}
+	}
+	e.Resume()
+	if e.visited[e.target.idx] {
+		t.Fatal("the waypoint was marked visited before the unit got there")
+	}
+	st, err := r.run(e, 5000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func TestExploreTravelsToABoxFarAway(t *testing.T) {
+	w := simWorld{}
+	w.platform(-320, 10, 0, 41)
+	w.fill("oak_log", -250, 1, 20, -250, 5, 20)
+	r, ww := exploreRig(t, w, 0, 1, 20)
+	box := Area{Min: protocol.BlockPos{-300, 0, 0}, Max: protocol.BlockPos{-100, 20, 41}}
+	st, err := r.run(NewExplore(ww, r.self, "oak_log", box, nil), 40000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if d := fromTree(r, protocol.BlockPos{-250, 1, 20}); d > 16*16 {
+		t.Errorf("stopped %.0f blocks from the tree", d)
+	}
+}
+
+func TestExploreFailsWhenTheWayToTheBoxIsNotLoaded(t *testing.T) {
+	w := simWorld{}
+	w.platform(-20, 10, 0, 41)
+	r, ww := exploreRig(t, w, 0, 1, 20)
+	box := Area{Min: protocol.BlockPos{-300, 0, 0}, Max: protocol.BlockPos{-100, 20, 41}}
+	st, err := r.run(NewExplore(ww, r.self, "oak_log", box, nil), 40000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "cannot reach the search area") {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
