@@ -1102,8 +1102,7 @@ func newPluginContext(cfg config.Config, bridgeClient *adapters.BridgeClient, br
 		// in this namespace", and a second knob for the same property is a
 		// knob that drifts.
 		ServerInfo: adapters.NewMetricsFacts(
-			adapters.NewMetricsClient(cfg.JoinProbeURL, cfg.BackupExporterURL, bridgeTimeout),
-			bridgeClient,
+			adapters.NewMetricsClient(cfg.MCMonitorURL, cfg.BackupExporterURL, bridgeTimeout),
 		),
 		Directory: registry,
 		// The live roster again, asked the other question: not who a name

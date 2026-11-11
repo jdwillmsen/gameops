@@ -10,10 +10,9 @@ import (
 // Stats provides read-only server information commands.
 //
 // Two transports back these. !players asks the game console through
-// mc-console-bridge; !version and !backup cannot be answered that way at all --
-// Bedrock has no version console command and knows nothing about backups -- so
-// they read the join probe and backup exporters instead. !online takes its
-// count from the console and its health from the join probe.
+// mc-console-bridge; !online, !version and !backup cannot be answered that way
+// at all -- Bedrock has no uptime or version console command and knows nothing
+// about backups -- so they read the mc-monitor and backup exporters instead.
 type Stats struct{}
 
 // NewStats builds the stats plugin.
@@ -40,7 +39,7 @@ func (Stats) Commands() []plugin.Command {
 		},
 		{
 			Name:        "online",
-			Description: "Server health, player count and version.",
+			Description: "Server health, player count and responsiveness.",
 			Permission:  plugin.PermissionVisitor,
 			Run: func(ctx context.Context, pctx *plugin.Context, inv plugin.Invocation) (string, error) {
 				if pctx.ServerInfo == nil {

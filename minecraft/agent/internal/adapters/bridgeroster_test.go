@@ -76,34 +76,6 @@ func TestBridgeClient_OnlinePlayersRunsListAndParsesIt(t *testing.T) {
 	}
 }
 
-// !online needs only the header, so a log line where the names belong must
-// not cost the count the way it costs OnlinePlayers its roster.
-func TestBridgeClient_PlayerCountsReadsTheHeaderOnly(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(commandResponse{Rule: "list", Output: "There are 2/20 players online:\n[2026-11-11 01:02:03:004 INFO] Running AutoCompaction...\n"})
-	}))
-	defer srv.Close()
-
-	online, max, err := NewBridgeClient(srv.URL, "tok", time.Second).PlayerCounts(context.Background())
-	if err != nil {
-		t.Fatalf("PlayerCounts: %v", err)
-	}
-	if online != 2 || max != 20 {
-		t.Errorf("PlayerCounts = %d/%d, want 2/20", online, max)
-	}
-}
-
-func TestBridgeClient_PlayerCountsRefusesOutputWithoutAHeader(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(commandResponse{Rule: "list", Output: "Running AutoCompaction...\n"})
-	}))
-	defer srv.Close()
-
-	if _, _, err := NewBridgeClient(srv.URL, "tok", time.Second).PlayerCounts(context.Background()); err == nil {
-		t.Fatal("PlayerCounts: want an error without a list header, got none")
-	}
-}
-
 func TestParseList(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

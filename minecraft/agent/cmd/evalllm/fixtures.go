@@ -55,7 +55,7 @@ var fixtureWaypoints = map[string][]waypoints.Waypoint{
 // The canned exporter and console answers, in the shapes the production
 // adapters produce, so the model reads what it would read in production.
 const (
-	fixtureStatus  = "3/10 players online, server passing its join check, running 1.21.100.7."
+	fixtureStatus  = "3/10 players online, server healthy, responding in 42ms, running 1.21.100.7."
 	fixtureVersion = "Bedrock 1.21.100.7."
 	fixtureBackup  = "Last world backup 3 hours ago, 1.4 GiB, taken with the world held (clean)."
 	fixturePlayers = "There are 3/10 players online:\nAlex, Steve, Sam"

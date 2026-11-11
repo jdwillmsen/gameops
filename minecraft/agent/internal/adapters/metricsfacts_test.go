@@ -2,7 +2,6 @@ package adapters
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,31 +9,17 @@ import (
 	"time"
 )
 
-// The expositions below are copied verbatim from the live exporters, not
-// invented. Every field these commands read -- the version label, the
-// /metrics.txt path, the zero-vs-absent distinction -- was wrong in an earlier
-// draft written from assumption, so the fixtures are real output.
-//
-// liveJoinProbe is the FWB join probe on 2026-11-11, with the server on
-// NetherNet and healthy.
-const liveJoinProbe = `mc_joinprobe_attempts_total{stage="handshake"} 0
-mc_joinprobe_attempts_total{stage="pong"} 119
-mc_joinprobe_attempts_total{stage="refused"} 0
-mc_joinprobe_attempts_total{stage="unreachable"} 0
-mc_joinprobe_dialed_protocol 2225
-mc_joinprobe_duration_seconds 0.000684761
-mc_joinprobe_joinable 1
-mc_joinprobe_last_joinable_timestamp_seconds 1.794383344e+09
-mc_joinprobe_play_status -1
-mc_joinprobe_server_info{version="1.26.60"} 1
-mc_joinprobe_server_protocol 2225
-mc_joinprobe_stage 1
-`
-
-// liveRakNetExporter is the mc-monitor exporter the same minute: it pings
-// over RakNet only, so against a NetherNet server it reads unhealthy with no
-// version. The agent used to read this and tell players the server was down.
-const liveRakNetExporter = `minecraft_status_healthy{server_edition="bedrock",server_host="127.0.0.1",server_port="31132",server_version=""} 0
+// The exposition below is copied verbatim from the live exporters on
+// 2026-09-08, not invented. Every field these commands read -- the
+// server_version label, the /metrics.txt path, the zero-vs-absent distinction
+// -- was wrong in an earlier draft written from assumption, so the fixtures
+// are real output.
+const liveMCMonitor = `# HELP minecraft_status_healthy Whether the server responded
+# TYPE minecraft_status_healthy gauge
+minecraft_status_healthy{server_edition="bedrock",server_host="127.0.0.1",server_port="31132",server_version="1.26.45"} 1
+minecraft_status_players_max_count{server_edition="bedrock",server_host="127.0.0.1",server_port="31132",server_version="1.26.45"} 20
+minecraft_status_players_online_count{server_edition="bedrock",server_host="127.0.0.1",server_port="31132",server_version="1.26.45"} 5
+minecraft_status_response_time_seconds{server_edition="bedrock",server_host="127.0.0.1",server_port="31132",server_version="1.26.45"} 0.000160695
 `
 
 const liveBackup = `backup_last_success_timestamp_seconds{backup_job="jdwillmsen-minecraft-fwb-prd-backup",artifact="world"} 1788819879
@@ -52,152 +37,46 @@ func serve(t *testing.T, body string) *httptest.Server {
 	return srv
 }
 
-// counts is a PlayerCounter with a fixed answer.
-type counts struct {
-	online, max int
-	err         error
-}
-
-func (c counts) PlayerCounts(context.Context) (int, int, error) { return c.online, c.max, c.err }
-
-func factsFor(t *testing.T, probeURL, backupURL string, now time.Time) *MetricsFacts {
+func factsFor(t *testing.T, mcURL, backupURL string, now time.Time) *MetricsFacts {
 	t.Helper()
-	return factsWithPlayers(t, probeURL, backupURL, nil, now)
-}
-
-func factsWithPlayers(t *testing.T, probeURL, backupURL string, players PlayerCounter, now time.Time) *MetricsFacts {
-	t.Helper()
-	f := NewMetricsFacts(NewMetricsClient(probeURL, backupURL, 2*time.Second), players)
+	f := NewMetricsFacts(NewMetricsClient(mcURL, backupURL, 2*time.Second))
 	f.now = func() time.Time { return now }
 	return f
 }
 
-func failing(t *testing.T) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "down", http.StatusServiceUnavailable)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
 func TestServerStatusReportsCountsHealthAndVersion(t *testing.T) {
-	f := factsWithPlayers(t, serve(t, liveJoinProbe).URL, "", counts{online: 5, max: 20}, time.Now())
-	got, err := f.ServerStatus(context.Background())
+	srv := serve(t, liveMCMonitor)
+	got, err := factsFor(t, srv.URL, "", time.Now()).ServerStatus(context.Background())
 	if err != nil {
 		t.Fatalf("ServerStatus: %v", err)
 	}
-	if want := "5/20 players online, server passing its join check, running 1.26.60."; got != want {
-		t.Errorf("ServerStatus = %q, want %q", got, want)
+	for _, want := range []string{"5/20 players online", "server healthy", "1.26.45"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ServerStatus = %q, missing %q", got, want)
+		}
 	}
 }
 
-// The outage this replaced: a NetherNet server, healthy, with the RakNet-only
-// exporter reading 0. Whatever that exporter says, !online must neither call
-// the server down nor claim staff were alerted -- and an agent still pointed
-// at the exporter has nothing it can read, so it says the status is
-// unavailable rather than inventing an outage.
-func TestServerStatusIsNotFooledByTheRakNetExporterReadingZero(t *testing.T) {
-	for name, body := range map[string]string{
-		"join probe":            liveJoinProbe + liveRakNetExporter,
-		"exporter in its place": liveRakNetExporter,
-	} {
-		t.Run(name, func(t *testing.T) {
-			f := factsWithPlayers(t, serve(t, body).URL, "", counts{online: 2, max: 20}, time.Now())
-			got, err := f.ServerStatus(context.Background())
-			if err != nil {
-				t.Fatalf("ServerStatus: %v", err)
-			}
-			for _, bad := range []string{"NOT responding", "alerted"} {
-				if strings.Contains(got, bad) {
-					t.Errorf("ServerStatus = %q, must not say %q", got, bad)
-				}
-			}
-			if !strings.HasPrefix(got, "2/20 players online, ") {
-				t.Errorf("ServerStatus = %q, want the console's count first", got)
-			}
-		})
-	}
-	got, _ := factsWithPlayers(t, serve(t, liveRakNetExporter).URL, "", nil, time.Now()).ServerStatus(context.Background())
-	if got != "Server status unavailable." {
-		t.Errorf("ServerStatus over the exporter alone = %q, want it to say the status is unavailable", got)
-	}
-}
-
-// A failed join check is said plainly, but as what it is: the probe's last
-// attempt, not a page to staff that this process cannot know was sent.
-func TestServerStatusSaysSoWhenTheJoinCheckFails(t *testing.T) {
-	body := strings.Replace(liveJoinProbe, "mc_joinprobe_joinable 1", "mc_joinprobe_joinable 0", 1)
+// An unreachable server must be stated plainly rather than reported as zero
+// players on a healthy server, which is what reading the count alone would do.
+func TestServerStatusSaysSoWhenUnhealthy(t *testing.T) {
+	body := strings.Replace(liveMCMonitor, `server_version="1.26.45"} 1`, `server_version="1.26.45"} 0`, 1)
 	got, err := factsFor(t, serve(t, body).URL, "", time.Now()).ServerStatus(context.Background())
 	if err != nil {
 		t.Fatalf("ServerStatus: %v", err)
 	}
-	if !strings.Contains(got, "did not answer its last join check") || strings.Contains(got, "alerted") {
-		t.Errorf("ServerStatus = %q, want a failed join check without a claim about staff", got)
-	}
-	// The probe keeps its last version through a failure; that is history.
-	if !strings.Contains(got, "last seen running 1.26.60") {
-		t.Errorf("ServerStatus = %q, want the version marked as last seen", got)
-	}
-}
-
-// A pinned-protocol probe that the server answered and turned away is a
-// version skew, and must not read as the server being unreachable.
-func TestServerStatusSaysRefusedWhenTheServerTurnedTheProbeAway(t *testing.T) {
-	body := strings.NewReplacer("mc_joinprobe_joinable 1", "mc_joinprobe_joinable 0", "mc_joinprobe_stage 1", "mc_joinprobe_stage 2").Replace(liveJoinProbe)
-	got, err := factsFor(t, serve(t, body).URL, "", time.Now()).ServerStatus(context.Background())
-	if err != nil {
-		t.Fatalf("ServerStatus: %v", err)
-	}
-	if !strings.Contains(got, "refused its last join check") {
-		t.Errorf("ServerStatus = %q, want the refusal named", got)
-	}
-}
-
-// Each source degrades on its own: a probe that cannot be scraped costs the
-// health half, a console that cannot be asked costs the count, and neither
-// turns into an error the player sees as the command breaking.
-func TestServerStatusDegradesSourceBySource(t *testing.T) {
-	cases := []struct {
-		name    string
-		probe   string
-		players PlayerCounter
-		want    string
-	}{
-		{"probe down", failing(t).URL, counts{online: 3, max: 20}, "3/20 players online, server status unavailable."},
-		{"console down", serve(t, liveJoinProbe).URL, counts{err: errors.New("bridge timeout")}, "Player count unavailable, server passing its join check, running 1.26.60."},
-		{"both down", failing(t).URL, counts{err: errors.New("bridge timeout")}, "Player count unavailable, server status unavailable."},
-		{"no probe configured", "", counts{online: 0, max: 20}, "0/20 players online, server status unavailable."},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := factsWithPlayers(t, tc.probe, "", tc.players, time.Now()).ServerStatus(context.Background())
-			if err != nil {
-				t.Fatalf("ServerStatus: %v", err)
-			}
-			if got != tc.want {
-				t.Errorf("ServerStatus = %q, want %q", got, tc.want)
-			}
-		})
+	if !strings.Contains(got, "NOT responding") {
+		t.Errorf("ServerStatus = %q, want an explicit not-responding message", got)
 	}
 }
 
 func TestVersionReadsTheLabelNotAValue(t *testing.T) {
-	got, err := factsFor(t, serve(t, liveJoinProbe+liveRakNetExporter).URL, "", time.Now()).Version(context.Background())
+	got, err := factsFor(t, serve(t, liveMCMonitor).URL, "", time.Now()).Version(context.Background())
 	if err != nil {
 		t.Fatalf("Version: %v", err)
 	}
-	if got != "Bedrock 1.26.60." {
-		t.Errorf("Version = %q, want %q", got, "Bedrock 1.26.60.")
-	}
-}
-
-// Before its first answer the probe publishes no server_info at all; that is
-// "no version yet", which a watcher must skip rather than compare against.
-func TestCurrentVersionRefusesBeforeTheProbeHasSeenOne(t *testing.T) {
-	body := strings.Replace(liveJoinProbe, `mc_joinprobe_server_info{version="1.26.60"} 1`+"\n", "", 1)
-	if _, err := factsFor(t, serve(t, body).URL, "", time.Now()).CurrentVersion(context.Background()); err == nil {
-		t.Fatal("CurrentVersion: want an error with no server_info series, got none")
+	if got != "Bedrock 1.26.45." {
+		t.Errorf("Version = %q, want %q", got, "Bedrock 1.26.45.")
 	}
 }
 
@@ -283,12 +162,12 @@ func TestUnconfiguredEndpointsReportThemselves(t *testing.T) {
 // Label values may contain commas; splitting naively would corrupt the
 // version this reads.
 func TestLabelParsingSurvivesCommasInValues(t *testing.T) {
-	body := `mc_joinprobe_server_info{note="a,b",version="1.26.60"} 1` + "\n"
+	body := `minecraft_status_healthy{server_note="a,b",server_version="1.26.45"} 1` + "\n"
 	got, err := factsFor(t, serve(t, body).URL, "", time.Now()).Version(context.Background())
 	if err != nil {
 		t.Fatalf("Version: %v", err)
 	}
-	if got != "Bedrock 1.26.60." {
+	if got != "Bedrock 1.26.45." {
 		t.Errorf("Version = %q, want the version intact past a comma-bearing label", got)
 	}
 }
