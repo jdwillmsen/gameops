@@ -49,6 +49,18 @@ func (p *pose) takeTeleportAck() bool {
 	return v
 }
 
+// report reads the pose and takes any pending teleport acknowledgement in one
+// step, so an acknowledgement is never sent with a position older than the
+// teleport it answers. Nothing is taken while paused.
+func (p *pose) report() (pos mgl32.Vec3, pitch float32, paused bool, vehicle int64, ack bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.paused {
+		ack, p.ackTeleport = p.ackTeleport, false
+	}
+	return p.pos, p.pitch, p.paused, p.vehicle, ack
+}
+
 func (p *pose) markTeleport() {
 	p.mu.Lock()
 	p.ackTeleport = true
@@ -132,7 +144,7 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 // server gave it with that rotation, so the report never asks to move it.
 func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick func() uint64) {
 	send := func() {
-		pos, pitch, paused, vehicle := p.get()
+		pos, pitch, paused, vehicle, ack := p.report()
 		if paused {
 			return
 		}
@@ -140,7 +152,7 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 		if vehicle != 0 {
 			flags.Set(packet.InputFlagClientPredictedVehicle)
 		}
-		if p.takeTeleportAck() {
+		if ack {
 			flags.Set(packet.InputFlagHandledTeleport)
 		}
 		pk := &packet.PlayerAuthInput{

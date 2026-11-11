@@ -13,142 +13,75 @@ import (
 // cannot: !online, !version and !backup.
 type MetricsFacts struct {
 	client *MetricsClient
-	// players is the console's own count for !online. Optional: the server
-	// watcher reads only versions and backups and has no use for it.
-	players PlayerCounter
 	// now is injected so the age arithmetic in BackupStatus is testable
 	// without freezing the process clock.
 	now func() time.Time
 }
 
-// PlayerCounter reads how many players are online and how many the server
-// allows. Satisfied by BridgeClient.
-type PlayerCounter interface {
-	PlayerCounts(ctx context.Context) (online, max int, err error)
+// NewMetricsFacts builds a MetricsFacts over client.
+func NewMetricsFacts(client *MetricsClient) *MetricsFacts {
+	return &MetricsFacts{client: client, now: time.Now}
 }
 
-// NewMetricsFacts builds a MetricsFacts over client. players may be nil, in
-// which case !online leaves the count out.
-func NewMetricsFacts(client *MetricsClient, players PlayerCounter) *MetricsFacts {
-	return &MetricsFacts{client: client, players: players, now: time.Now}
-}
+const notConfigured = "That command isn't configured on this server."
 
-const (
-	notConfigured     = "That command isn't configured on this server."
-	statusUnavailable = "server status unavailable"
-)
-
-// StatusEnabled reports whether the join probe is configured; it backs both
+// StatusEnabled reports whether mc-monitor is configured; it backs both
 // ServerStatus and Version, which read the same exposition.
-func (f *MetricsFacts) StatusEnabled() bool { return f.client != nil && f.client.joinProbeURL != "" }
+func (f *MetricsFacts) StatusEnabled() bool { return f.client != nil && f.client.mcMonitorURL != "" }
 
 // BackupEnabled reports whether the backup exporter is configured.
 func (f *MetricsFacts) BackupEnabled() bool { return f.client != nil && f.client.backupURL != "" }
 
 // ServerStatus answers !online: how many players, whether the server is
-// letting clients in, and which build it runs.
+// answering, and how quickly.
 //
 // Deliberately more than a count. !players already lists names, so a second
 // command repeating them earns nothing; what it cannot tell you is whether
-// the server is healthy, which is the other half of "is the server ok" that
-// players actually mean when they ask.
-//
-// Each half degrades on its own. A reading that cannot be had is reported as
-// unavailable rather than as the server being down: a player told the server
-// is broken when only a scrape failed goes looking for a problem that is not
-// there.
+// the server is healthy and responsive, which is the other half of "is the
+// server ok" that players actually mean when they ask.
 func (f *MetricsFacts) ServerStatus(ctx context.Context) (string, error) {
-	if !f.StatusEnabled() && f.players == nil {
+	if f.client.mcMonitorURL == "" {
 		return notConfigured, nil
 	}
+	m, err := f.client.fetch(ctx, f.client.mcMonitorURL)
+	if err != nil {
+		return "", fmt.Errorf("metrics facts: server status: %w", err)
+	}
 
-	// Concurrent, so a console slow to answer `list` cannot spend the
-	// command's deadline before the probe has been read.
-	type count struct {
-		online, max int
-		err         error
+	healthy, ok := first(m, "minecraft_status_healthy")
+	if !ok {
+		return "", fmt.Errorf("metrics facts: server status: mc-monitor published no minecraft_status_healthy")
 	}
-	counted := make(chan count, 1)
-	if f.players != nil {
-		go func() {
-			online, max, err := f.players.PlayerCounts(ctx)
-			counted <- count{online, max, err}
-		}()
+	if healthy.value != 1 {
+		// Reachable exporter, unreachable server. Worth saying plainly: the
+		// player asked because something felt wrong, and it is.
+		return "Server is NOT responding to status checks. Staff have been alerted by monitoring.", nil
 	}
-	probe, err := f.probe(ctx)
 
 	var parts []string
-	if f.players != nil {
-		if c := <-counted; c.err == nil {
-			parts = append(parts, fmt.Sprintf("%d/%d players online", c.online, c.max))
-		} else {
-			parts = append(parts, "player count unavailable")
-		}
+	online, hasOnline := first(m, "minecraft_status_players_online_count")
+	max, hasMax := first(m, "minecraft_status_players_max_count")
+	if hasOnline && hasMax {
+		parts = append(parts, fmt.Sprintf("%d/%d players online", int(online.value), int(max.value)))
 	}
+	parts = append(parts, "server healthy")
 
-	joinable, hasJoinable := first(probe, "mc_joinprobe_joinable")
-	passing := err == nil && hasJoinable && joinable.value == 1
-	switch {
-	case err != nil || !hasJoinable:
-		parts = append(parts, statusUnavailable)
-	case passing:
-		// "Passing", not "accepting joins": over NetherNet the probe reaches
-		// the signaling endpoint and stops before login, so a login fault
-		// further on would still pass it.
-		parts = append(parts, "server passing its join check")
-	case stageRefused(probe):
-		// It answered and turned the session away, which is a version skew
-		// rather than an outage; "did not answer" would send players looking
-		// for the wrong fault.
-		parts = append(parts, "server refused its last join check")
-	default:
-		// The probe's last attempt only. One miss is often a restart in
-		// progress, and the chart's own alert waits out a window before it
-		// calls anyone, so this does not claim that staff were told.
-		parts = append(parts, "server did not answer its last join check")
+	if rt, ok := first(m, "minecraft_status_response_time_seconds"); ok {
+		parts = append(parts, fmt.Sprintf("responding in %s", formatLatency(rt.value)))
 	}
-	// The probe keeps the last version it saw through a failed attempt, so
-	// one read while it is failing is history, not what is running now.
-	if v := serverVersion(probe); v != "" {
-		if passing {
-			parts = append(parts, "running "+v)
-		} else {
-			parts = append(parts, "last seen running "+v)
-		}
+	if v := serverVersion(m); v != "" {
+		parts = append(parts, "running "+v)
 	}
-
-	if len(parts) == 0 {
-		return "Server status unavailable.", nil
-	}
-	msg := strings.Join(parts, ", ") + "."
-	return strings.ToUpper(msg[:1]) + msg[1:], nil
+	return strings.Join(parts, ", ") + ".", nil
 }
 
-// stageRefused reports whether the probe's last attempt reached the server
-// and was refused a session, mc_joinprobe_stage's 2.
-func stageRefused(probe map[string][]sample) bool {
-	s, ok := first(probe, "mc_joinprobe_stage")
-	return ok && s.value == 2
-}
-
-// probe reads the join probe, or nothing when it is not configured.
-func (f *MetricsFacts) probe(ctx context.Context) (map[string][]sample, error) {
-	if !f.StatusEnabled() {
-		return nil, errStatusUnconfigured
-	}
-	m, err := f.client.fetch(ctx, f.client.joinProbeURL)
-	if err != nil {
-		return nil, fmt.Errorf("metrics facts: join probe: %w", err)
-	}
-	return m, nil
-}
-
-// Version answers !version with the server build the join probe last saw.
+// Version answers !version with the server build mc-monitor last saw.
 //
-// The version is a label on mc_joinprobe_server_info rather than a metric
-// value of its own, which is why this reads a label instead of a number.
+// The version is a label on every minecraft_status_* series rather than a
+// metric value of its own, which is why this reads a label instead of a
+// number.
 func (f *MetricsFacts) Version(ctx context.Context) (string, error) {
-	if !f.StatusEnabled() {
+	if f.client.mcMonitorURL == "" {
 		return notConfigured, nil
 	}
 	v, err := f.CurrentVersion(ctx)
@@ -163,20 +96,23 @@ func (f *MetricsFacts) Version(ctx context.Context) (string, error) {
 // notConfigured line: the caller of a raw reading is a watcher comparing
 // values, and a sentence is not a version it should ever compare against.
 var (
-	errStatusUnconfigured = errors.New("metrics facts: the join probe is not configured")
+	errStatusUnconfigured = errors.New("metrics facts: mc-monitor is not configured")
 	errBackupUnconfigured = errors.New("metrics facts: backup exporter is not configured")
 )
 
-// CurrentVersion is the bare version label, for a caller that compares
-// versions rather than reading one out to a player.
+// CurrentVersion is the bare server_version label, for a caller that
+// compares versions rather than reading one out to a player.
 func (f *MetricsFacts) CurrentVersion(ctx context.Context) (string, error) {
-	m, err := f.probe(ctx)
+	if !f.StatusEnabled() {
+		return "", errStatusUnconfigured
+	}
+	m, err := f.client.fetch(ctx, f.client.mcMonitorURL)
 	if err != nil {
 		return "", fmt.Errorf("metrics facts: version: %w", err)
 	}
 	v := serverVersion(m)
 	if v == "" {
-		return "", fmt.Errorf("metrics facts: version: the join probe has not seen a server version yet")
+		return "", fmt.Errorf("metrics facts: version: no server_version label on any minecraft_status series")
 	}
 	return v, nil
 }
@@ -277,16 +213,29 @@ func (f *MetricsFacts) BackupStatus(ctx context.Context) (string, error) {
 	return msg, nil
 }
 
-// serverVersion reads the version label off mc_joinprobe_server_info. The
-// probe resets the series before setting a new one, so at most one is
-// published; the value check guards against one ever left at 0.
+// serverVersion pulls the server_version label off whichever
+// minecraft_status_* series carries it.
 func serverVersion(m map[string][]sample) string {
-	for _, s := range m["mc_joinprobe_server_info"] {
-		if v := s.labels["version"]; v != "" && s.value == 1 {
-			return v
+	for _, name := range []string{
+		"minecraft_status_healthy",
+		"minecraft_status_players_online_count",
+		"minecraft_status_players_max_count",
+	} {
+		if s, ok := first(m, name); ok {
+			if v := s.labels["server_version"]; v != "" {
+				return v
+			}
 		}
 	}
 	return ""
+}
+
+func formatLatency(seconds float64) string {
+	ms := seconds * 1000
+	if ms < 1 {
+		return "under 1ms"
+	}
+	return fmt.Sprintf("%.0fms", ms)
 }
 
 // formatAge renders a duration the way someone reads it aloud, because these

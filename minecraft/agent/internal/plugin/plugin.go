@@ -88,11 +88,11 @@ type Facts interface {
 //
 // Separate from Facts rather than folded into it because the two are backed
 // by different transports and either can be absent: Facts speaks to the
-// console through mc-console-bridge, ServerInfo scrapes the join probe and
+// console through mc-console-bridge, ServerInfo scrapes the mc-monitor and
 // backup exporters. Merging them would force the console-backed
 // implementation to carry three methods it has no way to answer.
 type ServerInfo interface {
-	// ServerStatus reports player counts, health and version in one
+	// ServerStatus reports player counts, health and responsiveness in one
 	// line -- the "is the server ok" question, as distinct from PlayersOnline's
 	// list of who is here.
 	ServerStatus(ctx context.Context) (string, error)
