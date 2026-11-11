@@ -27,8 +27,15 @@ const (
 	breakTicks = 200
 	// Least wait for a drop after the block went; the time the break itself
 	// took is added, as it measures how slowly this server is running.
-	pickupTicks  = 40
-	maxMisses    = 3
+	pickupTicks = 40
+	maxMisses   = 3
+	// A chancy block drops its item rarely, so most breaks bring nothing. The
+	// drop is on the ground within a few ticks or not at all, so the wait for
+	// it is short: 40 ticks per empty leaf would make a sapling take minutes.
+	chancyPickupTicks = 24
+	// Consecutive empty breaks tolerated for a chancy block. A sapling drops
+	// about 1 break in 20, so 120 misses in a row happens about 1 time in 500.
+	ChancyMisses = 120
 	maxWalkFails = 12
 	maxCandidate = 64
 	// A drop is collected within 1.5 blocks; stay well inside it.
@@ -84,6 +91,10 @@ type Mine struct {
 	lastBreak int
 	misses    int
 	pickInit  bool
+	// missLimit and pickupWait are the misses tolerated and the wait for a
+	// drop; Chancy loosens the first and shortens the second.
+	missLimit  int
+	pickupWait int
 }
 
 // Area is an inclusive box of blocks.
@@ -102,6 +113,13 @@ type MineOption func(*Mine)
 // misplaced unit cannot dig up anything outside the area it was given.
 func InArea(a Area) MineOption { return func(m *Mine) { m.area = &a } }
 
+// Chancy marks a block whose item drops rarely, like a sapling from leaves:
+// up to maxMisses breaks in a row may bring nothing before the skill gives up,
+// and each waits only briefly for a drop to show.
+func Chancy(maxMisses int) MineOption {
+	return func(m *Mine) { m.missLimit, m.pickupWait = maxMisses, chancyPickupTicks }
+}
+
 // NewMineBlock breaks blocks until qty more of item are in the inventory.
 // tool is a name suffix: "pickaxe" matches any "*_pickaxe". A radius of zero
 // or less means 24.
@@ -114,7 +132,8 @@ func NewMineBlockWith(world path.Blocks, self func() belief.Snapshot, block, ite
 	if radius <= 0 {
 		radius = defaultRadius
 	}
-	m := &Mine{world: world, self: self, block: block, item: item, tool: tool, qty: qty, radius: radius, skip: map[protocol.BlockPos]bool{}}
+	m := &Mine{world: world, self: self, block: block, item: item, tool: tool, qty: qty, radius: radius, skip: map[protocol.BlockPos]bool{},
+		missLimit: maxMisses, pickupWait: pickupTicks}
 	for _, o := range opts {
 		o(m)
 	}
@@ -385,9 +404,9 @@ func (m *Mine) pickupStep(a Actuator, have int, p act.Pose) outcome {
 		m.phase = mFind
 		return next
 	}
-	if m.waited >= pickupTicks+m.lastBreak {
-		if m.misses++; m.misses >= maxMisses {
-			return m.failed(a, errors.New("no pickup after 3 breaks"))
+	if m.waited >= m.pickupWait+m.lastBreak {
+		if m.misses++; m.misses >= m.missLimit {
+			return m.failed(a, fmt.Errorf("no pickup after %d breaks", m.missLimit))
 		}
 		m.phase = mFind
 		return next
