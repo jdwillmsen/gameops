@@ -137,6 +137,19 @@ func TestServerStatusSaysSoWhenTheJoinCheckFails(t *testing.T) {
 	}
 }
 
+// A pinned-protocol probe that the server answered and turned away is a
+// version skew, and must not read as the server being unreachable.
+func TestServerStatusSaysRefusedWhenTheServerTurnedTheProbeAway(t *testing.T) {
+	body := strings.NewReplacer("mc_joinprobe_joinable 1", "mc_joinprobe_joinable 0", "mc_joinprobe_stage 1", "mc_joinprobe_stage 2").Replace(liveJoinProbe)
+	got, err := factsFor(t, serve(t, body).URL, "", time.Now()).ServerStatus(context.Background())
+	if err != nil {
+		t.Fatalf("ServerStatus: %v", err)
+	}
+	if !strings.Contains(got, "refused its last join check") {
+		t.Errorf("ServerStatus = %q, want the refusal named", got)
+	}
+}
+
 // Each source degrades on its own: a probe that cannot be scraped costs the
 // health half, a console that cannot be asked costs the count, and neither
 // turns into an error the player sees as the command breaking.
