@@ -40,7 +40,7 @@ func (Stats) Commands() []plugin.Command {
 		},
 		{
 			Name:        "online",
-			Description: "Server health, player count and responsiveness.",
+			Description: "Server health, player count and version.",
 			Permission:  plugin.PermissionVisitor,
 			Run: func(ctx context.Context, pctx *plugin.Context, inv plugin.Invocation) (string, error) {
 				if pctx.ServerInfo == nil {

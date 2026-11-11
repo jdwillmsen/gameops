@@ -693,7 +693,7 @@ out of chat. The full surface, as wired in `internal/toolset/toolset.go`:
 - `waypoint_lookup` - the asker's own coordinates saved under a name
 - `waypoint_list` - the names of the asker's own saved waypoints
 - `players_online` - who is currently connected
-- `server_status` - health, player count, responsiveness, and the same
+- `server_status` - join-probe health, player count, and the same
   update rule `server_version` carries, because this answer names the build
   too
 - `server_version` - the Bedrock build the server runs, and that a client

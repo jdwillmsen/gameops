@@ -76,6 +76,11 @@ func (f *MetricsFacts) ServerStatus(ctx context.Context) (string, error) {
 		parts = append(parts, statusUnavailable)
 	case joinable.value == 1:
 		parts = append(parts, "server accepting joins")
+	case stageRefused(probe):
+		// It answered and turned the session away, which is a version skew
+		// rather than an outage; "did not answer" would send players looking
+		// for the wrong fault.
+		parts = append(parts, "server refused its last join check")
 	default:
 		// The probe's last attempt only. One miss is often a restart in
 		// progress, and the chart's own alert waits out a window before it
@@ -86,8 +91,18 @@ func (f *MetricsFacts) ServerStatus(ctx context.Context) (string, error) {
 		parts = append(parts, "running "+v)
 	}
 
+	if len(parts) == 0 {
+		return "Server status unavailable.", nil
+	}
 	msg := strings.Join(parts, ", ") + "."
 	return strings.ToUpper(msg[:1]) + msg[1:], nil
+}
+
+// stageRefused reports whether the probe's last attempt reached the server
+// and was refused a session, mc_joinprobe_stage's 2.
+func stageRefused(probe map[string][]sample) bool {
+	s, ok := first(probe, "mc_joinprobe_stage")
+	return ok && s.value == 2
 }
 
 // probe reads the join probe, or nothing when it is not configured.
