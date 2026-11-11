@@ -8,6 +8,9 @@ type Source struct {
 	// Fell makes the unit cut down whole trees, pillaring up for logs above
 	// its reach, instead of only breaking what it can reach from the ground.
 	Fell bool
+	// Chancy marks an item the block drops only now and then, so most breaks
+	// bring nothing and the task must not give up after a few.
+	Chancy bool
 }
 
 // recipes is closed on purpose: an item missing here is rejected at the API
@@ -15,4 +18,5 @@ type Source struct {
 var recipes = map[string]Source{
 	"cobblestone": {Block: "stone", Tool: "pickaxe"},
 	"oak_log":     {Block: "oak_log", Tool: "axe", Fell: true},
+	"oak_sapling": {Block: "oak_leaves", Chancy: true},
 }

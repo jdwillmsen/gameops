@@ -64,7 +64,7 @@ var reasonRules = []reasonRule{
 	{regexp.MustCompile(`server rejected the (deposit|withdrawal|source stack)`), ReasonDepositRejected},
 	{regexp.MustCompile(`inventory did not show`), ReasonInventoryDesync},
 	{regexp.MustCompile(`wire down|session ended|connection (lost|closed)`), ReasonSessionLost},
-	{regexp.MustCompile(`no standing spot|cannot reach|the entrance is outside|the plan reaches outside|^no reachable .+ (in the area|within \d+ blocks)$|^target not found$`), ReasonNoReachableTarget},
+	{regexp.MustCompile(`no standing spot|cannot reach|the entrance is outside|the plan reaches outside|^no reachable .+ (in the area|within \d+ blocks)$|^target not found$|^no [a-z_]+ found in search area$`), ReasonNoReachableTarget},
 	{regexp.MustCompile(`no solid neighbour to place against|did not place the block|the target is not air or replaceable|the target is out of reach`), ReasonPlacementFailed},
 	{regexp.MustCompile(`^unit died$`), ReasonUnitDied},
 	{regexp.MustCompile(`^a (hostile mob|player who is not crew) is nearby$`), ReasonUnsafeNearby},

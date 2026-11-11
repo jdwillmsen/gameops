@@ -31,6 +31,7 @@ const (
 	inspectTemplate  = "inspect"
 	observeTemplate  = "observe_blocks"
 	placeTemplate    = "place_block"
+	plantTemplate    = "plant_trees"
 	craftTemplate    = "craft"
 	// The harness templates act on other entities, which a lab unit must never
 	// be asked to do, so they exist only after EnableHarness.
@@ -48,6 +49,14 @@ const (
 	// One craft task asks for at most a stack of the item.
 	maxCraftCount = 64
 	maxAreaSpan   = 64
+	// A search box is a wider net than an area: the unit roams it looking for
+	// the block, so it may span most of the lab square.
+	maxSearchSpan = 400
+	// plant_trees: a tree needs room, so saplings go at least minSpacing apart.
+	defaultSpacing = 4
+	minSpacing     = 3
+	maxSpacing     = 16
+	maxPlantCount  = 64
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
 	// goto is confined to the lab's flat square, so a typo cannot send the
@@ -74,7 +83,8 @@ type Chest struct {
 	Z int32 `json:"z"`
 }
 
-// Template is a task request: gather_and_deposit fills Item, Qty and Chest;
+// Template is a task request: gather_and_deposit fills Item, Qty and Chest, and
+// optionally Area and Search; plant_trees fills Item, Qty, Area and Spacing;
 // haul fills Items, From and To; withdraw and deposit fill Items and Chest;
 // place_block fills Block and Item.
 type Template struct {
@@ -84,8 +94,20 @@ type Template struct {
 	Chest    Chest  `json:"chest"`
 	// Block, when set, is the cell place_block fills.
 	Block *Chest `json:"block,omitempty"`
-	// Area, when set, confines gather_and_deposit to blocks inside the box.
+	// Area, when set, confines gather_and_deposit to blocks inside the box. For
+	// plant_trees it is the grove.
 	Area *Area `json:"area,omitempty"`
+	// Search, when set on gather_and_deposit, makes the unit look for the
+	// block across this box, up to 400 blocks on an axis, before it gathers:
+	// it reads the loaded blocks around it and, if the block is not there,
+	// walks an expanding ring of waypoints about 32 blocks apart until it sees
+	// one, then goes near it. With Search set, Area is optional; if both are
+	// given Area must lie inside Search, and only blocks inside Area are
+	// broken and count as found. The task fails with "no <block> found in
+	// search area" once the ring has covered the box.
+	Search *SearchBox `json:"search,omitempty"`
+	// Spacing is plant_trees' distance between saplings, in blocks.
+	Spacing int `json:"spacing,omitempty"`
 	// Box, when set, is what observe_blocks reads.
 	Box *Box `json:"box,omitempty"`
 
@@ -136,6 +158,35 @@ var itemName = regexp.MustCompile(`^[a-z0-9_]{1,32}$`)
 type Area struct {
 	Min Chest `json:"min"`
 	Max Chest `json:"max"`
+}
+
+// SearchBox is the inclusive box a unit may roam to find a block. It is wider
+// than an Area and, unlike it, must lie inside the lab square.
+type SearchBox struct {
+	Min Chest `json:"min"`
+	Max Chest `json:"max"`
+}
+
+func (b SearchBox) validate() error {
+	for _, ax := range [][2]int32{{b.Min.X, b.Max.X}, {b.Min.Y, b.Max.Y}, {b.Min.Z, b.Max.Z}} {
+		if ax[0] > ax[1] {
+			return errors.New("search min must not exceed max")
+		}
+		if int64(ax[1])-int64(ax[0])+1 > maxSearchSpan {
+			return fmt.Errorf("search must span at most %d blocks on each axis", maxSearchSpan)
+		}
+	}
+	// The message names no coordinate: they are lab locations and must stay
+	// out of logs.
+	if !b.Min.inLab() || !b.Max.inLab() {
+		return errors.New("search is outside the allowed area")
+	}
+	return nil
+}
+
+func (b SearchBox) contains(a Area) bool {
+	return a.Min.X >= b.Min.X && a.Max.X <= b.Max.X && a.Min.Y >= b.Min.Y && a.Max.Y <= b.Max.Y &&
+		a.Min.Z >= b.Min.Z && a.Max.Z <= b.Max.Z
 }
 
 // Box is an inclusive box to observe, min at most max on every axis. It is
@@ -210,6 +261,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parsePlace(body)
 	case craftTemplate:
 		return parseCraft(body)
+	case plantTemplate:
+		return parsePlant(body)
 	case buildTemplate:
 		return parseBuild(body)
 	case repairTemplate:
@@ -296,6 +349,10 @@ func parseGather(body []byte) (Template, error) {
 			Min *Chest `json:"min"`
 			Max *Chest `json:"max"`
 		} `json:"area"`
+		Search *struct {
+			Min *Chest `json:"min"`
+			Max *Chest `json:"max"`
+		} `json:"search"`
 	}
 	if err := decodeStrict(body, &raw); err != nil {
 		return Template{}, err
@@ -320,7 +377,65 @@ func parseGather(body []byte) (Template, error) {
 		}
 		t.Area = &a
 	}
+	if raw.Search != nil {
+		if raw.Search.Min == nil || raw.Search.Max == nil {
+			return Template{}, errors.New("search needs min and max")
+		}
+		s := SearchBox{Min: *raw.Search.Min, Max: *raw.Search.Max}
+		if err := s.validate(); err != nil {
+			return Template{}, err
+		}
+		if t.Area != nil && !s.contains(*t.Area) {
+			return Template{}, errors.New("area must lie inside search")
+		}
+		t.Search = &s
+	}
 	return t, nil
+}
+
+// plantable is the closed set of items plant_trees sets out.
+var plantable = map[string]bool{"oak_sapling": true}
+
+// parsePlant reads {"template":"plant_trees","item":"oak_sapling","area":{...},
+// "spacing":4,"qty":N}. Qty is the most saplings to plant; the grove may take
+// fewer.
+func parsePlant(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Item     string `json:"item"`
+		Qty      int    `json:"qty"`
+		Spacing  int    `json:"spacing"`
+		Area     *struct {
+			Min *Chest `json:"min"`
+			Max *Chest `json:"max"`
+		} `json:"area"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if !plantable[raw.Item] {
+		return Template{}, errors.New("unknown item")
+	}
+	if raw.Qty < minQty || raw.Qty > maxPlantCount {
+		return Template{}, fmt.Errorf("qty must be %d to %d", minQty, maxPlantCount)
+	}
+	if raw.Spacing == 0 {
+		raw.Spacing = defaultSpacing
+	}
+	if raw.Spacing < minSpacing || raw.Spacing > maxSpacing {
+		return Template{}, fmt.Errorf("spacing must be %d to %d", minSpacing, maxSpacing)
+	}
+	if raw.Area == nil || raw.Area.Min == nil || raw.Area.Max == nil {
+		return Template{}, errors.New("area with min and max is required")
+	}
+	a := Area{Min: *raw.Area.Min, Max: *raw.Area.Max}
+	if err := a.validate(); err != nil {
+		return Template{}, err
+	}
+	if !a.Min.inLab() || !a.Max.inLab() {
+		return Template{}, errors.New("area is outside the allowed area")
+	}
+	return Template{Template: raw.Template, Item: raw.Item, Qty: raw.Qty, Area: &a, Spacing: raw.Spacing}, nil
 }
 
 func (a Area) validate() error {
@@ -645,6 +760,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil
 	}
+	if t.Template == plantTemplate && t.Area != nil {
+		return []skill.Skill{skill.NewPlant(world, self, t.Item, skillArea(t.Area), t.Spacing, t.Qty, opts...)}, nil
+	}
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 		return []skill.Skill{skill.NewNavigate(world, self, goal, gotoWithin)}, nil
@@ -659,15 +777,33 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	chest := protocol.BlockPos{t.Chest.X, t.Chest.Y, t.Chest.Z}
 	var mineOpts []skill.MineOption
+	var accept *skill.Area
 	if t.Area != nil {
-		mineOpts = append(mineOpts, skill.InArea(skill.Area{
-			Min: protocol.BlockPos{t.Area.Min.X, t.Area.Min.Y, t.Area.Min.Z},
-			Max: protocol.BlockPos{t.Area.Max.X, t.Area.Max.Y, t.Area.Max.Z},
-		}))
+		a := skillArea(t.Area)
+		accept = &a
+		mineOpts = append(mineOpts, skill.InArea(a))
+	}
+	if src.Chancy {
+		mineOpts = append(mineOpts, skill.Chancy(skill.ChancyMisses))
 	}
 	gather := skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...)
 	if src.Fell {
 		gather = skill.NewFell(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts, opts...)
 	}
-	return []skill.Skill{gather, skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...)}, nil
+	out := []skill.Skill{gather, skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...)}
+	if t.Search != nil {
+		box := skill.Area{
+			Min: protocol.BlockPos{t.Search.Min.X, t.Search.Min.Y, t.Search.Min.Z},
+			Max: protocol.BlockPos{t.Search.Max.X, t.Search.Max.Y, t.Search.Max.Z},
+		}
+		out = append([]skill.Skill{skill.NewExplore(world, self, src.Block, box, accept)}, out...)
+	}
+	return out, nil
+}
+
+func skillArea(a *Area) skill.Area {
+	return skill.Area{
+		Min: protocol.BlockPos{a.Min.X, a.Min.Y, a.Min.Z},
+		Max: protocol.BlockPos{a.Max.X, a.Max.Y, a.Max.Z},
+	}
 }
