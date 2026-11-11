@@ -83,7 +83,7 @@ func TestTemplateIsClosed(t *testing.T) {
 	if Template("haul") != "haul" || Template("gather_and_deposit") != "gather_and_deposit" {
 		t.Fatal("known templates must pass through")
 	}
-	if Template("repair_build") != "repair_build" || Template("build_blueprint") != "build_blueprint" {
+	if Template("plant_trees") != "plant_trees" || Template("repair_build") != "repair_build" || Template("build_blueprint") != "build_blueprint" {
 		t.Fatal("the mender and builder templates must pass through")
 	}
 	for _, s := range []string{"", "HAUL", "haul ", "build_castle", strings.Repeat("a", 1000)} {
