@@ -2,6 +2,7 @@ package skill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -98,7 +99,12 @@ func (p *Plant) Step(ctx context.Context, a Actuator) (Status, error) {
 		case Done:
 			p.planted++
 		default:
-			// One unreachable cell must not end the grove.
+			// One unreachable cell must not end the grove; a dead connection
+			// or a cancelled run must.
+			var ce cellError
+			if ctx.Err() != nil || !errors.As(err, &ce) {
+				return Failed, err
+			}
 			p.lastErr = err
 		}
 		p.cur = nil
