@@ -576,3 +576,148 @@ func TestEntityTemplatesParseOnlyInHarnessMode(t *testing.T) {
 		t.Errorf("empty hand refused: %v", err)
 	}
 }
+
+const searchGather = `{"template":"gather_and_deposit","item":"oak_log","qty":16,"chest":{"x":1,"y":2,"z":3},"search":%s}`
+
+func searchBody(search string) []byte { return []byte(fmt.Sprintf(searchGather, search)) }
+
+func TestSearchFieldIsValidatedStrictly(t *testing.T) {
+	good := `{"min":{"x":-300,"y":60,"z":-300},"max":{"x":99,"y":90,"z":99}}`
+	if tpl, err := ParseTemplate(searchBody(good)); err != nil || tpl.Search == nil || tpl.Area != nil {
+		t.Fatalf("good search: %+v, %v", tpl, err)
+	}
+	cases := map[string]string{
+		"min above max":      `{"min":{"x":10,"y":60,"z":0},"max":{"x":0,"y":90,"z":9}}`,
+		"x span 401":         `{"min":{"x":-300,"y":60,"z":0},"max":{"x":100,"y":90,"z":9}}`,
+		"z span 401":         `{"min":{"x":0,"y":60,"z":-300},"max":{"x":9,"y":90,"z":100}}`,
+		"past the east edge": `{"min":{"x":400,"y":60,"z":0},"max":{"x":500,"y":90,"z":9}}`,
+		"past the west edge": `{"min":{"x":-501,"y":60,"z":0},"max":{"x":-400,"y":90,"z":9}}`,
+		"below the world":    `{"min":{"x":0,"y":-65,"z":0},"max":{"x":9,"y":90,"z":9}}`,
+		"missing max":        `{"min":{"x":0,"y":60,"z":0}}`,
+		"missing min":        `{"max":{"x":0,"y":60,"z":0}}`,
+		"unknown field":      `{"min":{"x":0,"y":60,"z":0},"max":{"x":9,"y":90,"z":9},"step":8}`,
+		"unknown corner key": `{"min":{"x":0,"y":60,"z":0,"w":1},"max":{"x":9,"y":90,"z":9}}`,
+		"not an object":      `5`,
+	}
+	for name, s := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate(searchBody(s)); err == nil {
+				t.Fatal("accepted")
+			} else if strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "-300") {
+				t.Errorf("error names a coordinate: %v", err)
+			}
+		})
+	}
+	if _, err := ParseTemplate(searchBody(`{"min":{"x":-500,"y":-64,"z":-500},"max":{"x":-101,"y":320,"z":-101}}`)); err != nil {
+		t.Errorf("a 400 box on the lab's edge: %v", err)
+	}
+}
+
+func TestSearchAndAreaTogetherNeedTheAreaInsideTheSearch(t *testing.T) {
+	body := func(area string) []byte {
+		return []byte(`{"template":"gather_and_deposit","item":"oak_log","qty":4,"chest":{"x":1,"y":2,"z":3},` +
+			`"search":{"min":{"x":0,"y":60,"z":0},"max":{"x":200,"y":90,"z":200}},"area":` + area + `}`)
+	}
+	if tpl, err := ParseTemplate(body(`{"min":{"x":10,"y":60,"z":10},"max":{"x":50,"y":80,"z":50}}`)); err != nil || tpl.Area == nil || tpl.Search == nil {
+		t.Fatalf("area inside search: %+v, %v", tpl, err)
+	}
+	if _, err := ParseTemplate(body(`{"min":{"x":-10,"y":60,"z":10},"max":{"x":50,"y":80,"z":50}}`)); err == nil {
+		t.Error("an area outside the search was accepted")
+	}
+	// The area keeps its own 64-block limit.
+	if _, err := ParseTemplate(body(`{"min":{"x":0,"y":60,"z":0},"max":{"x":100,"y":80,"z":50}}`)); err == nil {
+		t.Error("a 101-block area was accepted")
+	}
+}
+
+func skillNames(t *testing.T, body string) string {
+	t.Helper()
+	tpl, err := ParseTemplate([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, s := range skills {
+		names = append(names, s.Name())
+	}
+	return strings.Join(names, ",")
+}
+
+func TestGatherWithSearchExploresFirst(t *testing.T) {
+	got := skillNames(t, string(searchBody(`{"min":{"x":0,"y":60,"z":0},"max":{"x":99,"y":90,"z":99}}`)))
+	if got != "explore,fell_tree,deposit_chest" {
+		t.Errorf("skills = %s", got)
+	}
+	if got := skillNames(t, `{"template":"gather_and_deposit","item":"oak_log","qty":4,"chest":{"x":1,"y":2,"z":3}}`); strings.Contains(got, "explore") {
+		t.Errorf("a gather with no search explores: %s", got)
+	}
+}
+
+func TestSaplingIsAGatherableRecipe(t *testing.T) {
+	body := `{"template":"gather_and_deposit","item":"oak_sapling","qty":4,"chest":{"x":1,"y":2,"z":3}}`
+	if got := skillNames(t, body); got != "mine_block,deposit_chest" {
+		t.Errorf("skills = %s", got)
+	}
+	if src := recipes["oak_sapling"]; src.Block != "oak_leaves" || src.Tool != "" || src.Fell || !src.Chancy {
+		t.Errorf("recipe = %+v", src)
+	}
+	for item, src := range recipes {
+		if item != "oak_sapling" && src.Chancy {
+			t.Errorf("%s is chancy: only the sapling's misses are tolerated", item)
+		}
+	}
+}
+
+const plantBody = `{"template":"plant_trees","item":"oak_sapling","qty":8,"area":{"min":{"x":0,"y":60,"z":0},"max":{"x":31,"y":70,"z":31}}%s}`
+
+func TestParsePlantTrees(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(fmt.Sprintf(plantBody, "")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tpl.Spacing != 4 || tpl.Qty != 8 || tpl.Item != "oak_sapling" || tpl.Area == nil {
+		t.Errorf("template = %+v", tpl)
+	}
+	if got := skillNames(t, fmt.Sprintf(plantBody, "")); got != "plant" {
+		t.Errorf("skills = %s", got)
+	}
+	if tpl, err := ParseTemplate([]byte(fmt.Sprintf(plantBody, `,"spacing":3`))); err != nil || tpl.Spacing != 3 {
+		t.Errorf("spacing 3: %+v, %v", tpl, err)
+	}
+}
+
+func TestParsePlantTreesRejectsBadRequests(t *testing.T) {
+	area := `"area":{"min":{"x":0,"y":60,"z":0},"max":{"x":31,"y":70,"z":31}}`
+	cases := map[string]string{
+		"spacing 2":        fmt.Sprintf(plantBody, `,"spacing":2`),
+		"spacing negative": fmt.Sprintf(plantBody, `,"spacing":-4`),
+		"spacing 17":       fmt.Sprintf(plantBody, `,"spacing":17`),
+		"unknown field":    fmt.Sprintf(plantBody, `,"bonemeal":true`),
+		"chest field":      fmt.Sprintf(plantBody, `,"chest":{"x":1,"y":2,"z":3}`),
+		"qty 0":            strings.Replace(fmt.Sprintf(plantBody, ""), `"qty":8`, `"qty":0`, 1),
+		"qty 65":           strings.Replace(fmt.Sprintf(plantBody, ""), `"qty":8`, `"qty":65`, 1),
+		"other item":       strings.Replace(fmt.Sprintf(plantBody, ""), "oak_sapling", "oak_log", 1),
+		"no area":          `{"template":"plant_trees","item":"oak_sapling","qty":8}`,
+		"area missing max": `{"template":"plant_trees","item":"oak_sapling","qty":8,"area":{"min":{"x":0,"y":60,"z":0}}}`,
+		"span 65":          `{"template":"plant_trees","item":"oak_sapling","qty":8,"area":{"min":{"x":0,"y":60,"z":0},"max":{"x":64,"y":70,"z":9}}}`,
+		"min above max":    `{"template":"plant_trees","item":"oak_sapling","qty":8,"area":{"min":{"x":9,"y":60,"z":0},"max":{"x":0,"y":70,"z":9}}}`,
+		"outside the lab":  `{"template":"plant_trees","item":"oak_sapling","qty":8,"area":{"min":{"x":480,"y":60,"z":0},"max":{"x":520,"y":70,"z":9}}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatalf("accepted %s", area)
+			}
+		})
+	}
+}
+
+func TestExploreFailureHasAReasonCode(t *testing.T) {
+	if got := ReasonCode("no oak_log found in search area"); got != ReasonNoReachableTarget {
+		t.Errorf("code = %s", got)
+	}
+}

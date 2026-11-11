@@ -376,6 +376,65 @@ unit only ever breaks blocks inside it and fails with `no reachable <block> in
 the area` if none is left. Without it, the unit may break any matching block
 within 24 blocks, so set it wherever other blocks of that kind matter.
 
+`search` is optional and makes the unit find the block itself when none is
+loaded near it. It is a wider box in the same shape as `area`, up to 400 blocks
+on an axis and wholly inside the lab square (x and z -500 to 499). Before it
+gathers, the unit reads the loaded blocks around it; if the block is not there
+it walks an expanding ring of waypoints about 32 blocks apart, clipped to the
+box, reading again at each and skipping any it cannot stand on or reach, until
+it sees one and walks to within 12 blocks. Then the gather runs as usual. If
+the ring covers the box without a sighting the task fails with `no <block>
+found in search area`. With `search` set `area` stays optional; when both are
+given `area` must lie inside `search`, and only sightings inside `area` count.
+`search` can start a few blocks outside the box, but a unit further than about
+48 blocks from it has nowhere loaded to walk and finds nothing.
+
+`oak_sapling` is also a gather item: the unit breaks `oak_leaves` by hand (no
+tool) for the sapling that drops about one time in twenty. It tolerates 120
+empty breaks in a row, where every other item gives up after 3, and waits only
+about a second for a drop after each leaf. It fails with `no reachable
+oak_leaves` once no leaf is within reach.
+
+`plant_trees` sets saplings out on a grid:
+
+```json
+{"template": "plant_trees", "item": "oak_sapling", "qty": 8, "spacing": 4,
+ "area": {"min": {"x": 0, "y": 60, "z": 0}, "max": {"x": 31, "y": 72, "z": 31}}}
+```
+
+`item` is `oak_sapling`, `qty` (1 to 64) the most to plant, `spacing` (3 to 16,
+default 4) the distance between saplings in x and z, and `area` the grove, at
+most 64 blocks on an axis and inside the lab square. The unit must carry
+saplings; without any the task fails with `no oak_sapling in inventory`. It
+walks the grid and, for each cell whose top block in the box is grass or dirt
+with four clear blocks above it, places a sapling on top. Cells holding a
+sapling, log or leaves, or with something over the ground, are skipped. It
+ends done at `qty` planted, when it runs out of saplings, or when no cell is
+left to plant; it fails only if every placement it tried failed. `progress`
+counts saplings planted. Bone meal is not used: trees grow on their own, and
+speeding them up is a follow-up.
+
+A self-sustaining wood loop is one `WORK_PLAN`: gather saplings, plant them,
+then fell what has grown, searching when no tree is loaded, and craft:
+
+```json
+[
+ {"template": "gather_and_deposit", "item": "oak_sapling", "qty": 8,
+  "chest": {"x": 0, "y": 64, "z": 0},
+  "search": {"min": {"x": -200, "y": 60, "z": -200}, "max": {"x": 199, "y": 90, "z": 199}}},
+ {"template": "withdraw", "chest": {"x": 0, "y": 64, "z": 0}, "items": {"oak_sapling": 8}},
+ {"template": "plant_trees", "item": "oak_sapling", "qty": 8,
+  "area": {"min": {"x": 10, "y": 60, "z": 10}, "max": {"x": 41, "y": 72, "z": 41}}},
+ {"template": "gather_and_deposit", "item": "oak_log", "qty": 32,
+  "chest": {"x": 0, "y": 64, "z": 0},
+  "search": {"min": {"x": -200, "y": 60, "z": -200}, "max": {"x": 199, "y": 90, "z": 199}}},
+ {"template": "craft", "item": "oak_planks", "count": 16}
+]
+```
+
+A step that fails is skipped and the plan goes on to the next, so a full grove
+or an empty forest costs one turn, not the loop.
+
 `haul` empties source chests into one destination chest, waiting for items to
 arrive and making as many trips as the inventory needs. It ends when every
 item has been moved the requested number of times:
@@ -550,7 +609,7 @@ failed task to them. `/v1/state` carries `session_id` for the same reason.
 | `session_lost` | connection ended mid-task | `session ended`, `wire down` | runner |
 | `deposit_rejected` | server refused a chest transfer | `server rejected the deposit with status 6` | deposit, withdraw |
 | `no_pickup` | breaks yielded no item | `no pickup after 3 breaks` | mining skills |
-| `no_reachable_target` | nowhere to stand within reach, or nothing of the kind to reach | `no standing spot within reach of the chest`, `no reachable stone in the area` | chest, place, observe |
+| `no_reachable_target` | nowhere to stand within reach, or nothing of the kind to reach | `no standing spot within reach of the chest`, `no reachable stone in the area`, `no oak_log found in search area` | chest, place, observe, explore |
 | `trap_climb_failed` | could not climb out of a trap | `climbing out of a trap: ...` | climb |
 | `inventory_desync` | inventory never showed the transfer | `inventory did not show the deposit within 40 ticks` | deposit, withdraw |
 | `chunk_not_loaded` | target chunk not loaded | `the chest's chunk is not loaded` | chest skills |
