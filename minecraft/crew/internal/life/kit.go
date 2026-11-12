@@ -43,6 +43,9 @@ const (
 	// fail, and the task queue waits for the whole of a failing visit. A Kit
 	// may set its own reach.
 	kitReach = 96
+	// No reach is set past this: at walking pace kitLimit ticks cover about
+	// 250 blocks of straight line, and a route is longer than that.
+	kitMaxReach = 160
 	// The back-off after a failed visit doubles with each failure in a row, up
 	// to this, so a unit that cannot reach its kit stops spending its time on it.
 	kitMaxBackoff = 18000
@@ -175,6 +178,13 @@ func (l *Life) missing(s belief.Snapshot) kitMissing {
 				m.armour[i] = false
 			}
 		}
+		// A piece that is carried but was not put on (the server refused it)
+		// is not fetched again, or each back-off would bring another.
+		for _, it := range s.Inventory {
+			if strings.HasSuffix(it.Name, "_"+armourPieces[i]) {
+				m.armour[i] = false
+			}
+		}
 	}
 	m.pickaxe, m.axe = true, true
 	for _, it := range s.Inventory {
@@ -235,6 +245,7 @@ func (l *Life) kitInReach(s belief.Snapshot) bool {
 	if reach <= 0 {
 		reach = kitReach
 	}
+	reach = min(reach, kitMaxReach)
 	return math.Hypot(dx, dz) <= reach
 }
 

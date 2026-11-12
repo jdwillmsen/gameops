@@ -135,14 +135,30 @@ func TestKitReachCanBeSetAndDefaultsToNinetySix(t *testing.T) {
 	if !r.l.kitInReach(snap) {
 		t.Error("the default reach missed a chest 86 blocks off")
 	}
-	r.l.cfg.Kit.Reach = 300
-	chest(250)
+	r.l.cfg.Kit.Reach = 150
+	chest(140)
 	if !r.l.kitInReach(snap) {
-		t.Error("a reach of 300 missed a chest 250 blocks off")
+		t.Error("a reach of 150 missed a chest 140 blocks off")
+	}
+	r.l.cfg.Kit.Reach = 900
+	chest(kitMaxReach + 10)
+	if r.l.kitInReach(snap) {
+		t.Error("a reach past what a visit can walk was honoured")
 	}
 	r.l.cfg.Kit.Reach = 30
 	chest(50)
 	if r.l.kitInReach(snap) {
 		t.Error("a reach of 30 covered a chest 50 blocks off")
+	}
+}
+
+func TestAnArmourPieceCarriedButNotWornIsNotFetchedAgain(t *testing.T) {
+	r, visits := gearRig(t)
+	r.equipped()
+	r.wear(0, idChest, idLegs, idBoots)
+	r.give(20, idHelmet, 1) // the server refused to put it on
+	r.run(kitSettleTicks + kitEmptyBackoff + 100)
+	if len(*visits) != 0 {
+		t.Errorf("visits = %d for a helmet already in the inventory", len(*visits))
 	}
 }
