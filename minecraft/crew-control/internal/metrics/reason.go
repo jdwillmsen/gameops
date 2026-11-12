@@ -77,7 +77,7 @@ const TemplateOther = "other"
 var Templates = []string{
 	"gather_and_deposit", "haul", "withdraw", "deposit", "mine_shaft",
 	"goto", "inspect", "observe_blocks", "place_block", "craft",
-	"repair_build", "build_blueprint", "plant_trees",
+	"repair_build", "build_blueprint", "plant_trees", "use_bed",
 }
 
 // Template maps a reported template onto the closed set.

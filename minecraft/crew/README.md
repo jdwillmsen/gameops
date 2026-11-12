@@ -321,7 +321,8 @@ well as the server's corrections and teleports. Until `position_known` is
 true the position is the server's placeholder, not a real one. It also carries
 `health`, `hunger`, the 36-slot `inventory`, `held_slot` (only meaningful when
 `held_known`), `armour` (each worn piece with its `slot`: helmet, chest, legs or
-boots), and `effects`: the status effects the server has put on the
+boots), `spawn_point` (valid when `spawn_known`: where the server says the
+unit respawns) and `sleeping`, and `effects`: the status effects the server has put on the
 unit and not taken back, each with `id`, `name`, `amplifier` and `duration`
 in ticks (negative means it does not expire; a logout forgets them all), and
 `unique_id`, the signed decimal id the server gave the unit's player, which
@@ -413,6 +414,25 @@ ends done at `qty` planted, when it runs out of saplings, or when no cell is
 left to plant; it fails only if every placement it tried failed. `progress`
 counts saplings planted. Bone meal is not used: trees grow on their own, and
 speeding them up is a follow-up.
+
+`use_bed` makes a bed the unit's respawn point, so a death returns it to its
+base rather than to the world spawn:
+
+```json
+{"template": "use_bed", "block": {"x": 12, "y": 64, "z": -30}}
+```
+
+`block` is the bed (either half), inside the lab square. The operator builds
+the bed; the unit does not craft one. The unit walks within reach, taps the
+bed and is done once the server sets the respawn point, at any hour. At night
+the server also puts the unit to sleep and it stays in bed until dawn wakes it,
+or until a fight takes it out. With monsters nearby the server refuses sleep
+but still sets the point, so the visit ends done. It fails with `no bed at the
+target` when the block is not a bed, `the bed's chunk is not loaded`, a
+no-path or no-standing-spot error when it cannot get near, and `the server did
+not set the respawn point` when its tap goes unanswered. `progress` is 1 once
+the point is set. The unit's state reports `spawn_point`, `spawn_known` and
+`sleeping`.
 
 A self-sustaining wood loop is one `WORK_PLAN`: gather saplings, plant them,
 then fell what has grown, searching when no tree is loaded, and craft:
