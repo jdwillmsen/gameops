@@ -576,3 +576,48 @@ func TestSmeltCollectsInRoundsWhenTheFurnaceIsShort(t *testing.T) {
 		t.Error("the unit never waited for the rest")
 	}
 }
+
+func TestFuelForKeepingLeavesWhatTheToolsNeed(t *testing.T) {
+	inv := func(items ...[2]any) belief.Snapshot {
+		var s belief.Snapshot
+		for i, it := range items {
+			s.Inventory = append(s.Inventory, belief.Item{Slot: i, Name: it[0].(string), Count: it[1].(int)})
+		}
+		return s
+	}
+	keep := map[string]int{"stick": 5}
+	cases := []struct {
+		name     string
+		snap     belief.Snapshot
+		wantItem string
+		wantOK   bool
+	}{
+		{"only the handle sticks", inv([2]any{"stick", 5}), "", false},
+		{"sticks beyond the handles burn", inv([2]any{"stick", 24}), "stick", true},
+		{"planks burn when the sticks are kept", inv([2]any{"stick", 5}, [2]any{"oak_planks", 8}), "oak_planks", true},
+		{"coal is still first", inv([2]any{"stick", 24}, [2]any{"coal", 2}), "coal", true},
+	}
+	for _, c := range cases {
+		item, _, ok := FuelForKeeping(c.snap, "raw_iron", 8, keep)
+		if item != c.wantItem || ok != c.wantOK {
+			t.Errorf("%s: got %q ok=%v, want %q ok=%v", c.name, item, ok, c.wantItem, c.wantOK)
+		}
+	}
+	// Without a keep list sticks are fuel, as before.
+	if item, _, ok := FuelFor(inv([2]any{"stick", 24}), "raw_iron", 8); item != "stick" || !ok {
+		t.Errorf("sticks without a keep list: %q ok=%v", item, ok)
+	}
+}
+
+func TestSmeltWithKeptSticksReadyNamesNoFuel(t *testing.T) {
+	r, w, _ := smeltRig(t)
+	r.give(0, idRawIron, 2)
+	r.give(1, craftStickID, 5)
+	s, err := NewSmelt(w, r.self, furnacePos, "raw_iron", 2, Keep(map[string]int{"stick": 5}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Ready(r.self()); err == nil || err.Error() != "no fuel in inventory" {
+		t.Errorf("Ready = %v, want no fuel in inventory", err)
+	}
+}

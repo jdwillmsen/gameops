@@ -83,6 +83,12 @@ func fuelValue(name string) int {
 // burnt, and a stack too small is passed over for the next rather than mixed:
 // a furnace's fuel slot holds one kind.
 func FuelFor(s belief.Snapshot, input string, qty int) (string, int, bool) {
+	return FuelForKeeping(s, input, qty, nil)
+}
+
+// FuelForKeeping is FuelFor that leaves keep[item] of each item unburnt: the
+// sticks an iron tool's handle needs are not fuel however short the coal is.
+func FuelForKeeping(s belief.Snapshot, input string, qty int, keep map[string]int) (string, int, bool) {
 	need := qty * halfPerSmelt
 	rank := func(n string) int {
 		switch n {
@@ -103,6 +109,11 @@ func FuelFor(s belief.Snapshot, input string, qty int) (string, int, bool) {
 			names = append(names, it.Name)
 		}
 		have[it.Name] += it.Count
+	}
+	for n, k := range keep {
+		if _, ok := have[n]; ok {
+			have[n] = max(have[n]-k, 0)
+		}
 	}
 	sort.SliceStable(names, func(i, j int) bool {
 		if ri, rj := rank(names[i]), rank(names[j]); ri != rj {
@@ -159,6 +170,8 @@ type Smelt struct {
 	output  string
 	qty     int
 	log     Logger
+	// keep is what the fuel choice must leave unburnt.
+	keep map[string]int
 
 	phase   smeltPhase
 	started bool
@@ -196,7 +209,7 @@ func NewSmelt(world ChestWorld, self func() belief.Snapshot, furnace protocol.Bl
 	for _, f := range opts {
 		f(&o)
 	}
-	return &Smelt{world: world, self: self, furnace: furnace, input: input, output: output, qty: qty, log: o.log}, nil
+	return &Smelt{world: world, self: self, furnace: furnace, input: input, output: output, qty: qty, log: o.log, keep: o.keep}, nil
 }
 
 func (s *Smelt) Name() string { return "smelt" }
@@ -219,7 +232,7 @@ func (s *Smelt) Ready(sn belief.Snapshot) error {
 	if count(sn, s.input) < s.qty {
 		return fmt.Errorf("no %s in inventory", s.input)
 	}
-	if _, _, ok := FuelFor(sn, s.input, s.qty); !ok {
+	if _, _, ok := FuelForKeeping(sn, s.input, s.qty, s.keep); !ok {
 		return errors.New("no fuel in inventory")
 	}
 	if !s.hasFurnace() && count(sn, "furnace") == 0 {
@@ -471,7 +484,7 @@ func (s *Smelt) prepare(a Actuator, snap belief.Snapshot) error {
 		s.loads = append(s.loads, load{item: s.input, n: need, slot: act.FurnaceIngredient})
 	}
 	if held(act.FurnaceFuel) == 0 {
-		fuel, n, ok := FuelFor(snap, s.input, total)
+		fuel, n, ok := FuelForKeeping(snap, s.input, total, s.keep)
 		if !ok {
 			return errors.New("no fuel in inventory")
 		}

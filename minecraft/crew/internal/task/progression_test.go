@@ -500,3 +500,33 @@ func TestEnchantingIsDecidedWhenItStarts(t *testing.T) {
 		t.Errorf("first step = %s, want the ingredient check", got)
 	}
 }
+
+// With the coal gone the smelt may burn wood, but never the handles the iron
+// tools are about to be made with.
+func TestIronAgeSmeltLeavesTheToolHandles(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(ironAgeBody))
+	held := map[string]int{"stone_pickaxe": 1, "raw_iron": 8, "torch": 16, "stick": 5, "coal": 1}
+	s := snap(held)
+	skills, err := Expand(tpl, ironAgeWorld(), func() belief.Snapshot { return s })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var smelt skill.Skill
+	for _, sk := range flatten(t, skills, s) {
+		if sk.Name() == "smelt" {
+			smelt = sk
+		}
+	}
+	if smelt == nil {
+		t.Fatal("no smelt in the chain")
+	}
+	// The coal is spent before the smelt starts.
+	spent := snap(map[string]int{"stone_pickaxe": 1, "raw_iron": 8, "torch": 16, "stick": 5})
+	if err := smelt.Ready(spent); err == nil || err.Error() != "no fuel in inventory" {
+		t.Errorf("sticks only: Ready = %v, want no fuel", err)
+	}
+	spare := snap(map[string]int{"stone_pickaxe": 1, "raw_iron": 8, "torch": 16, "stick": 5, "oak_planks": 8})
+	if err := smelt.Ready(spare); err != nil {
+		t.Errorf("planks to burn: Ready = %v", err)
+	}
+}

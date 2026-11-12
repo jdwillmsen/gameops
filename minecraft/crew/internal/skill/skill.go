@@ -109,6 +109,8 @@ type options struct {
 	// because a unit does not need to hold them to use them.
 	anywhere map[string]bool
 	wear     bool
+	// keep names items, and how many of each, that a skill must not spend.
+	keep map[string]int
 }
 
 // group is a budget of n items to take from any of names, best first.
@@ -144,6 +146,10 @@ func Anywhere(names ...string) Option {
 		}
 	}
 }
+
+// Keep stops a smelt burning the first n of an item as fuel: wood the unit
+// still needs for tool handles is not fuel.
+func Keep(n map[string]int) Option { return func(o *options) { o.keep = n } }
 
 // Wear makes a withdraw put on the armour it took, while the chest is still
 // open, when the actuator can.

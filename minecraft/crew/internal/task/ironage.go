@@ -3,6 +3,7 @@ package task
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -224,18 +225,27 @@ func expandIronAge(t Template, world skill.ChestWorld, s belief.Snapshot, self f
 		}
 		add(skill.NewWithdrawChest(world, self, chest, map[string]int{itemRawIron: plan.rawIron}, opts...))
 	}
+	var toCraft []string
+	handles := 0
+	for _, kind := range ToolKinds {
+		if tool := toolItem("iron", kind); inv[tool] == 0 {
+			toCraft = append(toCraft, tool)
+			for _, in := range chainRecipes[tool].in {
+				if in.item == itemStick {
+					handles += in.n
+				}
+			}
+		}
+	}
 	if plan.ingots > 0 {
-		sm, err := skill.NewSmelt(world, self, furnace, itemRawIron, plan.ingots, opts...)
+		// Short of coal, the smelt falls back on wood, but not on the sticks
+		// the iron tools are about to need.
+		sm, err := skill.NewSmelt(world, self, furnace, itemRawIron, plan.ingots,
+			append(slices.Clone(opts), skill.Keep(map[string]int{itemStick: handles}))...)
 		if err != nil {
 			return nil, err
 		}
 		add(sm)
-	}
-	var toCraft []string
-	for _, kind := range ToolKinds {
-		if tool := toolItem("iron", kind); inv[tool] == 0 {
-			toCraft = append(toCraft, tool)
-		}
 	}
 	if len(toCraft) > 0 {
 		add(skill.NewNear(world, self, table, tableReach))
