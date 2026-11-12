@@ -8,6 +8,8 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
+
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
@@ -262,5 +264,77 @@ func TestShelterFailsRatherThanLeaveBySealedRock(t *testing.T) {
 	st, err := r.run(NewShelter(w, atNight(r, 60), 0), 2000)
 	if st != Failed || err == nil || !strings.Contains(err.Error(), "no safe exit") {
 		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func sealedShelter(t *testing.T, w simWorld, r *rig, dawnAt int) Skill {
+	t.Helper()
+	sk := NewShelter(w, atNight(r, dawnAt), 0)
+	for sk.(*Shelter).phase != shlWait {
+		if st, err := sk.Step(context.Background(), r); st != Running || err != nil {
+			t.Fatalf("status %v, err %v while building", st, err)
+		}
+	}
+	return sk
+}
+
+func TestShelterStopOpensTheExitSoACancelledTaskDoesNotLeaveTheUnitWalledIn(t *testing.T) {
+	w := flatWorld(40)
+	r := shelterRig(t, w, 32)
+	sk := sealedShelter(t, w, r, -1)
+	before := r.ticks
+	sk.(Stopper).Stop(r)
+	if sent := r.ticks - before; sent > 1 {
+		t.Fatalf("Stop sent %d inputs, want at most 1", sent)
+	}
+	for i := 0; i < 40; i++ {
+		_ = r.Tick(act.Input{})
+	}
+	open := 0
+	for _, c := range ringCells(protocol.BlockPos{20, 1, 20}) {
+		if w[c] == "air" {
+			open++
+		}
+	}
+	if open == 0 {
+		t.Error("every wall is still up after the task was stopped")
+	}
+}
+
+func TestShelterResumeClosesTheCellStopOpened(t *testing.T) {
+	w := flatWorld(40)
+	r := shelterRig(t, w, 32)
+	sk := sealedShelter(t, w, r, 600)
+	sk.(Stopper).Stop(r)
+	for i := 0; i < 40; i++ {
+		_ = r.Tick(act.Input{})
+	}
+	sk.(Resumer).Resume()
+	placedBefore := r.placed
+	for sk.(*Shelter).phase != shlWait {
+		if st, err := sk.Step(context.Background(), r); st != Running || err != nil {
+			t.Fatalf("status %v, err %v while resealing", st, err)
+		}
+	}
+	if r.placed != placedBefore+1 {
+		t.Errorf("placed %d blocks to reseal, want 1", r.placed-placedBefore)
+	}
+	if st, err := r.run(sk, 2000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+func TestFullCubeRejectsShapesThatLeaveGaps(t *testing.T) {
+	for _, n := range []string{"flower_pot", "oak_sign", "white_banner", "skeleton_skull", "lantern", "chain", "end_rod", "lightning_rod",
+		"white_candle", "cake", "anvil", "chipped_anvil", "oak_slab", "oak_stairs", "oak_fence", "cobblestone_wall", "glass_pane",
+		"oak_door", "oak_trapdoor", "stone_button", "stone_pressure_plate", "white_carpet", "red_bed", "iron_bars", "enchanting_table", "water", "air"} {
+		if fullCube(n) {
+			t.Errorf("%s counts as a full cube", n)
+		}
+	}
+	for _, n := range []string{"stone", "dirt", "cobblestone", "oak_planks", "deepslate", "sea_lantern", "glass"} {
+		if !fullCube(n) {
+			t.Errorf("%s does not count as a full cube", n)
+		}
 	}
 }

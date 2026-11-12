@@ -13,6 +13,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/world/shape"
 )
 
 const (
@@ -100,7 +101,9 @@ type Shelter struct {
 	waitMove int
 	retried  bool
 	// mine is the cells the shelter itself filled.
-	mine   map[protocol.BlockPos]bool
+	mine map[protocol.BlockPos]bool
+	// opened says Stop started breaking the exit.
+	opened bool
 	item   string
 	settle int
 
@@ -144,16 +147,48 @@ func daytime(phase string) bool { return phase == belief.PhaseDawn || phase == b
 func (s *Shelter) Progress() int { return s.placed }
 
 // Resume replans after a fight: where the unit stands and what it holds have
-// changed, but the blocks already up still count.
+// changed, but the blocks already up still count. A room Stop opened is
+// closed again, one block, before the wait goes on.
 func (s *Shelter) Resume() {
 	s.nav, s.brk, s.tool = nil, cellBreak{}, false
-	if s.phase != shlDig && s.phase != shlWait {
+	reseal := s.opened
+	s.opened = false
+	switch {
+	case reseal && s.phase == shlWait:
+		if sc, ok := s.assess(s.room.cell); ok {
+			s.room.place, s.room.walls, s.idx, s.phase = sc.place, sc.walls, 0, shlBuild
+			return
+		}
+		s.phase = shlPlan
+	case s.phase != shlDig && s.phase != shlWait:
 		s.phase = shlPlan
 	}
 }
 
-// Stop releases an open break session.
+// Stop is called when the task is cancelled or the unit is pulled off it. The
+// room it is waiting in must not outlive the task, or the next one inherits an
+// unit walled in, so one input starts breaking the head cell of the exit
+// column; the server finishes the break on its own. Resume closes that cell
+// again for a task that carries on. Mid-dig the exit is already being opened
+// and the break is left running for the same reason.
 func (s *Shelter) Stop(a Actuator) {
+	switch {
+	case s.phase == shlWait && !s.opened:
+		exits, err := s.exitCells()
+		if err != nil {
+			return
+		}
+		s.opened = true
+		eye := eyeOf(a.Pose().Feet)
+		yaw, pitch := lookAt(eye, centre(exits[0]))
+		_ = a.Tick(act.Input{Yaw: yaw, Pitch: pitch, Break: &act.BreakAction{Pos: exits[0], Face: faceToward(exits[0], eye), Phase: act.BreakStart}})
+	case s.phase != shlDig:
+		s.abortBreak(a)
+	}
+}
+
+// abortBreak releases an open break session.
+func (s *Shelter) abortBreak(a Actuator) {
 	if s.brk.open {
 		s.brk.open = false
 		p := a.Pose()
@@ -197,7 +232,7 @@ func (s *Shelter) Step(ctx context.Context, a Actuator) (Status, error) {
 		}
 		if !o.again {
 			if o.st == Failed {
-				s.Stop(a)
+				s.abortBreak(a)
 			}
 			return o.st, o.err
 		}
@@ -212,25 +247,46 @@ func (s *Shelter) idle(a Actuator) outcome {
 	return outcome{st: Running}
 }
 
-// fullCube says a block is a solid cube that stops a mob and an arrow. Shapes
-// that leave a gap (slabs, stairs, fences, panes) and blocks that are not
-// really there (leaves decay, liquids flow) do not count.
+// notCubeSuffixes and notCubeNames are blocks that fill less than a cell or
+// can be walked or shot through, which the block table does not model and so
+// reports as cubes. Anything it does model (slabs, stairs, fences, walls,
+// doors, trapdoors, carpets, snow, ladders) is caught by the shape check.
+var notCubeSuffixes = []string{"_slab", "_stairs", "_fence", "_fence_gate", "_wall", "_pane", "_door", "_trapdoor",
+	"_carpet", "_leaves", "_bed", "_sign", "_hanging_sign", "_banner", "_button", "_pressure_plate", "_sapling",
+	"_torch", "_rail", "_head", "_skull", "_candle", "_candle_cake", "_cake", "_anvil", "_pot", "_bars", "_chain",
+	"_vines", "_bush", "_coral", "_coral_fan", "_wall_fan", "_dripleaf", "_cluster", "_campfire", "_repeater",
+	"_comparator", "_shulker_box", "_chest", "_rod"}
+
+var notCubeNames = map[string]bool{
+	"snow_layer": true, "ladder": true, "web": true, "cobweb": true, "torch": true, "vine": true, "glass_pane": true,
+	"iron_bars": true, "chain": true, "lantern": true, "soul_lantern": true, "candle": true, "cake": true,
+	"cactus": true, "campfire": true, "fire": true, "sweet_berry_bush": true, "bamboo": true, "scaffolding": true,
+	"hopper": true, "cauldron": true, "composter": true, "chest": true, "trapped_chest": true, "ender_chest": true,
+	"flower_pot": true, "anvil": true, "bell": true, "lectern": true, "enchanting_table": true, "end_portal_frame": true,
+	"end_rod": true, "lightning_rod": true, "brewing_stand": true, "stonecutter_block": true, "grindstone": true,
+	"conduit": true, "dragon_egg": true, "farmland": true, "dirt_path": true, "grass_path": true, "turtle_egg": true,
+	"sea_pickle": true, "decorated_pot": true, "daylight_detector": true, "daylight_detector_inverted": true,
+	"lever": true, "tripwire": true, "tripwire_hook": true, "redstone_wire": true, "repeater": true, "comparator": true,
+	"sculk_sensor": true, "pointed_dripstone": true, "amethyst_cluster": true, "glow_lichen": true, "sculk_vein": true,
+	"frog_spawn": true, "waterlily": true, "kelp": true, "seagrass": true, "mud_brick_slab": true, "soul_sand": true,
+	"mud": true, "moss_carpet": true, "heavy_core": true, "end_gateway": true, "end_portal": true, "portal": true,
+	"nether_portal": true, "structure_void": true, "barrier": true, "light_block": true,
+}
+
+// fullCube says a block is a solid cube that stops a mob and an arrow. A name
+// the shape table cannot place as exactly one full box is not one, and the
+// deny lists above catch the shapes the table calls full by default.
 func fullCube(name string) bool {
-	if name == "" || airLike(name) || liquid(name) {
+	if name == "" || airLike(name) || liquid(name) || notCubeNames[name] {
 		return false
 	}
-	for _, suffix := range []string{"_slab", "_stairs", "_fence", "_fence_gate", "_wall", "_pane", "_door", "_trapdoor",
-		"_carpet", "_leaves", "_bed", "_sign", "_button", "_pressure_plate", "_sapling", "_torch", "_rail", "_head"} {
+	for _, suffix := range notCubeSuffixes {
 		if strings.HasSuffix(name, suffix) {
 			return false
 		}
 	}
-	switch name {
-	case "snow_layer", "ladder", "web", "cobweb", "torch", "vine", "glass_pane", "iron_bars", "chain", "lantern",
-		"cactus", "magma", "campfire", "fire", "sweet_berry_bush", "bamboo", "scaffolding", "hopper", "cauldron", "chest", "trapped_chest":
-		return false
-	}
-	return true
+	boxes := shape.Boxes(name, nil)
+	return len(boxes) == 1 && boxes[0] == shape.Full()
 }
 
 func airLike(name string) bool {
