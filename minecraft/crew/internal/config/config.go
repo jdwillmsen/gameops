@@ -106,6 +106,12 @@ type Config struct {
 	// leaves the feature off. KitFood is how many food items one visit takes.
 	KitChest *[3]int32
 	KitFood  int
+	// KitReach is how far from the chest, in blocks, a unit still sets out for
+	// it. KitGear adds armour and a spare pickaxe and axe to what a visit takes.
+	KitReach int
+	KitGear  bool
+	// RecoverDrops sends a unit that died back to pick up what it dropped.
+	RecoverDrops bool
 
 	// SkinRole is the unit's job (miner, chopper, ...), which picks its
 	// outfit. A warrior's outfit follows Role instead. Empty or unknown gives
@@ -238,6 +244,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	kitReach, err := intInRange("KIT_REACH", 96, 8, 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	kitGear, err := boolDefault("KIT_GEAR", false)
+	if err != nil {
+		return Config{}, err
+	}
+	recoverDrops, err := boolDefault("RECOVER_DROPS", false)
+	if err != nil {
+		return Config{}, err
+	}
 	joinDelay, err := intInRange("JOIN_DELAY_S", 0, 0, 600)
 	if err != nil {
 		return Config{}, err
@@ -277,12 +295,16 @@ func Load() (Config, error) {
 
 		TacticsControlDir: strings.TrimSpace(os.Getenv("TACTICS_CONTROL_DIR")),
 
-		KitChest:   kitChest,
-		KitFood:    kitFood,
-		SkinRole:   strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
-		SkinDir:    strings.TrimSpace(os.Getenv("SKIN_DIR")),
-		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
-		JoinDelayS: joinDelay,
+		KitChest: kitChest,
+		KitFood:  kitFood,
+		KitReach: kitReach,
+		KitGear:  kitGear,
+
+		RecoverDrops: recoverDrops,
+		SkinRole:     strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
+		SkinDir:      strings.TrimSpace(os.Getenv("SKIN_DIR")),
+		WorkPlan:     strings.TrimSpace(os.Getenv("WORK_PLAN")),
+		JoinDelayS:   joinDelay,
 	}, nil
 }
 

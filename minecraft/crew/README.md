@@ -27,6 +27,9 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
+| `KIT_REACH` | `96` | How far from the kit chest, in blocks, a unit still sets out for it (8 to 1000). Raise it only where the chest's chunks stay loaded the whole way |
+| `KIT_GEAR` | `false` | A kit visit also takes armour, put on at the chest, and a pickaxe and an axe the unit lacks |
+| `RECOVER_DROPS` | `false` | A unit that died walks back to the death point and picks up what it dropped (see Recovering drops) |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
@@ -227,6 +230,28 @@ unit to the chest) and `above` (the block over it). A visit only fills empty hot
 displaced, and a unit whose hotbar is full does not go; a visit that fills
 the hotbar before taking everything it needed logs `kit_no_room` instead of
 `kit_empty`. The task queue waits while a visit is under way.
+
+With `KIT_GEAR=true` a visit also takes, for each empty armour slot, the best
+piece the chest holds (netherite down to leather) and puts it on before it
+closes the chest, and a pickaxe and an axe when the unit carries none. Armour
+and tools may land off the hotbar. A unit that lacks only gear sets out as
+well, even with a full hotbar. `KIT_REACH` replaces the 96 block limit above.
+
+### Recovering drops
+
+With `RECOVER_DROPS=true`, a unit that dies on a survival server remembers
+where (in memory only, so a restart forgets it) and, once it has respawned and
+before its next queued task, walks back to within 1.5 blocks of that point and
+sweeps 6 blocks around it for up to 20 seconds so its dropped items are
+picked up. It stops early once the inventory holds as many items as were lost
+or no dropped item is in view for three seconds, and leaves an item it cannot
+reach after five seconds. A fight pauses the trip, and the walk plans again
+afterwards. One trip is made per death, and none when the unit lost nothing,
+the death point is more than 96 blocks away, its chunk is not loaded, it was
+in another dimension, it was in lava, fire or below y -60, or five minutes of
+game time have passed. Logs carry `recover_started` (with `lost`),
+`recover_done`, `recover_failed` and `recover_skipped` (with a `reason`), never
+a position.
 
 To use it, set the same two variables on every unit in the deployment's
 environment, for example in the Helm values that carry `DEFEND`:
