@@ -434,6 +434,38 @@ not set the respawn point` when its tap goes unanswered. `progress` is 1 once
 the point is set. The unit's state reports `spawn_point`, `spawn_known` and
 `sleeping`.
 
+`shelter` makes the unit safe until morning without a bed:
+
+```json
+{"template": "shelter", "until": "dawn", "max_ticks": 12000}
+```
+
+`until` is `dawn` (the only value, and the default); `max_ticks` (100 to
+24000, default 12000, one night at 20 inputs a second) is the most the unit
+waits inside before it leaves whatever the clock says. The unit stands in a
+cell with a solid floor and open feet and head space, and closes the four
+side cells at feet height, the four at head height, and the cell over its
+head, using blocks it carries (`dirt`, `cobblestone`, `stone`, deepslate,
+andesite, diorite, granite, tuff, netherrack or any `*_planks`; the largest
+stack first). The roof cell has nothing to click from inside, so one block
+goes on top of a head-height wall first and the roof is placed against it,
+which costs one extra block. A wall the terrain already has costs nothing, so
+a hillside takes fewer blocks than open ground. If its own cell will not do
+(water or lava at a side, a side with no floor to place on, or too many
+blocks missing) it walks to the cheapest cell within 16 blocks of loaded
+ground. Light is not needed.
+
+Once sealed it sends idle inputs until the clock reads dawn or day, then
+breaks the head and feet cell of one wall column, with a shovel, axe or
+pickaxe from the hotbar when it has one, and ends done. A wall cell that
+stops being solid while it waits (a creeper, a player, a mob that digs)
+fails the task with `the shelter was breached`. It fails with `not enough
+blocks to shelter (need N)` when no cell within reach can be closed with what
+it carries, `no standing spot to shelter within 16 blocks` when none is safe,
+and is refused up front, by day, with `it is already day`. `progress` counts
+blocks placed. The decision to start one belongs to the Life reflex's tending
+step: `life.ShouldShelter` says whether a unit with no bed should dig in.
+
 A self-sustaining wood loop is one `WORK_PLAN`: gather saplings, plant them,
 then fell what has grown, searching when no tree is loaded, and craft:
 
@@ -621,7 +653,7 @@ failed task to them. `/v1/state` carries `session_id` for the same reason.
 
 | Code | Meaning | Example reason | Raised by |
 | --- | --- | --- | --- |
-| `missing_tool` | the tool a skill needs is not held | `no axe in inventory` | mining skills |
+| `missing_tool` | the tool or material a skill needs is not held | `no axe in inventory`, `not enough blocks to shelter (need 10)` | mining skills, shelter |
 | `kit_chunk_not_loaded` | kit chest's chunk not loaded yet | `the chest's chunk is not loaded` | kit visit |
 | `kit_no_path` | no way to the kit chest | `getting to the chest: walking to the goal: no path` | kit visit |
 | `kit_chest_timeout` | chest never opened | `chest did not open within 300 ticks` | kit visit, chest skills |
@@ -637,7 +669,7 @@ failed task to them. `/v1/state` carries `session_id` for the same reason.
 | `placement_failed` | a block could not be put where the plan needs it | `bridging a missing stair floor: no solid neighbour to place against` | shaft, place |
 | `no_progress` | an action ran and changed nothing | `block did not break`, `no progress after 5 replans` | mining, climb, shaft |
 | `unit_died` | the unit died with the task running | `unit died` | runner |
-| `unsafe_nearby` | the task stood down for a hostile mob or a stranger | `a hostile mob is nearby` | repair |
+| `unsafe_nearby` | the task stood down for a hostile mob or a stranger, or a mob broke in | `a hostile mob is nearby`, `the shelter was breached` | repair, shelter |
 | `movement_corrected` | the server keeps pulling the unit back | none: never a task's reason | crew-control's `rubberbanding` event, from `movement.corrections` |
 | `other` | anything not listed | `something nobody wrote a rule for` | the fallback |
 
