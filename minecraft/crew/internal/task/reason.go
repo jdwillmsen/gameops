@@ -69,7 +69,7 @@ var reasonRules = []reasonRule{
 	{regexp.MustCompile(`no solid neighbour to place against|did not place the block|the target is not air or replaceable|the target is out of reach`), ReasonPlacementFailed},
 	{regexp.MustCompile(`^unit died$`), ReasonUnitDied},
 	{regexp.MustCompile(`^a (hostile mob|player who is not crew) is nearby$`), ReasonUnsafeNearby},
-	{regexp.MustCompile(`block did not break|^no progress after \d+ replans$|jump did not land|the server did not set the respawn point|never settled on the ground|unit did not come down|drifted off the pillar|^the furnace made no [a-z_]+$`), ReasonNoProgress},
+	{regexp.MustCompile(`block did not break|^no progress after \d+ replans$|jump did not land|the server did not set the respawn point|never settled on the ground|unit did not come down|drifted off the pillar|^the furnace made no [a-z_]+$|^the dive found \d+ of \d+ [a-z_]+$`), ReasonNoProgress},
 	{regexp.MustCompile(`(chest|furnace) did not open within \d+ ticks`), ReasonKitChestTimeout},
 	{regexp.MustCompile(`chunk is not loaded`), ReasonChunkNotLoaded},
 	{regexp.MustCompile(`\bno path\b|no walking path`), ReasonNoPath},

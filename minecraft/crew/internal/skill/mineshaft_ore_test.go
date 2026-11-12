@@ -442,3 +442,44 @@ func TestShaftStillTakesOreWithASafeDrop(t *testing.T) {
 		t.Errorf("a safe ore was left (%q)", n)
 	}
 }
+
+// Done means the goal was met: a controller walking the ladder resubmits a
+// task that ends Done with the goal unmet for ever.
+func TestShaftFailsWhenTheDiveEndsShortOfItsGoal(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		setup func(w simWorld)
+		kinds []OreKind
+		goal  map[string]int
+		want  string
+	}{
+		{"too little ore", func(w simWorld) { w[protocol.BlockPos{12, -1, 11}] = "coal_ore" },
+			[]OreKind{OreCoal}, map[string]int{"coal": 3}, "the dive found 1 of 3 coal"},
+		{"no ore at all", func(w simWorld) {},
+			[]OreKind{OreCoal}, map[string]int{"coal": 1}, "the dive found 0 of 1 coal"},
+		{"pickaxe too weak for the goal", func(w simWorld) { w[protocol.BlockPos{12, -1, 11}] = "diamond_ore" },
+			[]OreKind{OreDiamond}, map[string]int{"diamond": 1}, "the dive found 0 of 1 diamond"},
+	} {
+		w := mineWorld()
+		c.setup(w)
+		r := shaftRig(t, w)
+		spec := oreSpec(4, c.kinds...)
+		spec.OreGoal = c.goal
+		st, err := r.run(newShaft(t, w, r, spec, nil), 12000)
+		if st != Failed || err == nil || err.Error() != c.want {
+			t.Errorf("%s: status %v, err %v; want Failed %q", c.name, st, err, c.want)
+		}
+		if got := r.have("coal"); got != 0 {
+			t.Errorf("%s: %d coal left on the unit after the deposit", c.name, got)
+		}
+	}
+}
+
+func TestShaftWithoutAGoalIsDoneWhateverItFinds(t *testing.T) {
+	w := mineWorld()
+	r := shaftRig(t, w)
+	st, err := r.run(newShaft(t, w, r, oreSpec(4, OreCoal), nil), 12000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}

@@ -77,7 +77,9 @@ type ShaftSpec struct {
 	// in the open air within reach of a stand and that the pickaxe can harvest.
 	Ores []OreKind
 	// OreGoal maps an item to the amount that ends the digging early once each
-	// has been gained, so a unit sent for coal does not dig the whole plan.
+	// has been gained, so a unit sent for coal does not dig the whole plan. A
+	// dive that ends with less than the goal fails after depositing what it
+	// found: Done means the goal was met.
 	OreGoal map[string]int
 }
 
@@ -207,6 +209,11 @@ type MineShaft struct {
 	oreRest   protocol.BlockPos
 	oreKind   OreKind
 	oreCount  int
+	// shortfall names the first goal item the dive gained too little of,
+	// worked out before the deposits empty the inventory it is read from.
+	shortfall string
+	gained    int
+	wanted    int
 	pickInit  bool
 	// floors are the cells the planned stands rest on; breaking one would
 	// leave a hole in the unit's own stair.
@@ -598,6 +605,7 @@ func (m *MineShaft) nameAt(c protocol.BlockPos) string {
 // started with, which is what the digging dropped.
 func (m *MineShaft) startDeposits() {
 	snap := m.self()
+	m.shortfall, m.gained, m.wanted = m.goalShortfall()
 	have := map[string]int{}
 	for _, it := range snap.Inventory {
 		have[it.Name] += it.Count
@@ -619,6 +627,12 @@ func (m *MineShaft) deposit(ctx context.Context, a Actuator) outcome {
 	if m.sub == nil {
 		if len(m.deposits) == 0 {
 			m.emit("mine_done", map[string]any{"opened": m.dug, "depth": m.stepsDone})
+			if m.shortfall != "" {
+				// Everything the dive found is in the chest; the task did
+				// not get what it was for, and a caller walking the ladder
+				// must not take Done for that.
+				return outcome{st: Failed, err: fmt.Errorf("the dive found %d of %d %s", m.gained, m.wanted, m.shortfall)}
+			}
 			return outcome{st: Done}
 		}
 		m.sub, m.deposits = m.deposits[0], m.deposits[1:]
