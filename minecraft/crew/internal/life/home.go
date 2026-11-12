@@ -50,6 +50,10 @@ func (l *Life) wantsHome(s belief.Snapshot) bool {
 		return false
 	}
 	if h.visit != nil {
+		if s.Creative || s.Dead {
+			h.visit, h.pending = nil, false
+			return false
+		}
 		if l.tick-h.startedAt > homeLimit {
 			h.visit, h.pending = nil, false
 			l.logEvent("home_failed", map[string]any{"error": "ran out of time"})
