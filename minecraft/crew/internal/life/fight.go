@@ -248,6 +248,7 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	}
 	l.stopEating(a, s)
 	l.stopKit(a)
+	l.stopInventory(a)
 	l.stopRecover()
 	e, ok := l.ents.Get(l.target.ID)
 	p := a.Pose()

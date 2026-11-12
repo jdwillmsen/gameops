@@ -67,11 +67,12 @@ type eatState struct {
 // running. It is only asked when the unit is not engaged in a fight.
 func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	l.working = working
+	l.inv.next = invNone
 	if l.eat.active {
 		return true
 	}
 	// A visit under way has a chest open, so a meal waits for it.
-	if l.kit.visit != nil {
+	if l.kit.visit != nil || l.inv.busy() {
 		return true
 	}
 	if l.wantsRecovery(s) {
@@ -83,7 +84,10 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	if l.wantsRest(s, working) {
 		return true
 	}
-	return l.kitWants(s, working)
+	if l.kitWants(s, working) {
+		return true
+	}
+	return l.invWants(s)
 }
 
 // Tend sends exactly one input for a tick Tending claimed.
@@ -93,7 +97,7 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	// meal needs the hand, and an item use would keep either up.
 	l.stowShield(a)
 	l.cancelDraw(a)
-	if !l.eat.active && l.kit.visit == nil {
+	if !l.eat.active && l.kit.visit == nil && !l.inv.busy() {
 		if food, ok := l.wantsMeal(s); ok {
 			l.eat = eatState{active: true, slot: food.Slot, food: food, startHunger: s.Hunger, startCount: food.Count, blockedUntil: l.eat.blockedUntil}
 			if s.HeldKnown && s.HeldSlot == food.Slot {
@@ -106,6 +110,9 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	}
 	if l.kit.visit == nil && l.rec.visit != nil {
 		return l.tendRecover(ctx, a)
+	}
+	if l.kit.visit == nil && (l.inv.busy() || l.inv.next != invNone) {
+		return l.tendInventory(ctx, a, s)
 	}
 	if l.kit.visit == nil && l.wantsRest(s, l.working) {
 		l.resting(s, l.working)
