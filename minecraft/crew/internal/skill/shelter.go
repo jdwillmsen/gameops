@@ -99,8 +99,10 @@ type Shelter struct {
 	idx      int
 	waitMove int
 	retried  bool
-	item     string
-	settle   int
+	// mine is the cells the shelter itself filled.
+	mine   map[protocol.BlockPos]bool
+	item   string
+	settle int
 
 	waited int
 	exits  []protocol.BlockPos
@@ -119,7 +121,7 @@ func NewShelter(world ChestWorld, self func() belief.Snapshot, maxTicks int, opt
 	if maxTicks <= 0 {
 		maxTicks = DefaultShelterTicks
 	}
-	return &Shelter{world: world, self: self, maxTicks: maxTicks, log: o.log, given: map[protocol.BlockPos]bool{}}
+	return &Shelter{world: world, self: self, maxTicks: maxTicks, log: o.log, given: map[protocol.BlockPos]bool{}, mine: map[protocol.BlockPos]bool{}}
 }
 
 func (s *Shelter) Name() string { return "shelter" }
@@ -513,7 +515,7 @@ func (s *Shelter) build(a Actuator, snap belief.Snapshot) outcome {
 	err := a.PlaceBlock(target, item)
 	switch {
 	case err == nil:
-		s.phase, s.settle, s.retried = shlConfirm, 0, false
+		s.phase, s.settle = shlConfirm, 0
 		return next
 	case errors.Is(err, act.ErrItemMoving):
 		if s.waitMove++; s.waitMove >= answerTicks {
@@ -530,8 +532,9 @@ func (s *Shelter) confirm(a Actuator) outcome {
 	target := s.room.place[s.idx]
 	if name, known := s.at(target); known && placedAs(s.item, name) {
 		s.placed++
+		s.mine[target] = true
 		s.idx++
-		s.waitMove = 0
+		s.waitMove, s.retried = 0, false
 		s.phase = shlBuild
 		return next
 	}
@@ -561,7 +564,11 @@ func (s *Shelter) wait(a Actuator, snap belief.Snapshot) outcome {
 	}
 	if daytime(snap.Env.DayPhase) || s.waited >= s.maxTicks {
 		s.emit("shelter_leaving", map[string]any{"waited": s.waited})
-		s.exits, s.phase = s.exitCells(), shlDig
+		exits, err := s.exitCells()
+		if err != nil {
+			return outcome{st: Failed, err: err}
+		}
+		s.exits, s.phase = exits, shlDig
 		return next
 	}
 	s.waited++
@@ -569,16 +576,40 @@ func (s *Shelter) wait(a Actuator, snap belief.Snapshot) outcome {
 }
 
 // exitCells is the wall column to open, head cell first so the unit can step
-// up into the gap once the feet cell goes too. It is never the bridge column,
-// whose roof block would hang over the gap.
-func (s *Shelter) exitCells() []protocol.BlockPos {
+// up into the gap once the feet cell goes too. Its far side must be open air:
+// digging into natural rock leaves the unit sealed in, and into a liquid
+// floods the room. A column the shelter placed itself is preferred, as it is
+// known to be a plain block, and the bridge column is never used, as its roof
+// block would hang over the gap.
+func (s *Shelter) exitCells() ([]protocol.BlockPos, error) {
 	c := s.room.cell
-	i := 0
-	if s.room.bridge == 0 {
-		i = 1
+	best, bestRank := -1, 3
+	for i, d := range sideOffsets {
+		if i == s.room.bridge {
+			continue
+		}
+		open := true
+		for dy := int32(0); dy <= 1; dy++ {
+			if n, known := s.at(off(c, 2*d[0], dy, 2*d[1])); !known || !airLike(n) {
+				open = false
+			}
+		}
+		if !open {
+			continue
+		}
+		rank := 1
+		if s.mine[off(c, d[0], 0, d[1])] && s.mine[off(c, d[0], 1, d[1])] {
+			rank = 0
+		}
+		if rank < bestRank {
+			best, bestRank = i, rank
+		}
 	}
-	d := sideOffsets[i]
-	return []protocol.BlockPos{off(c, d[0], 1, d[1]), off(c, d[0], 0, d[1])}
+	if best < 0 {
+		return nil, errors.New("no safe exit from the shelter: every wall has rock or liquid behind it")
+	}
+	d := sideOffsets[best]
+	return []protocol.BlockPos{off(c, d[0], 1, d[1]), off(c, d[0], 0, d[1])}, nil
 }
 
 // dig opens the exit with the tool that suits the block.
