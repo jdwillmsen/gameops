@@ -66,6 +66,7 @@ type eatState struct {
 // the runner then hands it the tick through Tend. working says a task is
 // running. It is only asked when the unit is not engaged in a fight.
 func (l *Life) Tending(s belief.Snapshot, working bool) bool {
+	l.working = working
 	if l.eat.active {
 		return true
 	}
@@ -77,6 +78,9 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 		return true
 	}
 	if _, ok := l.wantsMeal(s); ok {
+		return true
+	}
+	if l.wantsRest(s, working) {
 		return true
 	}
 	return l.kitWants(s, working)
@@ -103,33 +107,28 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	if l.kit.visit == nil && l.rec.visit != nil {
 		return l.tendRecover(ctx, a)
 	}
+	if l.kit.visit == nil && l.wantsRest(s, l.working) {
+		l.resting(s, l.working)
+		return l.still(a)
+	}
 	return l.tendKit(ctx, a, s)
 }
 
-// wantsMeal picks the food to eat now, if the unit is hungry enough.
+// wantsMeal picks the food to eat now: a golden apple in an emergency, else
+// the best-fitting food once the unit is hungry enough.
 func (l *Life) wantsMeal(s belief.Snapshot) (belief.Item, bool) {
 	if !l.cfg.Eat || !s.HungerKnown || l.tick < l.eat.blockedUntil {
 		return belief.Item{}, false
 	}
-	limit := float32(eatBelow)
-	if s.HealthKnown && s.Health < fullHealth {
-		limit = eatBelowHurt
+	if l.emergency(s) {
+		if apple, ok := emergencyApple(s.Inventory); ok {
+			return apple, true
+		}
 	}
-	if s.Hunger > limit {
+	if s.Hunger > l.eatLimit(s, l.working) {
 		return belief.Item{}, false
 	}
-	var best belief.Item
-	bestPts := 0
-	for _, it := range s.Inventory {
-		// The server only lets a unit hold a hotbar stack.
-		if it.Slot >= hotbarSlots {
-			continue
-		}
-		if pts := foods[it.Name]; pts > bestPts {
-			best, bestPts = it, pts
-		}
-	}
-	return best, bestPts > 0
+	return pickFood(s.Inventory, s.Hunger)
 }
 
 // eating advances the meal by one tick.
@@ -189,6 +188,9 @@ func (l *Life) endMeal(ok bool, s belief.Snapshot) {
 	if ok {
 		l.logEvent("eat", f)
 		e.blockedUntil = l.tick + attackEvery
+		if e.food.Name == goldenApple {
+			e.blockedUntil = l.tick + gappleCooldown
+		}
 	} else {
 		l.logEvent("eat_failed", f)
 		e.blockedUntil = l.tick + eatFailBackoff

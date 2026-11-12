@@ -81,7 +81,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	m := modeFight
 	switch {
 	case best.ID != 0:
-		low := s.HealthKnown && s.Health <= lowHealth
+		low := s.HealthKnown && s.Health <= l.retreatAt()
 		if (low || kindOf(best.Type) == flee) && l.retreating < retreatLimit {
 			m = modeRetreat
 		}
