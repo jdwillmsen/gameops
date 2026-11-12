@@ -75,6 +75,9 @@ type Config struct {
 	Role string
 	// Kit, when set, is a chest the unit rearms from.
 	Kit *Kit
+	// Recover makes a unit that died walk back to where it fell and pick up
+	// what it dropped.
+	Recover bool
 }
 
 type mode uint8
@@ -111,6 +114,13 @@ type Life struct {
 	dead       bool
 	feet       mgl32.Vec3
 	feetKnown  bool
+	// death outlives Reset, which the runner calls after a death: the next
+	// life is what recovers from it. carried and dim are what the unit held and
+	// where it was on its last tick, since by the time a death is announced the
+	// inventory may already be gone.
+	death   lastDeath
+	carried int
+	dim     int32
 
 	// The rest belongs to the stepping goroutine.
 	tick uint64
@@ -143,6 +153,7 @@ type Life struct {
 	swim swimState
 	eat  eatState
 	kit  kitState
+	rec  recoverState
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
@@ -163,6 +174,8 @@ type Life struct {
 	moves *act.MoveCounters
 	// makeKit replaces the withdraw a visit runs, for tests.
 	makeKit func(weapon bool, food int) skill.Skill
+	// makeRecover replaces the recovery walk, for tests.
+	makeRecover func(lastDeath) skill.Skill
 }
 
 // New builds a unit's life. The random source is the idle walk's only
@@ -190,6 +203,8 @@ func (l *Life) Spawn(runtimeID uint64) {
 	}
 	l.mu.Lock()
 	l.selfID, l.hurt, l.healthSeen, l.dead, l.feetKnown = runtimeID, false, false, false, false
+	// The drops of an earlier session are gone with its world.
+	l.death = lastDeath{}
 	l.mu.Unlock()
 }
 
@@ -209,7 +224,7 @@ func (l *Life) Reset() {
 	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
 	l.idle, l.swim = idleState{}, swimState{}
-	l.eat, l.kit = eatState{}, kitState{}
+	l.eat, l.kit, l.rec = eatState{}, kitState{}, recoverState{}
 	if w := l.warrior; w != nil {
 		w.reset()
 	}
@@ -282,6 +297,7 @@ func (l *Life) diedLocked() {
 		return
 	}
 	l.dead, l.hurt = true, false
+	l.noteDeathLocked()
 	if l.warrior == nil {
 		return
 	}
