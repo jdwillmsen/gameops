@@ -272,6 +272,13 @@ func TestLifeConfigTurnsTheKitOnOnlyWithAChest(t *testing.T) {
 	}
 }
 
+func TestLifeConfigCarriesTheVitalsThresholds(t *testing.T) {
+	lc := lifeConfig(config.Config{RetreatHealth: 7, EmergencyHealth: 3, RestBelow: 9, TaskMinHealth: 13, TaskMinFood: 15}, blocks.New(noNames{}, 1))
+	if want := (life.Vitals{RetreatHealth: 7, EmergencyHealth: 3, RestBelow: 9, TaskMinHealth: 13, TaskMinFood: 15}); lc.Vitals != want {
+		t.Errorf("vitals = %+v, want %+v", lc.Vitals, want)
+	}
+}
+
 func TestLifeConfigCarriesTheKitReachGearAndRecovery(t *testing.T) {
 	world := blocks.New(noNames{}, 1)
 	lc := lifeConfig(config.Config{KitChest: &[3]int32{1, 2, 3}, KitFood: 8, KitReach: 150, KitGear: true, RecoverDrops: true}, world)

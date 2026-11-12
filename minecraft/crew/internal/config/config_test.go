@@ -62,6 +62,11 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"KIT_FOOD":         "0",
 		"CREW_ROLE":        "wizard",
 		"CREW_SQUAD":       "9lives",
+		"RETREAT_HEALTH":   "0",
+		"EMERGENCY_HEALTH": "21",
+		"REST_BELOW":       "-1",
+		"TASK_MIN_HEALTH":  "half",
+		"TASK_MIN_FOOD":    "21",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -72,6 +77,27 @@ func TestLoadRejectsBadValues(t *testing.T) {
 				t.Fatalf("%s=%s: err = %v, want one naming %s", name, value, err, name)
 			}
 		})
+	}
+}
+
+func TestLoadParsesTheVitalsThresholds(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := [5]int{cfg.RetreatHealth, cfg.EmergencyHealth, cfg.RestBelow, cfg.TaskMinHealth, cfg.TaskMinFood}; got != [5]int{6, 4, 10, 12, 16} {
+		t.Errorf("defaults = %v, want [6 4 10 12 16]", got)
+	}
+	for name, value := range map[string]string{"RETREAT_HEALTH": "8", "EMERGENCY_HEALTH": "0", "REST_BELOW": "0", "TASK_MIN_HEALTH": "0", "TASK_MIN_FOOD": "0"} {
+		t.Setenv(name, value)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := [5]int{cfg.RetreatHealth, cfg.EmergencyHealth, cfg.RestBelow, cfg.TaskMinHealth, cfg.TaskMinFood}; got != [5]int{8, 0, 0, 0, 0} {
+		t.Errorf("overrides = %v, want [8 0 0 0 0]", got)
 	}
 }
 

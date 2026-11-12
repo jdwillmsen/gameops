@@ -22,6 +22,11 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
+| `RETREAT_HEALTH` | `6` | Health (out of 20) at or below which the reactive defence walks away from a threat instead of fighting (1 to 20; see Health and food) |
+| `EMERGENCY_HEALTH` | `4` | Health at or below which a golden apple is eaten whatever the hunger; the only time one is (0 to 20, `0` never) |
+| `REST_BELOW` | `10` | Health under which a unit with no hostile mob near stands still to heal, pausing a running task (0 to 20, `0` never pauses a task) |
+| `TASK_MIN_HEALTH` | `12` | Health a unit needs before it starts a task; under it, it rests first (0 to 20, `0` starts at any health) |
+| `TASK_MIN_FOOD` | `16` | Food a unit tops up to, from the hotbar, before it starts a task (0 to 20, `0` adds no such meal) |
 | `CREW_ROLE` | unset | The unit's role: a warrior (`vanguard`, `striker`, `ranger`; see Squads and warriors) or a builder (`mender`, `builder`; see Mender and builder roles); anything else is refused, unset leaves the reactive defence in charge |
 | `CREW_LAB` | `false` | Must be `true` for a `mender` or `builder`, which refuse to start without it; the lab chart or compose sets it, the live server's never does |
 | `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
@@ -205,13 +210,49 @@ A unit that died fights barehanded and never heals: on normal difficulty
 health only regenerates while food is at 18 of 20 or more. With `EAT` a unit
 that is not in a fight and holds food on its hotbar selects it, uses it for
 the 32 ticks a meal takes and lets go. It eats from 17 food when hurt and from
-14 when not, preferring the richest food (steak, then bread, then lesser
-foods); rotten flesh, raw meat and anything that poisons or teleports are
+14 when not, choosing the food that fits its hunger best (see Health and food); rotten flesh, raw meat and anything that poisons or teleports are
 never eaten, and neither is food outside the hotbar. The running skill is
 stopped for the meal and resumed after it, and meal time does not count toward
 `TASK_TIMEOUT_S`. A fight cuts a meal short. Logs carry `eat` and `eat_failed`
 with the food and hunger only; a meal that does not land is not retried for a
-minute.
+minute. See Health and food for which food is chosen and the other thresholds.
+
+### Health and food
+
+The reflex keeps a unit alive between fights. Everything below applies only
+outside a fight and is deterministic; the thresholds are the variables
+`RETREAT_HEALTH`, `EMERGENCY_HEALTH`, `REST_BELOW`, `TASK_MIN_HEALTH` and
+`TASK_MIN_FOOD` in the configuration table.
+
+- **Which food.** Of the food on the hotbar the unit eats the one that wastes
+  the fewest points for its hunger (a carrot for a gap of 3, steak for a gap of
+  8), then the one with the most saturation, then the larger, then the lower
+  slot. Rotten flesh, raw meat and golden apples are never picked this way.
+- **Eating to heal.** Natural regeneration needs 18 food, so a hurt unit eats
+  from 17. With no saturation left to burn the first point healed would drop
+  food under 18 at once, so it eats from 18. A unit about to start a task, with
+  nothing running, tops up to `TASK_MIN_FOOD` first.
+- **Golden apples** are eaten only at `EMERGENCY_HEALTH` or lower, whatever the
+  hunger, and not twice within seven seconds, so the regeneration of the first
+  has time to show.
+- **Resting.** A unit hurt under `REST_BELOW` (under `TASK_MIN_HEALTH` before a
+  task starts) with no hostile mob within 16 blocks and food of 18 or more stands
+  still until health is 18, pausing a running task and not charging the wait to
+  `TASK_TIMEOUT_S`. It stops early when a hostile mob comes into view
+  (resuming five seconds after it is gone) or food falls under 18, and gives up
+  after 90 seconds, after which it does not rest again for a minute, so a unit
+  that cannot heal never stalls its work. Meals come before rest. A unit that is
+  in creative mode or whose position is unknown does not rest.
+- **Retreat.** At `RETREAT_HEALTH` or lower the reactive defence walks away from
+  a threat. A warrior's own retreat rules are in its profile.
+- **Starting work.** A queued task waits while the unit rests or eats before
+  it, so it does not begin a long job hurt or hungry.
+
+Logs carry `rest` (with `health`, `hunger` and whether a task was `working`)
+and `rest_done` (with a `reason` of `healed`, `hungry`, `threat` or `timeout`,
+the `ticks` and the `health`), never positions. A zero value for
+`EMERGENCY_HEALTH`, `REST_BELOW`, `TASK_MIN_HEALTH` or `TASK_MIN_FOOD` turns that
+rule off.
 
 With `KIT_CHEST` set, a unit that has had no sword or axe, or no food, on its
 hotbar for five seconds, and is not running a task or fighting, walks to that

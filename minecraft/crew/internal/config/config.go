@@ -87,6 +87,11 @@ type Config struct {
 	Harness bool
 	// Eat lets a hungry unit eat food from its hotbar.
 	Eat bool
+	// The health and food reflex's thresholds, in points out of 20 (see
+	// life.Vitals): retreat at or below RetreatHealth, a golden apple at or
+	// below EmergencyHealth, a rest under RestBelow, and no task started under
+	// TaskMinHealth health or TaskMinFood food. Zero turns the last four off.
+	RetreatHealth, EmergencyHealth, RestBelow, TaskMinHealth, TaskMinFood int
 	// Role is the unit's job. A warrior role (vanguard, striker, ranger)
 	// opts into the warrior engine and a squad; a builder role (mender,
 	// builder) does neither. Empty leaves the reactive defence in charge;
@@ -221,6 +226,21 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	var vitals [5]int
+	for i, v := range [...]struct {
+		name     string
+		def, min int
+	}{
+		{"RETREAT_HEALTH", 6, 1},
+		{"EMERGENCY_HEALTH", 4, 0},
+		{"REST_BELOW", 10, 0},
+		{"TASK_MIN_HEALTH", 12, 0},
+		{"TASK_MIN_FOOD", 16, 0},
+	} {
+		if vitals[i], err = intInRange(v.name, v.def, v.min, 20); err != nil {
+			return Config{}, err
+		}
+	}
 	role, err := roleSetting()
 	if err != nil {
 		return Config{}, err
@@ -289,9 +309,11 @@ func Load() (Config, error) {
 		Defend:     defend,
 		Harness:    harness,
 		Eat:        eat,
-		Role:       role,
-		Lab:        lab,
-		Squad:      squad,
+
+		RetreatHealth: vitals[0], EmergencyHealth: vitals[1], RestBelow: vitals[2], TaskMinHealth: vitals[3], TaskMinFood: vitals[4],
+		Role:  role,
+		Lab:   lab,
+		Squad: squad,
 
 		TacticsControlDir: strings.TrimSpace(os.Getenv("TACTICS_CONTROL_DIR")),
 

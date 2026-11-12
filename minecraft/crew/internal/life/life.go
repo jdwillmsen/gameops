@@ -75,6 +75,9 @@ type Config struct {
 	Role string
 	// Kit, when set, is a chest the unit rearms from.
 	Kit *Kit
+	// Vitals tunes the health and food reflex; its zero value keeps the
+	// original thresholds.
+	Vitals Vitals
 	// Recover makes a unit that died walk back to where it fell and pick up
 	// what it dropped.
 	Recover bool
@@ -152,8 +155,11 @@ type Life struct {
 	idle idleState
 	swim swimState
 	eat  eatState
-	kit  kitState
-	rec  recoverState
+	rest restState
+	// working is whether a task was running at the last Tending, for Tend.
+	working bool
+	kit     kitState
+	rec     recoverState
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
@@ -224,7 +230,7 @@ func (l *Life) Reset() {
 	l.retreating, l.endReason = 0, ""
 	l.chase, l.flee = nil, nil
 	l.idle, l.swim = idleState{}, swimState{}
-	l.eat, l.kit, l.rec = eatState{}, kitState{}, recoverState{}
+	l.eat, l.kit, l.rec, l.rest = eatState{}, kitState{}, recoverState{}, restState{}
 	if w := l.warrior; w != nil {
 		w.reset()
 	}
