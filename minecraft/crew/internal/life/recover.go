@@ -33,6 +33,8 @@ type lastDeath struct {
 
 type recoverState struct {
 	visit skill.Skill
+	// since is the tick of the death the trip is for.
+	since uint64
 	// resume says a fight interrupted the walk, which then plans afresh.
 	resume bool
 }
@@ -92,6 +94,13 @@ func (l *Life) markAttempted() {
 // running died with the unit.
 func (l *Life) wantsRecovery(s belief.Snapshot) bool {
 	if l.rec.visit != nil {
+		// A fight can hold the trip past the drops' lifetime, and the walk's
+		// own clock stops while it does.
+		if l.tick-l.rec.since > recoverWindow {
+			l.rec.visit = nil
+			l.logEvent("recover_failed", map[string]any{"error": skill.ErrRecoverGaveUp.Error()})
+			return false
+		}
 		return true
 	}
 	if !l.cfg.Recover || !s.Spawned || s.Dead || !s.PositionKnown {
@@ -114,10 +123,15 @@ func (l *Life) wantsRecovery(s belief.Snapshot) bool {
 	}
 	v := l.newRecover(d)
 	if err := v.Ready(s); err != nil {
+		if errors.Is(err, skill.ErrRecoverNotLoaded) {
+			// Chunks stream in after a respawn; the death stays pending
+			// until its chunk arrives or the window closes.
+			return false
+		}
 		return skip(recoverReason(err))
 	}
 	l.markAttempted()
-	l.rec.visit, l.rec.resume = v, false
+	l.rec.visit, l.rec.resume, l.rec.since = v, false, d.at
 	l.logEvent("recover_started", map[string]any{"lost": d.lost})
 	return true
 }
