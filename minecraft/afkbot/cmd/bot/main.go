@@ -272,7 +272,8 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	}
 
 	var stow *stower
-	if cfg.Stow {
+	// A seat needs the hands known to be empty, so it brings the stow with it.
+	if cfg.Stow || cfg.HasSeat {
 		stow = newStower(log)
 	}
 	var seat *seater
@@ -300,11 +301,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 			stow.handle(pk, conn, gd.EntityRuntimeID)
 		}
 		if seat != nil {
-			var slot byte
-			if stow != nil {
-				slot = stow.selected
-			}
-			seat.step(conn, held, poseEvents, slot)
+			seat.step(conn, held, poseEvents, stow.selected, stow.selectedEmpty())
 		}
 
 		// A dead bot holds no chunks, and nothing outside this loop can tell

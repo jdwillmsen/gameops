@@ -141,7 +141,7 @@ func TestSeatMountsNearestCushion(t *testing.T) {
 	addActor(l, 3, 103, "minecraft:cow", mgl32.Vec3{10, 64, 10})
 	addActor(l, 4, 104, seatKind, mgl32.Vec3{20, 64, 10})
 	w := &sink{}
-	s.step(w, p, l, 3)
+	s.step(w, p, l, 3, true)
 	if len(w.got) != 1 {
 		t.Fatalf("sent %d", len(w.got))
 	}
@@ -156,8 +156,8 @@ func TestSeatMissingRetriesThenGivesUp(t *testing.T) {
 	s, now, p, l := seatFixture()
 	w := &sink{}
 	for i := 0; i < 20; i++ {
-		s.step(w, p, l, 0)
-		s.step(w, p, l, 0)
+		s.step(w, p, l, 0, true)
+		s.step(w, p, l, 0, true)
 		*now = now.Add(seatEvery)
 	}
 	if s.tries != seatMaxTries || len(w.got) != 0 {
@@ -169,19 +169,19 @@ func TestSeatRetriesEveryIntervalUntilRiding(t *testing.T) {
 	s, now, p, l := seatFixture()
 	addActor(l, 1, 101, seatKind, mgl32.Vec3{10, 64, 10})
 	w := &sink{}
-	s.step(w, p, l, 0)
-	s.step(w, p, l, 0)
+	s.step(w, p, l, 0, true)
+	s.step(w, p, l, 0, true)
 	if len(w.got) != 1 {
 		t.Fatalf("not rate limited: %d", len(w.got))
 	}
 	*now = now.Add(seatEvery)
-	s.step(w, p, l, 0)
+	s.step(w, p, l, 0, true)
 	if len(w.got) != 2 {
 		t.Fatalf("no retry: %d", len(w.got))
 	}
 	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 7, RiddenEntityUniqueID: 1, Type: protocol.EntityLinkRider}}, 1, 7)
 	*now = now.Add(seatEvery)
-	s.step(w, p, l, 0)
+	s.step(w, p, l, 0, true)
 	if len(w.got) != 2 {
 		t.Fatal("kept mounting while riding")
 	}
@@ -199,5 +199,24 @@ func TestSeatActorsRemovedAndBounded(t *testing.T) {
 	}
 	if len(l.seats) > maxPoseKinds {
 		t.Fatalf("seats = %d", len(l.seats))
+	}
+}
+
+func TestSeatWaitsForAKnownEmptyHandAndForTheLiving(t *testing.T) {
+	s, _, p, l := seatFixture()
+	addActor(l, 9, 9, seatKind, mgl32.Vec3{10, 64, 10})
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 4)}
+	s.step(r, p, l, 0, false)
+	p.setPaused(true)
+	s.step(r, p, l, 0, true)
+	if s.tries != 0 {
+		t.Fatalf("tried to mount with a held item or while dead: tries=%d", s.tries)
+	}
+	p.setPaused(false)
+	p.setVehicle(5)
+	s.tries = 4
+	s.step(r, p, l, 0, true)
+	if s.tries != 0 {
+		t.Fatalf("tries not reset once seated: %d", s.tries)
 	}
 }
