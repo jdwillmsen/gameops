@@ -51,6 +51,10 @@ const (
 	shStock
 	shArm
 	shClimb
+	shTorch
+	shOre
+	shOreBreak
+	shOrePick
 )
 
 // ShaftSpec is a stair shaft with branch tunnels off its bottom.
@@ -65,6 +69,16 @@ type ShaftSpec struct {
 	// Area bounds every cell the unit opens.
 	Area  Area
 	Chest protocol.BlockPos
+	// Torches lights the way down: at each stand deep enough below the entrance
+	// where the modelled light is under torchBelow, a torch goes on the cell
+	// the unit just left. A unit with no torch digs on in the dark.
+	Torches bool
+	// Ores are the ore kinds the unit also takes: any block of one that shows
+	// in the open air within reach of a stand and that the pickaxe can harvest.
+	Ores []OreKind
+	// OreGoal maps an item to the amount that ends the digging early once each
+	// has been gained, so a unit sent for coal does not dig the whole plan.
+	OreGoal map[string]int
 }
 
 // shaftStep opens some cells from the previous stand and walks to the next.
@@ -181,6 +195,22 @@ type MineShaft struct {
 	climbs     int
 	climbThen  shaftPhase
 	cl         *climber
+
+	// torchFrom is the stand the unit just left, the cell a torch goes on.
+	torchFrom protocol.BlockPos
+	noTorches bool
+	// oreBlocks maps a block name to the ore it holds; oreSkip are the cells
+	// ruled out, oreAt the one being broken and oreRest where its drop lands.
+	oreBlocks map[string]OreKind
+	oreSkip   map[protocol.BlockPos]bool
+	oreAt     protocol.BlockPos
+	oreRest   protocol.BlockPos
+	oreKind   OreKind
+	oreCount  int
+	pickInit  bool
+	// floors are the cells the planned stands rest on; breaking one would
+	// leave a hole in the unit's own stair.
+	floors map[protocol.BlockPos]bool
 }
 
 // NewMineShaft refuses a plan that would open a cell outside the area.
@@ -192,7 +222,16 @@ func NewMineShaft(world ChestWorld, self func() belief.Snapshot, spec ShaftSpec,
 	for _, f := range opts {
 		f(&o)
 	}
-	return &MineShaft{world: world, self: self, spec: spec, log: o.log, at: spec.Entrance, phase: shArm}, nil
+	m := &MineShaft{world: world, self: self, spec: spec, log: o.log, at: spec.Entrance, phase: shArm}
+	if len(spec.Ores) > 0 {
+		m.oreBlocks, m.oreSkip, m.floors = map[string]OreKind{}, map[protocol.BlockPos]bool{}, plannedFloors(spec)
+		for _, k := range spec.Ores {
+			for _, b := range k.Blocks {
+				m.oreBlocks[b] = k
+			}
+		}
+	}
+	return m, nil
 }
 
 func (m *MineShaft) Name() string { return "mine_shaft" }
@@ -239,6 +278,11 @@ func (m *MineShaft) Resume() {
 		}
 	case shArm:
 		m.waited = 0
+	case shTorch:
+		// The torch is tried again at the next dark stand.
+		m.sub, m.phase = nil, shSeg
+	case shOreBreak, shOrePick:
+		m.pickInit, m.phase = false, shOre
 	case shClimb:
 		m.cl, m.phase = nil, m.climbThen
 	case shStock:
@@ -283,6 +327,14 @@ func (m *MineShaft) Step(ctx context.Context, a Actuator) (Status, error) {
 		switch m.phase {
 		case shArm:
 			o = m.arm(a)
+		case shTorch:
+			o = m.torch(ctx, a)
+		case shOre:
+			o = m.ore(a, snap)
+		case shOreBreak:
+			o = m.oreBreak(a)
+		case shOrePick:
+			o = m.orePick(a)
 		case shClimb:
 			o = m.climb(a)
 		case shStock:
@@ -378,12 +430,12 @@ func (m *MineShaft) endSegment() {
 }
 
 func (m *MineShaft) stepDone() {
-	m.at = m.steps[m.si].stand
+	m.torchFrom, m.at = m.at, m.steps[m.si].stand
 	if m.seg == 0 {
 		m.stepsDone++
 	}
 	m.si, m.ci, m.tries, m.reachTried = m.si+1, 0, 0, false
-	m.phase = shSeg
+	m.phase = shTorch
 }
 
 // abort rules out the rest of the heading the skill is on. The shaft failing
@@ -408,6 +460,10 @@ func (m *MineShaft) abort(kind string) outcome {
 func (m *MineShaft) segment() outcome {
 	if m.si >= len(m.steps) {
 		m.endSegment()
+		return next
+	}
+	if m.goalsMet() {
+		m.phase, m.mendThen = shMend, shReturn
 		return next
 	}
 	st := m.steps[m.si]
@@ -458,15 +514,8 @@ func (m *MineShaft) dig(a Actuator, snap belief.Snapshot) outcome {
 			m.phase = shReach
 			return next
 		}
-		if !m.selected {
-			tool, ok := hotbarTool(snap, "pickaxe")
-			if !ok {
-				return m.failed(a, errors.New("no pickaxe in inventory"))
-			}
-			if err := a.SelectHotbar(tool.Slot, tool); err != nil {
-				return m.failed(a, err)
-			}
-			m.selected = true
+		if _, err := m.selectPickaxe(a, snap); err != nil {
+			return m.failed(a, err)
 		}
 		m.tries++
 		m.brk = cellBreak{pos: c, name: name}
@@ -482,6 +531,23 @@ func (m *MineShaft) dig(a Actuator, snap belief.Snapshot) outcome {
 	}
 	m.phase = shWalk
 	return next
+}
+
+// selectPickaxe holds the best pickaxe on the hotbar, once, and reports its
+// tier. The best one: a stone pickaxe takes iron where a wooden one drops
+// nothing.
+func (m *MineShaft) selectPickaxe(a Actuator, snap belief.Snapshot) (int, error) {
+	tool, tier, ok := bestPickaxe(snap)
+	if !ok {
+		return 0, errors.New("no pickaxe in inventory")
+	}
+	if !m.selected {
+		if err := a.SelectHotbar(tool.Slot, tool); err != nil {
+			return 0, err
+		}
+		m.selected = true
+	}
+	return tier, nil
 }
 
 func (m *MineShaft) breakCell(a Actuator) outcome {
@@ -666,7 +732,7 @@ func (m *MineShaft) keep(name string) int {
 // arm waits for the pickaxe and the entrance's ground, which arrive a little
 // after a unit joins or respawns, instead of failing the task for it.
 func (m *MineShaft) arm(a Actuator) outcome {
-	_, armed := hotbarTool(m.self(), "pickaxe")
+	_, _, armed := bestPickaxe(m.self())
 	_, here := m.world.Block(m.spec.Entrance)
 	_, below := m.world.Block(up(m.spec.Entrance, -1))
 	if armed && here && below {
