@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -205,6 +206,12 @@ type rig struct {
 	// from the rig's own server: a server that answers from its own goroutine
 	// (creative takes) hooks in here.
 	onWrite func(packet.Packet) bool
+	// onBed answers a click on a bed, which the rig otherwise treats as a
+	// placement against it.
+	onBed func(*protocol.UseItemTransactionData)
+	// onTick runs after each input the rig has answered, outside the
+	// actuator's lock, so it may send packets back.
+	onTick func()
 }
 
 // timedFill puts a stack in a chest slot once the unit has sent that many
@@ -285,6 +292,9 @@ func (r *rig) WritePacket(pk packet.Packet) error {
 func (r *rig) Tick(in act.Input) error {
 	err := r.Actuator.Tick(in)
 	r.pump()
+	if r.onTick != nil {
+		r.onTick()
+	}
 	return err
 }
 
@@ -593,6 +603,10 @@ func (r *rig) pickUp(item int32) {
 func (r *rig) onClick(p *packet.InventoryTransaction) {
 	u, ok := p.TransactionData.(*protocol.UseItemTransactionData)
 	if !ok {
+		return
+	}
+	if r.onBed != nil && strings.HasSuffix(r.world[u.BlockPosition], "bed") {
+		r.onBed(u)
 		return
 	}
 	if r.world[u.BlockPosition] != "chest" {
