@@ -39,3 +39,22 @@ func TestUnitSkinFollowsRoleAndOverride(t *testing.T) {
 		t.Error("a bad override must fall back to a generated skin, not no skin")
 	}
 }
+
+func TestChopperUnitWearsChopperOutfitDeterministically(t *testing.T) {
+	log := logging.New("")
+	cfg := config.Config{Username: "Dotablaze7321", SkinRole: "chopper"}
+
+	got := unitSkinFor(cfg, log)
+	if want := skin.ForPersona("Dotablaze7321", skin.Persona{Role: "chopper"}); got != want {
+		t.Error("a chopper should wear the chopper outfit")
+	}
+	if got != unitSkinFor(cfg, log) {
+		t.Error("the same name and role must give the same skin")
+	}
+	if got == skin.For("Dotablaze7321") {
+		t.Error("a chopper should not wear the plain name-hash skin")
+	}
+	if got == skin.ForPersona("Dotablaze7321", skin.Persona{Role: "miner"}) {
+		t.Error("a chopper and a miner of the same name should differ")
+	}
+}

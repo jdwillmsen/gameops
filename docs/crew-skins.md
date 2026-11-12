@@ -7,7 +7,7 @@ role always give the same skin.
 | Role | Outfit |
 |---|---|
 | miner | yellow hard hat with lamp, grey work shirt, belt |
-| chopper | plaid flannel in the unit's accent colour, beard |
+| chopper (the lumberjack) | plaid flannel in the unit's accent colour, beard |
 | hauler | flat cap, tan vest over blue shirt, pack on the back |
 | shaft | white helmet, orange hi-vis jacket with reflective bands |
 | mender | white coat with a green cross, white cap with a green band |
