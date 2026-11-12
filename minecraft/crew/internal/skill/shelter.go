@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
@@ -32,8 +33,16 @@ const (
 	// does.
 	shelterWalkFails = 3
 	// shelterDrift is how far from the middle of its cell the unit may be
-	// pushed before it walks back.
-	shelterDrift = 0.7
+	// pushed before it walks back. The body is 0.6 wide, so from 0.2 off the
+	// middle it reaches into the next cell, and the server refuses a block
+	// placed where the unit's body is: a wall cell beside it goes unanswered.
+	shelterDrift = 0.2
+	// shelterCentred is how close to the middle of its cell the unit gets
+	// before it builds, inside the drift so that settling does not trip it.
+	shelterCentred = 0.12
+	// shelterCentreTicks bounds that settling; a unit that cannot get there
+	// builds from where it stands.
+	shelterCentreTicks = 60
 )
 
 type shelterPhase int
@@ -41,6 +50,7 @@ type shelterPhase int
 const (
 	shlPlan shelterPhase = iota
 	shlWalk
+	shlCentre
 	shlBuild
 	shlConfirm
 	shlWait
@@ -98,6 +108,7 @@ type Shelter struct {
 	drifted int
 
 	idx      int
+	centring int
 	waitMove int
 	retried  bool
 	// mine is the cells the shelter itself filled.
@@ -221,6 +232,8 @@ func (s *Shelter) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = s.plan(a, snap)
 		case shlWalk:
 			o = s.walk(a)
+		case shlCentre:
+			o = s.centreUp(a)
 		case shlBuild:
 			o = s.build(a, snap)
 		case shlConfirm:
@@ -499,9 +512,28 @@ func (s *Shelter) plan(a Actuator, snap belief.Snapshot) outcome {
 }
 
 func (s *Shelter) settleOn(sc shelterCell) outcome {
-	s.room, s.idx = sc, 0
-	s.nav, s.phase = nil, shlBuild
+	s.room, s.idx, s.centring = sc, 0, 0
+	s.nav, s.phase = nil, shlCentre
 	return next
+}
+
+// centreUp sneaks the unit onto the middle of its cell, slowly enough not to
+// overshoot, so that its body stays out of the cells the walls go in.
+func (s *Shelter) centreUp(a Actuator) outcome {
+	p := a.Pose()
+	c := centre(s.room.cell)
+	dx, dz := float64(c.X()-p.Feet.X()), float64(c.Z()-p.Feet.Z())
+	d := math.Hypot(dx, dz)
+	if d <= shelterCentred || s.centring >= shelterCentreTicks {
+		s.phase = shlBuild
+		return next
+	}
+	s.centring++
+	yaw, _ := lookAt(eyeOf(p.Feet), mgl32.Vec3{c.X(), eyeOf(p.Feet).Y(), c.Z()})
+	if err := a.Tick(act.Input{Forward: 1, Sneak: true, Yaw: yaw, Pitch: p.Pitch}); err != nil {
+		return outcome{st: Failed, err: tickError{err}}
+	}
+	return outcome{st: Running}
 }
 
 func (s *Shelter) walk(a Actuator) outcome {

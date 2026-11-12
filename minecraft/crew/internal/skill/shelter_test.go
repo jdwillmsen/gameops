@@ -2,9 +2,11 @@ package skill
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
@@ -335,6 +337,35 @@ func TestFullCubeRejectsShapesThatLeaveGaps(t *testing.T) {
 	for _, n := range []string{"stone", "dirt", "cobblestone", "oak_planks", "deepslate", "sea_lantern", "glass"} {
 		if !fullCube(n) {
 			t.Errorf("%s does not count as a full cube", n)
+		}
+	}
+}
+
+// The server refuses a block placed where the unit's own body is, and the body
+// is 0.6 wide, so a unit standing 0.2 or more off the middle of its cell
+// cannot wall the neighbour on that side. The shelter has to centre first.
+func TestShelterCentresTheUnitBeforeItBuilds(t *testing.T) {
+	for _, off := range []float32{0.43, -0.4} {
+		w := flatWorld(40)
+		r := newRig(t, w, feetAt(20, 1, 20))
+		r.give(0, idDirt, 32)
+		r.Actuator.Apply(&packet.MovePlayer{EntityRuntimeID: 1, Position: feetAt(20, 1, 20).Add(mgl32.Vec3{off, 1.62, -off}), OnGround: true})
+		worst := 0.0
+		sk := NewShelter(w, atNight(r, -1), 0)
+		for sk.(*Shelter).phase != shlWait {
+			clicks, f := r.placeClicks, r.Pose().Feet
+			if st, err := sk.Step(context.Background(), r); st != Running || err != nil {
+				t.Fatalf("offset %v: status %v, err %v while building", off, st, err)
+			}
+			if r.placeClicks > clicks {
+				worst = math.Max(worst, math.Max(math.Abs(float64(f.X())-20.5), math.Abs(float64(f.Z())-20.5)))
+			}
+			if r.ticks > 400 {
+				t.Fatalf("offset %v: still building after 400 inputs", off)
+			}
+		}
+		if r.placed == 0 || worst > 0.2 {
+			t.Errorf("offset %v: placed %d blocks, the unit stood %.2f off the middle for a placement (limit 0.2)", off, r.placed, worst)
 		}
 	}
 }
