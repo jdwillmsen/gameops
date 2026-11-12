@@ -396,3 +396,43 @@ func TestEquipRejectsWhatIsNotAPieceOrASlot(t *testing.T) {
 		}
 	}
 }
+
+func TestDropThrowsCountItemsOutOfAnInventorySlot(t *testing.T) {
+	a, s := opened(t)
+	id, err := a.Drop(beliefItem(7, "dirt", 40, 55), 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, ok := s.last(t).(*packet.ItemStackRequest)
+	if !ok || len(req.Requests) != 1 || req.Requests[0].RequestID != id || len(req.Requests[0].Actions) != 1 {
+		t.Fatalf("sent %#v", s.last(t))
+	}
+	d, ok := req.Requests[0].Actions[0].(*protocol.DropStackRequestAction)
+	if !ok {
+		t.Fatalf("action %T", req.Requests[0].Actions[0])
+	}
+	if d.Count != 25 || d.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory || d.Source.Slot != 7 || d.Source.StackNetworkID != 55 {
+		t.Errorf("drop = %+v", d)
+	}
+	id2, err := a.Drop(beliefItem(7, "dirt", 40, 55), 1)
+	if err != nil || id2 == id {
+		t.Errorf("second drop id %d err %v, want a fresh request", id2, err)
+	}
+}
+
+func TestDropRejectsWhatIsNotAStackOrAnAmount(t *testing.T) {
+	a, _ := opened(t)
+	for _, c := range []struct {
+		it    belief.Item
+		count int
+	}{
+		{beliefItem(40, "dirt", 10, 5), 1},
+		{beliefItem(-1, "dirt", 10, 5), 1},
+		{beliefItem(3, "dirt", 10, 5), 0},
+		{beliefItem(3, "dirt", 10, 5), 11},
+	} {
+		if _, err := a.Drop(c.it, c.count); err == nil {
+			t.Errorf("Drop(%+v, %d) accepted", c.it, c.count)
+		}
+	}
+}

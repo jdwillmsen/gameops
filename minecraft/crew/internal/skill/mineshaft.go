@@ -11,6 +11,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/inventory"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 )
 
@@ -792,13 +793,8 @@ func (m *MineShaft) mend() outcome {
 	return m.startBridge(up(stairSteps(m.spec)[i].stand, -1), shMend)
 }
 
-// hotbarTool finds a tool stack on the hotbar, the only place the server
-// lets the unit select from.
+// hotbarTool finds the best stack of a tool on the hotbar, the only place the
+// server lets the unit select from.
 func hotbarTool(s belief.Snapshot, tool string) (belief.Item, bool) {
-	for _, it := range s.Inventory {
-		if it.Slot < hotbarSlots && hasSuffix(it.Name, tool) {
-			return it, true
-		}
-	}
-	return belief.Item{}, false
+	return inventory.BestTool(s.Inventory, tool, true)
 }
