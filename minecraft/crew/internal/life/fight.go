@@ -41,6 +41,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	if l.warrior != nil {
 		return l.warriorEngaged(p, s, hurt)
 	}
+	l.baselineNote(s)
 
 	var (
 		best  belief.Entity
@@ -64,7 +65,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		case suspect:
 			limit = shooterRange
 		case k == flee:
-			limit = creeperRange
+			limit = l.creeperLimit(e)
 		}
 		if d > limit {
 			return
@@ -73,8 +74,8 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if l.ignore[e.ID] > l.tick && !meleeExempt {
 			return
 		}
-		if d < bestD {
-			best, bestD = e, d
+		if rank := l.threatRank(e, d); rank < bestD {
+			best, bestD = e, rank
 		}
 	})
 
@@ -85,6 +86,7 @@ func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 		if (low || kindOf(best.Type) == flee) && l.retreating < retreatLimit {
 			m = modeRetreat
 		}
+		m = l.baselineMode(p, s, best, m)
 	case l.attackerPlayer && l.tick < l.attackerUntil && l.tick < l.stepBackEnd():
 		if e, ok := l.ents.Get(l.attacker); ok && horizontal(p.Feet, e.Pos) <= attributionRange*2 {
 			best, m = e, modeStepBack
@@ -253,6 +255,7 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	e, ok := l.ents.Get(l.target.ID)
 	p := a.Pose()
 	if l.target.ID == 0 || !ok {
+		l.stowShield(a)
 		// Walking only goes forward, so a step back turns away from the
 		// player; the hold after it turns round to face them again.
 		if l.mode == modeStepBack && l.attackerPlayer {
@@ -261,6 +264,9 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 			}
 		}
 		return l.still(a)
+	}
+	if done, err := l.baselineFight(ctx, a, p, e, s); done {
+		return err
 	}
 	switch l.mode {
 	case modeRetreat:

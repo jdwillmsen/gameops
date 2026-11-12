@@ -671,3 +671,56 @@ func TestInventoryManagerSettingsAreRangeChecked(t *testing.T) {
 		}
 	}
 }
+
+func TestCombatBaselineDefaultsAndOverrides(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	want := Combat{Baseline: true, FleeHealth: 6, NightFleeHealth: 8, ResumeHealth: 12, MinArmour: 8, AvoidNight: true, Shield: true}
+	if err != nil || cfg.Combat != want {
+		t.Fatalf("defaults = %+v, err %v, want %+v", cfg.Combat, err, want)
+	}
+	t.Setenv("COMBAT_BASELINE", "false")
+	t.Setenv("COMBAT_FLEE_HEALTH", "4")
+	t.Setenv("COMBAT_NIGHT_FLEE_HEALTH", "10")
+	t.Setenv("COMBAT_RESUME_HEALTH", "16")
+	t.Setenv("COMBAT_MIN_ARMOUR", "0")
+	t.Setenv("COMBAT_AVOID_NIGHT", "false")
+	t.Setenv("COMBAT_SHIELD", "false")
+	cfg, err = Load()
+	want = Combat{Baseline: false, FleeHealth: 4, NightFleeHealth: 10, ResumeHealth: 16, MinArmour: 0}
+	if err != nil || cfg.Combat != want {
+		t.Fatalf("overrides = %+v, err %v, want %+v", cfg.Combat, err, want)
+	}
+}
+
+func TestCombatBaselineRejectsBadValues(t *testing.T) {
+	for _, tc := range []struct{ name, value, want string }{
+		{"COMBAT_FLEE_HEALTH", "0", "COMBAT_FLEE_HEALTH"},
+		{"COMBAT_FLEE_HEALTH", "abc", "COMBAT_FLEE_HEALTH"},
+		{"COMBAT_RESUME_HEALTH", "21", "COMBAT_RESUME_HEALTH"},
+		{"COMBAT_MIN_ARMOUR", "-1", "COMBAT_MIN_ARMOUR"},
+		{"COMBAT_SHIELD", "maybe", "COMBAT_SHIELD"},
+		{"COMBAT_AVOID_NIGHT", "2", "COMBAT_AVOID_NIGHT"},
+		// Below the daytime flee bar of 6.
+		{"COMBAT_NIGHT_FLEE_HEALTH", "5", "COMBAT_NIGHT_FLEE_HEALTH"},
+		// Not above the night bar of 8.
+		{"COMBAT_RESUME_HEALTH", "8", "COMBAT_RESUME_HEALTH"},
+	} {
+		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(tc.name, tc.value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want one naming %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCombatBaselineBarsAreNotCheckedWhenItIsOff(t *testing.T) {
+	setRequired(t)
+	t.Setenv("COMBAT_BASELINE", "false")
+	t.Setenv("COMBAT_RESUME_HEALTH", "3")
+	if _, err := Load(); err != nil {
+		t.Errorf("a switched-off baseline refused its bars: %v", err)
+	}
+}
