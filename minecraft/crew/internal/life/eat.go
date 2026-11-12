@@ -60,6 +60,10 @@ type eatState struct {
 	ticks       int
 	// blockedUntil is the tick before which no meal starts.
 	blockedUntil uint64
+	// appleUntil is the tick before which no emergency golden apple starts.
+	// It is apart from blockedUntil so that a meal cut short by a fight does
+	// not hold back the apple that fight calls for.
+	appleUntil uint64
 }
 
 // Tending says whether the unit has something to see to besides its task, and
@@ -121,16 +125,48 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	return l.tendKit(ctx, a, s)
 }
 
+// startMeal begins eating food, keeping the backoffs a meal leaves behind.
+func (l *Life) startMeal(food belief.Item, s belief.Snapshot) {
+	l.eat = eatState{active: true, slot: food.Slot, food: food, startHunger: s.Hunger, startCount: food.Count, blockedUntil: l.eat.blockedUntil, appleUntil: l.eat.appleUntil}
+	if s.HeldKnown && s.HeldSlot == food.Slot {
+		l.eat.phase = eatHold
+	}
+}
+
+// fightMeal says the unit eats an emergency golden apple instead of fighting
+// this tick, starting the meal if it is not under way. Any other meal is cut
+// short, as the fight demands. It reports whether the tick belongs to the
+// meal.
+func (l *Life) fightMeal(a skill.Actuator, s belief.Snapshot) bool {
+	if l.eat.active && l.eat.food.Name == goldenApple {
+		return true
+	}
+	apple, ok := l.emergencyMeal(s)
+	if !ok {
+		return false
+	}
+	l.stopEating(a, s)
+	// A fight may have left the shield raised or a bow half drawn, and a meal
+	// needs the hand.
+	l.stowShield(a)
+	l.cancelDraw(a)
+	l.startMeal(apple, s)
+	return true
+}
+
 // wantsMeal picks the food to eat now: a golden apple in an emergency, else
 // the best-fitting food once the unit is hungry enough.
 func (l *Life) wantsMeal(s belief.Snapshot) (belief.Item, bool) {
-	if !l.cfg.Eat || !s.HungerKnown || l.tick < l.eat.blockedUntil {
+	if !l.cfg.Eat {
 		return belief.Item{}, false
 	}
-	if l.emergency(s) {
-		if apple, ok := emergencyApple(s.Inventory); ok {
-			return apple, true
-		}
+	if apple, ok := l.emergencyMeal(s); ok && s.HungerKnown {
+		return apple, true
+	}
+	// A full unit cannot eat: the server refuses and the meal would only
+	// fail and repeat.
+	if !s.HungerKnown || l.tick < l.eat.blockedUntil || s.Hunger >= fullHunger {
+		return belief.Item{}, false
 	}
 	if s.Hunger > l.eatLimit(s, l.working) {
 		return belief.Item{}, false
@@ -197,10 +233,14 @@ func (l *Life) endMeal(ok bool, s belief.Snapshot) {
 		e.blockedUntil = l.tick + attackEvery
 		if e.food.Name == goldenApple {
 			e.blockedUntil = l.tick + gappleCooldown
+			e.appleUntil = l.tick + gappleCooldown
 		}
 	} else {
 		l.logEvent("eat_failed", f)
 		e.blockedUntil = l.tick + eatFailBackoff
+		if e.food.Name == goldenApple {
+			e.appleUntil = l.tick + eatFailBackoff
+		}
 	}
 	e.active = false
 }
@@ -210,6 +250,9 @@ func (l *Life) endMeal(ok bool, s belief.Snapshot) {
 func (l *Life) abandonMeal(a skill.Actuator, err error, in act.Input) error {
 	l.eat.active = false
 	l.eat.blockedUntil = l.tick + eatFailBackoff
+	if l.eat.food.Name == goldenApple {
+		l.eat.appleUntil = l.tick + eatFailBackoff
+	}
 	l.logEvent("eat_failed", map[string]any{"food": l.eat.food.Name, "error": err.Error()})
 	return a.Tick(in)
 }

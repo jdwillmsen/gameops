@@ -240,24 +240,35 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	var vitals [5]int
-	for i, v := range [...]struct {
-		name     string
-		def, min int
-	}{
-		{"RETREAT_HEALTH", 6, 1},
-		{"EMERGENCY_HEALTH", 4, 0},
-		{"REST_BELOW", 10, 0},
-		{"TASK_MIN_HEALTH", 12, 0},
-		{"TASK_MIN_FOOD", 16, 0},
-	} {
-		if vitals[i], err = intInRange(v.name, v.def, v.min, 20); err != nil {
-			return Config{}, err
-		}
-	}
 	role, err := roleSetting()
 	if err != nil {
 		return Config{}, err
+	}
+	// A warrior fights and recovers by its profile, so the reflex's resting,
+	// top-up meals and golden apple are off for it unless a variable turns
+	// them on. RETREAT_HEALTH has nothing to gate: a warrior has its own.
+	warriorDef := func(def int) int {
+		if role.IsWarrior() {
+			return 0
+		}
+		return def
+	}
+	var vitals [5]int
+	for i, v := range [...]struct {
+		name          string
+		def, min, max int
+	}{
+		{"RETREAT_HEALTH", 6, 1, 20},
+		{"EMERGENCY_HEALTH", warriorDef(4), 0, 20},
+		{"REST_BELOW", warriorDef(10), 0, 20},
+		{"TASK_MIN_HEALTH", warriorDef(12), 0, 20},
+		// A full unit cannot eat, so a top-up bar of 20 could only start
+		// meals the server refuses.
+		{"TASK_MIN_FOOD", warriorDef(16), 0, 19},
+	} {
+		if vitals[i], err = intInRange(v.name, v.def, v.min, v.max); err != nil {
+			return Config{}, err
+		}
 	}
 	lab, err := boolDefault("CREW_LAB", false)
 	if err != nil {
