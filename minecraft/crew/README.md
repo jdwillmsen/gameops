@@ -22,9 +22,9 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
 | `COMBAT_BASELINE` | `true` | A unit with no warrior role fights by the combat baseline (see Combat baseline); `false` leaves the plain reactive defence. The other `COMBAT_*` settings are read either way and ignored when it is off |
-| `COMBAT_FLEE_HEALTH` | `6` | Health (half-hearts, 1 to 18) at or under which the unit walks away from a fight |
+| `COMBAT_FLEE_HEALTH` | `6` | Health (half-hearts, 1 to 18) at or under which the unit walks away from a fight; `RETREAT_HEALTH` replaces it when higher |
 | `COMBAT_NIGHT_FLEE_HEALTH` | `8` | The same bar at dusk and night for an under-geared unit; at least `COMBAT_FLEE_HEALTH` |
-| `COMBAT_RESUME_HEALTH` | `12` | Health (2 to 20) a unit that fled must regain before it fights again; above the night bar |
+| `COMBAT_RESUME_HEALTH` | `12` | Health (2 to 18) a unit that fled must regain before it fights again; above the night bar and `RETREAT_HEALTH` |
 | `COMBAT_MIN_ARMOUR` | `8` | Armour rating (0 to 30; full leather 7, iron 15, diamond 20) under which, or with no sword or axe on the hotbar, the unit counts as under-geared |
 | `COMBAT_AVOID_NIGHT` | `true` | An under-geared unit gives ground at dusk and night instead of going out to meet a mob |
 | `COMBAT_SHIELD` | `true` | Raise a shield from the hotbar against arrows |
@@ -138,13 +138,15 @@ situation, so every row is a table test.
   *under-geared* when it holds no sword or axe, or its worn armour rates under
   `COMBAT_MIN_ARMOUR` (defence points per piece, pieces under 15% durability
   not counted).
-- **Flee and heal.** The unit walks away at `COMBAT_FLEE_HEALTH` or less, and
-  the flight is latched until health is back to `COMBAT_RESUME_HEALTH`, so it
-  does not turn round at the first heart. The default flee bar is the
-  reflex's own low-health bar; the resume bar is a health regeneration reaches
-  once the eat reflex has fed a hurt unit (it eats from food 17, regeneration
-  needs 18). A unit that cannot outrun the threat for 10 s, or has nowhere to
-  go, fights anyway. Logged as `combat_flee` and `combat_resume`.
+- **Flee and heal.** The unit walks away at `COMBAT_FLEE_HEALTH` or less (or
+  `RETREAT_HEALTH` when that is higher; the baseline and the reflex share the
+  one bar), and the flight is latched until health is back to
+  `COMBAT_RESUME_HEALTH`, so it does not turn round at the first heart. The
+  resume bar is capped at 18, a health regeneration reaches once the eat
+  reflex has fed a hurt unit (it eats from food 17, regeneration needs 18); a
+  unit that cannot regenerate at all is let go after three minutes, at a health
+  over the flee bar. A unit that cannot outrun the threat for 10 s, has
+  nowhere to go, or has a mob already within a blow, fights anyway. Logged as `combat_flee` and `combat_resume`.
 - **Night.** At dusk and night in the overworld an under-geared unit flees
   from `COMBAT_NIGHT_FLEE_HEALTH` and gives ground to any mob it has not yet
   come to blows with (an archer by breaking its line of sight). Cornered, or

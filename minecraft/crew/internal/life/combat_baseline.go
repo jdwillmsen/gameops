@@ -25,8 +25,9 @@ type CombatBaseline struct {
 	NightFleeHealth float32
 	// ResumeHealth is the health a unit that fled must regain before it
 	// fights again. It sits above both flee bars so a unit does not turn back
-	// at the first heart, and at or below the health natural regeneration
-	// reaches: eatBelowHurt feeds a hurt unit until food allows it.
+	// at the first heart, and at or below maxResumeHealth, which natural
+	// regeneration reaches: eatBelowHurt feeds a hurt unit until food allows
+	// it. A higher bar could keep a unit that cannot regenerate fleeing.
 	ResumeHealth float32
 	// MinArmour is the armour rating (armourRating) under which the unit
 	// counts as under-geared; a missing sword or axe counts too.
@@ -37,6 +38,15 @@ type CombatBaseline struct {
 	// Shield lets the unit raise a shield from the hotbar against arrows.
 	Shield bool
 }
+
+// maxResumeHealth is the highest resume bar accepted: the health a unit rests
+// up to, which regeneration with food of 18 reaches.
+const maxResumeHealth = restUntilHealth
+
+// fleeHoldTicks is the longest the health latch holds a unit that has not
+// dropped back under its flee bar, for a unit that cannot regenerate at all
+// (little food, regeneration off). Three minutes.
+const fleeHoldTicks = 20 * 60 * 3
 
 // DefaultCombatBaseline is the baseline the unit runs with when nothing
 // overrides it.
@@ -62,8 +72,8 @@ func (c CombatBaseline) Validate() error {
 		return fmt.Errorf("night flee health %v is below flee health %v", c.NightFleeHealth, c.FleeHealth)
 	case c.ResumeHealth <= c.NightFleeHealth:
 		return fmt.Errorf("resume health %v must exceed night flee health %v", c.ResumeHealth, c.NightFleeHealth)
-	case c.ResumeHealth > fullHealth:
-		return fmt.Errorf("resume health %v is above full health %d", c.ResumeHealth, fullHealth)
+	case c.ResumeHealth > maxResumeHealth:
+		return fmt.Errorf("resume health %v is above %d, the health a unit regenerates to", c.ResumeHealth, maxResumeHealth)
 	case c.MinArmour < 0:
 		return errors.New("min armour is negative")
 	}
@@ -145,8 +155,8 @@ func (c CombatBaseline) avoids(in situation) bool { return c.AvoidNight && in.Ni
 
 // decide is the baseline's whole rulebook.
 //
-// A fleeing unit runs from everything it could outrun; one that is cornered
-// fights whatever it can safely hit. A fused or charged creeper is never hit,
+// A fleeing unit runs from everything it could outrun; one that is cornered,
+// or that has a mob within a blow, fights whatever it can safely hit. A fused or charged creeper is never hit,
 // cornered or not. An archer is closed on in a zigzag behind a shield, or its
 // line of sight is broken when the unit is not fit or equipped to win the
 // duel.
@@ -157,7 +167,9 @@ func (c CombatBaseline) decide(in situation) stance {
 	case threatArcher:
 		return c.decideArcher(in)
 	}
-	if in.Fleeing && !in.Cornered {
+	// A mob already within a blow is not outrun, so turning a back on it only
+	// gives it free hits: a fleeing unit fights it, as at night.
+	if in.Fleeing && !in.Cornered && !in.InReach {
 		return stanceRetreat
 	}
 	if c.avoids(in) && !in.InReach && !in.Cornered {

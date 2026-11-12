@@ -16,7 +16,7 @@ func TestDecideTable(t *testing.T) {
 		// Ordinary mobs.
 		{"melee healthy by day", situation{Dist: 4}, stanceFight},
 		{"melee while fleeing", situation{Dist: 4, Fleeing: true}, stanceRetreat},
-		{"melee while fleeing in reach", situation{Dist: 1, InReach: true, Fleeing: true}, stanceRetreat},
+		{"melee while fleeing in reach: cannot outrun it, fights", situation{Dist: 1, InReach: true, Fleeing: true}, stanceFight},
 		{"melee fleeing but cornered", situation{Dist: 1, InReach: true, Fleeing: true, Cornered: true}, stanceFight},
 		{"night under-geared, mob not yet in reach", situation{Dist: 4, Night: true, Under: true}, stanceRetreat},
 		{"night under-geared, mob in reach", situation{Dist: 1, InReach: true, Night: true, Under: true}, stanceFight},
@@ -118,7 +118,7 @@ func TestDefaultBarsAgreeWithTheHealthReflex(t *testing.T) {
 	if c.FleeHealth != lowHealth {
 		t.Errorf("flee bar %v, the reflex's low health is %d", c.FleeHealth, lowHealth)
 	}
-	if !(c.FleeHealth <= c.NightFleeHealth && c.NightFleeHealth < c.ResumeHealth && c.ResumeHealth <= fullHealth) {
+	if !(c.FleeHealth <= c.NightFleeHealth && c.NightFleeHealth < c.ResumeHealth && c.ResumeHealth <= maxResumeHealth) {
 		t.Errorf("bars out of order: %+v", c)
 	}
 	// Regeneration needs food of 18; the reflex eats a hurt unit from 17, so
@@ -141,7 +141,9 @@ func TestValidate(t *testing.T) {
 		{"night bar equals day bar", func(c *CombatBaseline) { c.NightFleeHealth = c.FleeHealth }, true},
 		{"resume at night bar", func(c *CombatBaseline) { c.ResumeHealth = c.NightFleeHealth }, false},
 		{"resume above full", func(c *CombatBaseline) { c.ResumeHealth = fullHealth + 1 }, false},
-		{"resume at full", func(c *CombatBaseline) { c.ResumeHealth = fullHealth }, true},
+		{"resume at full: regeneration may never get there", func(c *CombatBaseline) { c.ResumeHealth = fullHealth }, false},
+		{"resume above what regeneration reaches", func(c *CombatBaseline) { c.ResumeHealth = maxResumeHealth + 1 }, false},
+		{"resume at what regeneration reaches", func(c *CombatBaseline) { c.ResumeHealth = maxResumeHealth }, true},
 		{"negative armour bar", func(c *CombatBaseline) { c.MinArmour = -1 }, false},
 	}
 	for _, tc := range cases {
