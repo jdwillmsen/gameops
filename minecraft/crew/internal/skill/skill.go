@@ -45,6 +45,10 @@ type Actuator interface {
 	// while a stack it needs is still travelling to the hotbar.
 	PlaceBlock(target protocol.BlockPos, item string) error
 	OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
+	// InteractBlock right-clicks any block that answers a use.
+	InteractBlock(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error
+	// StopSleeping leaves the bed the unit is in.
+	StopSleeping() error
 	Container() (open bool, windowID byte, pos protocol.BlockPos)
 	ContainerContent() []protocol.ItemInstance
 	ItemTable() map[string]int32

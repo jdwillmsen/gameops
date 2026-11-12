@@ -204,6 +204,12 @@ func (a *Actuator) ReleaseItem(slot int, held belief.Item) error {
 // the side toward the unit, and blockRuntimeID the block's hash from its
 // UpdateBlock; the server compares both with its own world.
 func (a *Actuator) OpenChest(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error {
+	return a.InteractBlock(pos, face, hotbar, held, blockRuntimeID)
+}
+
+// InteractBlock right-clicks the block at pos with the held stack, for any
+// block that answers a use: a chest opens, a bed sets the respawn point.
+func (a *Actuator) InteractBlock(pos protocol.BlockPos, face int32, hotbar int, held belief.Item, blockRuntimeID uint32) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	inst, err := a.instance(held)
@@ -223,6 +229,17 @@ func (a *Actuator) OpenChest(pos protocol.BlockPos, face int32, hotbar int, held
 		BlockRuntimeID:   blockRuntimeID,
 		ClientPrediction: protocol.ClientPredictionSuccess,
 	}})
+}
+
+// StopSleeping gets the unit out of a bed; the server otherwise only wakes
+// it at dawn.
+func (a *Actuator) StopSleeping() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.w.WritePacket(&packet.PlayerAction{
+		EntityRuntimeID: a.runtimeID,
+		ActionType:      protocol.PlayerActionStopSleeping,
+	})
 }
 
 // Container reports the window opened last. The window ID differs on every
