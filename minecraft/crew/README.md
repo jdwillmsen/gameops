@@ -298,14 +298,15 @@ long task is not stopped by a full inventory. Every stack falls in one class:
 | Junk | rotten flesh, spider eye, poisonous potato, pufferfish | all dropped |
 | Filler | dirt, cobblestone, cobbled deepslate, gravel, andesite, diorite, granite, tuff, netherrack | `INV_KEEP_FILLER` of each kept, the rest dropped |
 | Building blocks | planks, logs, stone, stone bricks, glass, sand, sandstone, bricks | `INV_KEEP_BLOCKS` of each kept, the rest stored |
-| Food | everything the unit eats | `INV_KEEP_FOOD` kept, richest first; the poorest is stored |
-| Tools | pickaxe, axe, shovel, hoe, sword | the best of each kind (material, then durability) plus `INV_SPARE_TOOLS`; the rest stored |
+| Food | everything the unit eats | `INV_KEEP_FOOD` kept; the poorest is stored, from the main inventory only (a unit eats from its hotbar) |
+| Tools | pickaxe, axe, shovel, hoe, sword | the best of each kind (material, then durability) plus `INV_SPARE_TOOLS`; the rest stored, but never a hotbar stack, and a name with a stack that stays (two iron axes, one kept) is not stored |
 | Armour carried | helmet, chestplate, leggings, boots | the best of each piece kept; worn pieces are never touched |
 | Protected | saplings, torches, beds, crafting table, chest, furnace, shield, bow, arrows, buckets, shears, flint and steel, fishing rod, ender pearls, totem, elytra | never stored or dropped |
 | Anything else | ores, ingots, gems, raw meat, ... | stored |
 
-Dropping is one stack request at a time and happens at once, even with a
-task running; the server's answer updates the pack. Dropped stacks can be
+Dropping is one stack request at a time; the server's answer updates the pack.
+While a task runs only junk is dropped and a trip waits for a full pack, since
+the task may be collecting the very filler or loot the rules would shed. Dropped stacks can be
 picked up again by a unit that stands on them. An item dropped again within
 a minute of an earlier cycle is spaced out by a back-off that doubles,
 and after two such repeats it goes to the chest at the front of the next trip,
@@ -317,7 +318,7 @@ to store and the chest is within `INV_REACH`. It interrupts a running task,
 which resumes afterwards, since a full pack would stop it anyway. The trip
 deposits up to six items, those freeing the most slots first, and stops once
 `INV_FULL_SLOTS` plus eight slots are free. A fight cuts a trip short and it
-starts again after ten seconds; a failed trip (`inv_trip_failed`) backs off for
+starts again after ten seconds; a failed trip, or one whose deposits could not start at all, as in the Nether (`inv_trip_failed`), backs off for
 three minutes, doubling per failure in a row up to 15 minutes; a trip that leaves the pack
 still full logs `inv_still_full` and waits one minute (the chest is probably
 full). A meal waits while a trip has the chest open. Other logs are

@@ -75,7 +75,7 @@ func TestPlan(t *testing.T) {
 		},
 		{
 			name:     "food beyond the reserve, poorest first",
-			inv:      []belief.Item{it(0, "cooked_beef", 8), it(1, "bread", 10), it(2, "carrot", 6)},
+			inv:      []belief.Item{it(10, "cooked_beef", 8), it(11, "bread", 10), it(12, "carrot", 6)},
 			deposits: []Move{{"carrot", 6}, {"bread", 8}},
 		},
 		{
@@ -84,18 +84,26 @@ func TestPlan(t *testing.T) {
 		},
 		{
 			name:     "spare tools: best plus one spare stay",
-			inv:      []belief.Item{it(0, "wooden_pickaxe", 1), it(1, "iron_pickaxe", 1), it(2, "stone_pickaxe", 1), it(3, "diamond_pickaxe", 1)},
+			inv:      []belief.Item{it(10, "wooden_pickaxe", 1), it(11, "iron_pickaxe", 1), it(12, "stone_pickaxe", 1), it(13, "diamond_pickaxe", 1)},
 			deposits: []Move{{"stone_pickaxe", 1}, {"wooden_pickaxe", 1}},
 		},
 		{
 			name:     "armour: only the best carried piece stays",
-			inv:      []belief.Item{it(0, "iron_helmet", 1), it(1, "leather_helmet", 1), it(2, "iron_boots", 1)},
+			inv:      []belief.Item{it(10, "iron_helmet", 1), it(11, "leather_helmet", 1), it(12, "iron_boots", 1)},
 			deposits: []Move{{"leather_helmet", 1}},
 		},
 		{
-			name:     "equal tools: the more worn one is the spare that goes",
-			inv:      []belief.Item{worn(0, "iron_axe", 20), worn(1, "iron_axe", 90), worn(2, "iron_axe", 55)},
-			deposits: []Move{{"iron_axe", 1}},
+			name: "a name with a stack that stays is not stored by name",
+			inv:  []belief.Item{worn(10, "iron_axe", 20), worn(11, "iron_axe", 90), worn(12, "iron_axe", 55)},
+		},
+		{
+			name:     "hotbar food is never stored even when it is the poorest",
+			inv:      []belief.Item{it(1, "bread", 10), it(12, "cooked_beef", 30)},
+			deposits: []Move{{"cooked_beef", 30}},
+		},
+		{
+			name: "a hotbar tool is never stored",
+			inv:  []belief.Item{it(0, "wooden_sword", 1), it(12, "iron_sword", 1), it(13, "diamond_sword", 1)},
 		},
 	}
 	for _, c := range cases {

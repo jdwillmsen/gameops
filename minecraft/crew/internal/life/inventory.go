@@ -85,6 +85,10 @@ type invState struct {
 	visit     skill.Skill
 	current   inventory.Move
 	startedAt uint64
+	// started counts the deposits of this trip that got going, and skipErr is
+	// why the last one that could not was skipped.
+	started int
+	skipErr error
 	// blockedUntil is the tick before which no trip starts.
 	blockedUntil uint64
 	fails        int
@@ -102,9 +106,10 @@ type invState struct {
 func (s *invState) busy() bool { return s.pending || s.visit != nil || len(s.queue) > 0 }
 
 // invWants says the unit has something to drop or store. Dropping is a single
-// request and happens at once, task or not; a trip pauses a running task, as a
-// full inventory would stop it anyway.
-func (l *Life) invWants(s belief.Snapshot) bool {
+// request, but a running task may be collecting the very filler or loot the
+// policy would shed, so while one runs only junk is dropped and a trip waits
+// for a full pack, which would stop the task anyway.
+func (l *Life) invWants(s belief.Snapshot, working bool) bool {
 	c := l.cfg.Inventory
 	if c == nil || !s.Spawned || s.Dead || s.Creative {
 		return false
@@ -115,7 +120,7 @@ func (l *Life) invWants(s belief.Snapshot) bool {
 	}
 	plan := c.Policy.Plan(s.Inventory)
 	plan = l.routeLitter(plan)
-	if m, ok := l.nextDrop(plan); ok {
+	if m, ok := l.nextDrop(plan, working); ok {
 		st.next, st.move = invDrop, m
 		return true
 	}
@@ -148,9 +153,12 @@ func (l *Life) routeLitter(plan inventory.Plan) inventory.Plan {
 	return plan
 }
 
-func (l *Life) nextDrop(plan inventory.Plan) (inventory.Move, bool) {
+func (l *Life) nextDrop(plan inventory.Plan, working bool) (inventory.Move, bool) {
 	st := &l.inv
 	for _, m := range plan.Drops {
+		if working && !inventory.IsJunk(m.Name) {
+			continue
+		}
 		if l.tick < st.dropHold[m.Name] || (l.tick < st.dropBlock[m.Name] && l.tick-st.dropAt[m.Name] > invDropCycleGap) {
 			continue
 		}
@@ -187,7 +195,7 @@ func (l *Life) tendInventory(ctx context.Context, a skill.Actuator, s belief.Sna
 		return l.dropStack(a, s)
 	case next == invDeposit:
 		st.queue = l.cfg.Inventory.Policy.Trip(l.routeLitter(l.cfg.Inventory.Policy.Plan(s.Inventory)))
-		st.startedAt = l.tick
+		st.startedAt, st.started, st.skipErr = l.tick, 0, nil
 		return l.stepTrip(ctx, a, s)
 	}
 	return l.still(a)
@@ -261,17 +269,24 @@ func (l *Life) stepTrip(ctx context.Context, a skill.Actuator, s belief.Snapshot
 	for {
 		if st.visit == nil {
 			if len(st.queue) == 0 {
-				l.endTrip(nil)
+				if st.started == 0 && st.skipErr != nil {
+					l.endTrip(st.skipErr)
+				} else {
+					l.endTrip(nil)
+				}
 				return l.still(a)
 			}
 			m := st.queue[0]
 			st.queue = st.queue[1:]
 			sk := l.newDeposit(m)
-			if sk.Ready(s) != nil {
-				// What was planned is no longer carried; skip it.
+			if err := sk.Ready(s); err != nil {
+				// What was planned is no longer carried, or the unit is not
+				// where a chest can be used; skip it.
+				st.skipErr = err
 				continue
 			}
 			st.visit, st.current = sk, m
+			st.started++
 		}
 		if l.tick-st.startedAt > invTripLimit {
 			l.abortTrip(a)

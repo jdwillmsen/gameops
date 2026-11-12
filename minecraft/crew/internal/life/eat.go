@@ -87,7 +87,7 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	if l.kitWants(s, working) {
 		return true
 	}
-	return l.invWants(s)
+	return l.invWants(s, working)
 }
 
 // Tend sends exactly one input for a tick Tending claimed.

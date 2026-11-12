@@ -143,6 +143,9 @@ func FoodPoints(name string) int { return foods[name] }
 // Foods lists the food names for tests.
 func Foods() map[string]int { return foods }
 
+// IsJunk says an item is dropped whatever the unit is doing.
+func IsJunk(name string) bool { return junkNames[name] }
+
 func classify(name string) class {
 	switch {
 	case junkNames[name]:
@@ -311,14 +314,18 @@ func (pol Policy) Plan(inv []belief.Item) Plan {
 	return plan
 }
 
-// surplusFood is the food beyond what the policy keeps, the least rich first.
+// surplusFood is the food beyond what the policy keeps, the poorest first.
+// Only stacks in the main inventory are stored: a unit eats from its hotbar,
+// and nothing moves food there.
 func (pol Policy) surplusFood(inv []belief.Item) []Move {
 	var stacks []belief.Item
 	total := 0
 	for _, it := range inv {
 		if foods[it.Name] > 0 && it.Count > 0 {
-			stacks = append(stacks, it)
 			total += it.Count
+			if it.Slot >= HotbarSlots {
+				stacks = append(stacks, it)
+			}
 		}
 	}
 	excess := total - pol.KeepFood
@@ -351,8 +358,14 @@ func (pol Policy) surplusFood(inv []belief.Item) []Move {
 // surplusGear is every tool beyond the best of its kind and its spares, and
 // every armour piece beyond the best of its slot. A worn piece is not in the
 // inventory, so a carried one is the unit's spare or a replacement.
+//
+// A deposit takes an item by name, so a name is stored only when every stack
+// of it is surplus (two iron axes, one kept, stay), and a hotbar stack is never
+// stored: the unit holds what is on the hotbar and nothing moves a tool there.
 func (pol Policy) surplusGear(inv []belief.Item) []Move {
-	var out []Move
+	surplus := map[string]int{}
+	kept := map[string]bool{}
+	var order []string
 	group := func(keep int, key func(string) string) {
 		by := map[string][]belief.Item{}
 		var keys []string
@@ -370,26 +383,25 @@ func (pol Policy) surplusGear(inv []belief.Item) []Move {
 		for _, k := range keys {
 			items := by[k]
 			slices.SortFunc(items, better)
-			for _, it := range items[min(keep, len(items)):] {
-				out = append(out, Move{it.Name, it.Count})
+			for i, it := range items {
+				if i < min(keep, len(items)) || it.Slot < HotbarSlots {
+					kept[it.Name] = true
+					continue
+				}
+				if _, ok := surplus[it.Name]; !ok {
+					order = append(order, it.Name)
+				}
+				surplus[it.Name] += it.Count
 			}
 		}
 	}
 	group(1+max(0, pol.SpareTools), ToolKind)
 	group(1, ArmourPiece)
-	// The same name can appear twice (two iron axes); merge so a move names
-	// each item once.
-	merged := map[string]int{}
-	var order []string
-	for _, m := range out {
-		if _, ok := merged[m.Name]; !ok {
-			order = append(order, m.Name)
-		}
-		merged[m.Name] += m.Count
-	}
-	out = out[:0]
+	var out []Move
 	for _, name := range order {
-		out = append(out, Move{name, merged[name]})
+		if !kept[name] {
+			out = append(out, Move{name, surplus[name]})
+		}
 	}
 	return out
 }
