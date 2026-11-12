@@ -105,6 +105,10 @@ type options struct {
 	groups []group
 	hotbar bool
 	guard  *Guard
+	// anywhere names the items a hotbar-bound withdraw may put in any slot,
+	// because a unit does not need to hold them to use them.
+	anywhere map[string]bool
+	wear     bool
 }
 
 // group is a budget of n items to take from any of names, best first.
@@ -127,6 +131,32 @@ func OneOf(n int, names ...string) Option {
 // IntoHotbar keeps a withdraw's items on the hotbar, the only stacks a unit
 // can hold, instead of anywhere in the inventory.
 func IntoHotbar() Option { return func(o *options) { o.hotbar = true } }
+
+// Anywhere lets a withdraw that keeps to the hotbar put these items in any
+// inventory slot: armour and spare tools would only crowd the hotbar out.
+func Anywhere(names ...string) Option {
+	return func(o *options) {
+		if o.anywhere == nil {
+			o.anywhere = map[string]bool{}
+		}
+		for _, n := range names {
+			o.anywhere[n] = true
+		}
+	}
+}
+
+// Wear makes a withdraw put on the armour it took, while the chest is still
+// open, when the actuator can.
+func Wear() Option { return func(o *options) { o.wear = true } }
+
+// Equipper is implemented by an actuator that can put a piece of armour on.
+// It is separate from Actuator so a skill that never wears anything needs no
+// stand-in for it.
+type Equipper interface {
+	// Equip moves one inventory stack onto an empty armour slot (0 helmet, 1
+	// chest, 2 legs, 3 boots) and returns the request to poll with Response.
+	Equip(from belief.Item, armourSlot int) (int32, error)
+}
 
 var errOverworld = errors.New("only the overworld is supported")
 

@@ -348,3 +348,85 @@ func TestHaulReportsEveryChestItClosedNotOnlyTheDestination(t *testing.T) {
 		t.Errorf("source A seen after the haul emptied it still holds %v", first.Items)
 	}
 }
+
+var (
+	helmets     = []string{"diamond_helmet", "iron_helmet"}
+	chestplates = []string{"diamond_chestplate", "iron_chestplate"}
+	bootsBest   = []string{"diamond_boots", "iron_boots"}
+	gearNames   = []string{"diamond_helmet", "iron_helmet", "diamond_chestplate", "iron_chestplate", "diamond_boots", "iron_boots", "iron_pickaxe"}
+)
+
+func gearChest(r *rig) {
+	c := r.chestFor(srcA)
+	c[0] = slotStack{400, 1, 700}  // iron helmet
+	c[1] = slotStack{404, 1, 701}  // diamond chestplate
+	c[2] = slotStack{403, 1, 702}  // iron boots
+	c[3] = slotStack{410, 1, 703}  // iron pickaxe
+	c[4] = slotStack{402, 1, 704}  // iron leggings, not asked for
+	c[5] = slotStack{401, 1, 705}  // iron chestplate, worse than the diamond one
+	c[6] = slotStack{340, 64, 706} // bread
+}
+
+func TestWithdrawWearsTheArmourItTookAndKeepsTheHotbarFree(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	gearChest(r)
+	for slot := 0; slot < 8; slot++ {
+		r.give(slot, idCobblestone, 64)
+	}
+	s := NewWithdrawChest(w, r.self, srcA, nil,
+		IntoHotbar(), Anywhere(gearNames...), Wear(),
+		OneOf(1, helmets...), OneOf(1, chestplates...), OneOf(1, bootsBest...), OneOf(1, "iron_pickaxe"), OneOf(4, "bread"))
+	if st, err := r.run(s, 1500); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	snap := r.self()
+	got := map[string]string{}
+	for _, p := range snap.Armour {
+		got[p.Slot] = p.Name
+	}
+	if got["helmet"] != "iron_helmet" || got["chest"] != "diamond_chestplate" || got["boots"] != "iron_boots" || len(got) != 3 {
+		t.Errorf("worn = %v", got)
+	}
+	if r.have("iron_helmet")+r.have("diamond_chestplate")+r.have("iron_boots") != 0 {
+		t.Error("a worn piece is also in the inventory")
+	}
+	if r.have("iron_pickaxe") != 1 || r.have("bread") != 4 || r.have("iron_leggings") != 0 || r.have("iron_chestplate") != 0 {
+		t.Errorf("pickaxe %d bread %d leggings %d spare chestplate %d", r.have("iron_pickaxe"), r.have("bread"), r.have("iron_leggings"), r.have("iron_chestplate"))
+	}
+	for _, it := range snap.Inventory {
+		if it.Name == "iron_pickaxe" && it.Slot < hotbarSlots {
+			t.Errorf("the pickaxe took hotbar slot %d, which bread needed", it.Slot)
+		}
+	}
+}
+
+func TestWithdrawLeavesAPieceTheServerWillNotWearInTheInventory(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	gearChest(r)
+	r.refuseWear = true
+	s := NewWithdrawChest(w, r.self, srcA, nil, IntoHotbar(), Anywhere(gearNames...), Wear(), OneOf(1, helmets...))
+	if st, err := r.run(s, 1500); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if len(r.self().Armour) != 0 || r.have("iron_helmet") != 1 {
+		t.Errorf("armour %+v, helmets held %d", r.self().Armour, r.have("iron_helmet"))
+	}
+	if open, _, _ := r.Container(); open {
+		t.Error("the chest was left open")
+	}
+}
+
+func TestWithdrawWithoutWearOnlyCarriesThePiece(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	gearChest(r)
+	s := NewWithdrawChest(w, r.self, srcA, nil, IntoHotbar(), Anywhere(gearNames...), OneOf(1, helmets...))
+	if st, err := r.run(s, 1500); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if len(r.self().Armour) != 0 || r.have("iron_helmet") != 1 {
+		t.Errorf("armour %+v, helmets held %d", r.self().Armour, r.have("iron_helmet"))
+	}
+}
