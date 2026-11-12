@@ -1,10 +1,13 @@
 package skill
 
 import (
+	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
+	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
@@ -16,9 +19,15 @@ const (
 	nightTicks = 16000
 )
 
+// serverBedReach is how far, horizontally, from a bed's block centre the live
+// Bedrock server still answers a tap on it: measured on a lab server, a tap
+// from 2.6 blocks set the spawn point and one from 2.65 got no answer at all.
+const serverBedReach = 2.6
+
 // bedRig is a flat world with a red bed at bedPos and a server that answers a
 // tap on it as Bedrock does: a player SetSpawnPosition, and at night the
-// sleeping flag.
+// sleeping flag. Like the live server it ignores a tap from beyond
+// serverBedReach.
 type bedRig struct {
 	*rig
 	taps     int
@@ -26,20 +35,31 @@ type bedRig struct {
 	// monsters makes the server refuse sleep after setting the point.
 	monsters bool
 	// silent makes it ignore the tap altogether.
-	silent  bool
-	wakeAt  int
-	stopped int
+	silent bool
+	// outOfReach counts taps the server ignored for their distance.
+	outOfReach int
+	wakeAt     int
+	stopped    int
 }
 
 func newBedRig(t *testing.T, worldTime int64) *bedRig {
 	t.Helper()
+	return newBedRigAt(t, worldTime, feetAt(1, 1, 2))
+}
+
+func newBedRigAt(t *testing.T, worldTime int64, start mgl32.Vec3) *bedRig {
+	t.Helper()
 	w := flatWorld(12)
 	w[bedPos] = "red_bed"
-	br := &bedRig{rig: newRig(t, w, feetAt(1, 1, 2))}
+	br := &bedRig{rig: newRig(t, w, start)}
 	br.tracker.SetClock(worldTime, false, int32(worldTime))
 	br.onBed = func(u *protocol.UseItemTransactionData) {
 		br.taps++
 		if hash, _ := br.world.BlockHash(u.BlockPosition); u.BlockRuntimeID != hash || br.silent {
+			return
+		}
+		if math.Hypot(float64(u.Position.X()-(float32(u.BlockPosition.X())+0.5)), float64(u.Position.Z()-(float32(u.BlockPosition.Z())+0.5))) > serverBedReach {
+			br.outOfReach++
 			return
 		}
 		br.send(&packet.SetSpawnPosition{SpawnType: packet.SpawnTypePlayer, Position: u.BlockPosition})
@@ -91,6 +111,9 @@ func TestUseBedWalksToTheBedAndSetsTheSpawnByDay(t *testing.T) {
 		t.Error("the unit sleeps by day")
 	}
 	near(t, br.rig, bedPos, 5)
+	if br.outOfReach != 0 {
+		t.Errorf("%d taps went out from beyond the server's reach", br.outOfReach)
+	}
 	if len(log.lines) != 1 || log.lines[0].event != "respawn_point_set" {
 		t.Fatalf("log = %+v", log.lines)
 	}
@@ -321,5 +344,43 @@ func TestUseBedFailsWhenTheServerKeepsTheUnitInBed(t *testing.T) {
 	st, err := br.run(sk, maxSleepTicks+200)
 	if st != Failed || !errors.Is(err, errBedNotWoken) {
 		t.Fatalf("status %v, err %v", st, err)
+	}
+}
+
+// A unit already within placing reach of the bed, but past where the server
+// answers a tap, has to come closer before it taps.
+func TestUseBedStepsCloserWhenInPlacingReachButOutOfTapRange(t *testing.T) {
+	br := newBedRigAt(t, dayTicks, feetAt(4, 1, 7))
+	st, err := br.run(br.skill(nil), 600)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if br.outOfReach != 0 || br.taps != 1 {
+		t.Errorf("%d taps, %d of them out of reach", br.taps, br.outOfReach)
+	}
+}
+
+// A visit resumed after a fight starts with the walk, so a unit the fight
+// pulled out of range comes back before it taps.
+func TestUseBedWalksBackIntoTapRangeWhenResumed(t *testing.T) {
+	br := newBedRigAt(t, dayTicks, feetAt(6, 1, 7))
+	sk := br.skill(nil)
+	// The unit stands in range, so the first step is the tap going out.
+	if st, err := sk.Step(context.Background(), br); st != Running || err != nil {
+		t.Fatalf("first step %v, %v", st, err)
+	}
+	if br.taps != 1 {
+		t.Fatalf("%d taps after the first step, want 1", br.taps)
+	}
+	// The fight pulled the unit far off.
+	sk.(Resumer).Resume()
+	br.send(&packet.MovePlayer{EntityRuntimeID: 1, Position: feetAt(3, 1, 7).Add(mgl32.Vec3{0, 1.62, 0}), OnGround: true})
+	before := br.taps
+	st, err := br.run(sk, 600)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if br.outOfReach != 0 {
+		t.Errorf("%d taps went out from beyond the server's reach (%d taps in all, %d before)", br.outOfReach, br.taps, before)
 	}
 }
