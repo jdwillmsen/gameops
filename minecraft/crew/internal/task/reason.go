@@ -58,7 +58,8 @@ type reasonRule struct {
 // Patterns tolerate embedded numbers (status 6, after 3 breaks) because the
 // skills format them into the string.
 var reasonRules = []reasonRule{
-	{regexp.MustCompile(`^no [a-z_ ]+ in inventory$`), ReasonMissingTool},
+	{regexp.MustCompile(`^no [a-z_ ]+ in inventory$|^not enough blocks to shelter`), ReasonMissingTool},
+	{regexp.MustCompile(`^the shelter was breached$`), ReasonUnsafeNearby},
 	{regexp.MustCompile(`trapped with no walking path|climbing out of a trap|still no path after climbing|no way down from the pillar`), ReasonTrapClimbFailed},
 	{regexp.MustCompile(`no pickup after \d+ breaks`), ReasonNoPickup},
 	{regexp.MustCompile(`server rejected the (deposit|withdrawal|source stack)`), ReasonDepositRejected},
