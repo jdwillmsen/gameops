@@ -25,6 +25,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CREW_ROLE` | unset | The unit's role: a warrior (`vanguard`, `striker`, `ranger`; see Squads and warriors) or a builder (`mender`, `builder`; see Mender and builder roles); anything else is refused, unset leaves the reactive defence in charge |
 | `CREW_LAB` | `false` | Must be `true` for a `mender` or `builder`, which refuse to start without it; the lab chart or compose sets it, the live server's never does |
 | `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
+| `CREW_UNIT_ROLE` | unset | The unit's job, which picks its skin outfit: `miner`, `chopper` (the lumberjack), `hauler`, `shaft`, `mender` or `builder`. Case-insensitive; unset or unknown keeps the plain name-coloured skin. A warrior's outfit follows `CREW_ROLE` instead. Same name and role always give the same skin; see `docs/crew-skins.md` |
+| `SKIN_DIR` | unset | Directory of hand-painted 64x64 PNG skins named `<MC_USERNAME>.png`; a valid file there replaces the generated outfit on the unit's next join, an invalid one is logged and ignored. Unset turns overrides off |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |
 | `KIT_REACH` | `96` | How far from the kit chest, in blocks, a unit still sets out for it (8 to 1000). Raise it only where the chest's chunks stay loaded the whole way |
