@@ -581,15 +581,17 @@ func TestKitReachGearAndDropRecoveryHaveSafeDefaults(t *testing.T) {
 	if err != nil || cfg.KitReach != 96 || cfg.KitGear || cfg.RecoverDrops {
 		t.Fatalf("defaults = reach %d gear %v recover %v, err %v", cfg.KitReach, cfg.KitGear, cfg.RecoverDrops, err)
 	}
-	t.Setenv("KIT_REACH", "200")
+	t.Setenv("KIT_REACH", "150")
 	t.Setenv("KIT_GEAR", "true")
 	t.Setenv("RECOVER_DROPS", "true")
 	cfg, err = Load()
-	if err != nil || cfg.KitReach != 200 || !cfg.KitGear || !cfg.RecoverDrops {
+	if err != nil || cfg.KitReach != 150 || !cfg.KitGear || !cfg.RecoverDrops {
 		t.Fatalf("set = reach %d gear %v recover %v, err %v", cfg.KitReach, cfg.KitGear, cfg.RecoverDrops, err)
 	}
-	t.Setenv("KIT_REACH", "0")
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "KIT_REACH") {
-		t.Errorf("KIT_REACH=0: err = %v", err)
+	for _, v := range []string{"0", "161"} {
+		t.Setenv("KIT_REACH", v)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "KIT_REACH") {
+			t.Errorf("KIT_REACH=%s: err = %v", v, err)
+		}
 	}
 }

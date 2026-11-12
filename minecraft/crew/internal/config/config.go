@@ -244,7 +244,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	kitReach, err := intInRange("KIT_REACH", 96, 8, 1000)
+	kitReach, err := intInRange("KIT_REACH", 96, 8, 160)
 	if err != nil {
 		return Config{}, err
 	}
