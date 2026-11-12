@@ -148,7 +148,9 @@ func (g *GoHome) nextHop(p act.Pose) (goal protocol.BlockPos, final, ok bool) {
 	dx, dz := float64(g.home.X()-feet.X()), float64(g.home.Z()-feet.Z())
 	d := math.Hypot(dx, dz)
 	if d <= homeHop && g.hopFails == 0 {
-		if c, found := groundNear(g.world, g.home.X(), g.home.Z(), g.home.Y()); found {
+		// Ground in the home column that is a ledge far above or below the home
+		// cell is not home: reaching it would end the trip without arriving.
+		if c, found := groundNear(g.world, g.home.X(), g.home.Z(), g.home.Y()); found && abs32(c.Y()-g.home.Y()) <= homeLevel {
 			return c, true, true
 		}
 	}
@@ -157,7 +159,9 @@ func (g *GoHome) nextHop(p act.Pose) (goal protocol.BlockPos, final, ok bool) {
 		l := math.Min(homeHop, d) * frac
 		x := feet.X() + int32(math.Round(dx/d*l))
 		z := feet.Z() + int32(math.Round(dz/d*l))
-		if c, found := groundNear(g.world, x, z, feet.Y()); found {
+		// A hop that rounds to the cell the unit stands in goes nowhere, and
+		// would only reset the failure count.
+		if c, found := groundNear(g.world, x, z, feet.Y()); found && (c.X() != feet.X() || c.Z() != feet.Z()) {
 			return c, false, true
 		}
 	}

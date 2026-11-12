@@ -168,3 +168,23 @@ func TestATripIsNotOwedFromAnotherDimension(t *testing.T) {
 		t.Errorf("walked home on returning from another dimension: %+v", r.log.lines)
 	}
 }
+
+func TestAWalkHomeEndsWhenTheUnitGoesCreative(t *testing.T) {
+	r := homeRig(t, &homeCell)
+	v := &fakeVisit{name: "go_home", doneAfter: 1 << 30}
+	r.l.makeHome = func() skill.Skill { return v }
+	r.run(5)
+	if v.steps == 0 {
+		t.Fatal("the trip never started")
+	}
+	r.tracker.SetUniqueID(5)
+	r.tracker.Apply(&packet.UpdatePlayerGameType{GameType: 1, PlayerUniqueID: 5})
+	if !r.tracker.Snapshot().Creative {
+		t.Fatal("could not put the unit in creative with this packet")
+	}
+	steps := v.steps
+	r.run(20)
+	if v.steps != steps || r.l.home.visit != nil {
+		t.Errorf("the trip carried on in creative: %d steps more", v.steps-steps)
+	}
+}

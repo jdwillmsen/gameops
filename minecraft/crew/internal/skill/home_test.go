@@ -108,3 +108,38 @@ func TestFindBedPrefersTheNearestBed(t *testing.T) {
 		t.Error("found a bed in unloaded ground")
 	}
 }
+
+// A ledge in the home column far from the home cell's level is not home, so
+// the trip does not end there.
+func TestGoHomeDoesNotEndOnALedgeAboveTheHomeCell(t *testing.T) {
+	w := flatWorld(30)
+	// The home cell is a hole in the floor column; the nearest ground to it is
+	// a ledge six levels up.
+	home := protocol.BlockPos{20, 1, 20}
+	w[protocol.BlockPos{20, 0, 20}] = "air"
+	w[protocol.BlockPos{20, 6, 20}] = "stone"
+	w[protocol.BlockPos{20, 7, 20}] = "air"
+	w[protocol.BlockPos{20, 8, 20}] = "air"
+	r := newRig(t, w, feetAt(2, 1, 2))
+	g := NewGoHome(r.world, r.self, home, 2).(*GoHome)
+	goal, final, ok := g.nextHop(r.Pose())
+	if !ok {
+		t.Fatal("no hop at all")
+	}
+	if final {
+		t.Errorf("the final hop is %v, %d levels over home", goal, goal.Y()-home.Y())
+	}
+}
+
+func TestGoHomeNeverHopsToTheCellItStandsIn(t *testing.T) {
+	r := newRig(t, flatWorld(30), feetAt(10, 1, 10))
+	// Home is a diagonal step away and not at home yet (within 0.5 only), so a
+	// short hop toward it rounds to the feet cell.
+	g := NewGoHome(r.world, r.self, protocol.BlockPos{11, 1, 11}, 0.5).(*GoHome)
+	for _, hf := range []int{0, 1, 2, 3, 4, 5} {
+		g.hopFails = hf
+		if goal, _, ok := g.nextHop(r.Pose()); ok && goal.X() == 10 && goal.Z() == 10 {
+			t.Errorf("hopFails %d: hop to the feet cell %v", hf, goal)
+		}
+	}
+}
