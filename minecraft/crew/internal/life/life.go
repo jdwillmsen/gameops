@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/go-gl/mathgl/mgl32"
+	"github.com/sandertv/gophertunnel/minecraft/protocol"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
@@ -88,6 +89,17 @@ type Config struct {
 	// Combat, when set, has a unit without a warrior role fight by the
 	// combat baseline; nil leaves the plain reactive defence.
 	Combat *CombatBaseline
+	// NightShelter makes a unit spend the night safely: from dusk it goes to
+	// the bed it set its respawn point on and sleeps, or with no bed walls
+	// itself in where it stands, and at dawn it goes back to what it was
+	// doing. It needs World.
+	NightShelter bool
+	// World is what the night skills read and click: the bed to tap and the
+	// ground to wall in.
+	World skill.ChestWorld
+	// Home, when set, is where a unit goes on its own after a join or a death
+	// has put it at the world spawn, before it resumes its work.
+	Home *protocol.BlockPos
 }
 
 type mode uint8
@@ -168,6 +180,9 @@ type Life struct {
 	kit     kitState
 	rec     recoverState
 	inv     invState
+	// night is the night's bed or shelter, and home the walk back to base.
+	night nightState
+	home  homeState
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
@@ -192,6 +207,10 @@ type Life struct {
 	makeRecover func(lastDeath) skill.Skill
 	// makeDeposit replaces one chest deposit of a trip, for tests.
 	makeDeposit func(inventory.Move) skill.Skill
+	// makeNight and makeHome replace the night visit and the walk home, for
+	// tests.
+	makeNight func(nightKind, protocol.BlockPos) skill.Skill
+	makeHome  func() skill.Skill
 }
 
 // New builds a unit's life. The random source is the idle walk's only
@@ -200,7 +219,7 @@ func New(cfg Config, world path.Blocks, self func() belief.Snapshot, log skill.L
 	if cfg.Radius < 1 {
 		cfg.Radius = 1
 	}
-	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}, moves: &act.MoveCounters{}}
+	l := &Life{cfg: cfg, world: world, body: path.NewSolid(world), self: self, log: log, rng: rng, ents: belief.NewEntities(), ignore: map[uint64]uint64{}, fightTicks: map[uint64]int{}, moves: &act.MoveCounters{}, home: newHomeState(cfg)}
 	if role, ok := validRole(cfg.Role); ok {
 		l.warrior = &warriorState{role: role, p: tactics.Defaults()}
 		l.watch = NewDamageWatcher(&l.dealt)
@@ -243,6 +262,9 @@ func (l *Life) Reset() {
 	l.eat, l.kit, l.rec, l.rest = eatState{}, kitState{}, recoverState{}, restState{}
 	l.inv = invState{}
 	l.baselineReset()
+	l.eat, l.kit, l.rec = eatState{}, kitState{}, recoverState{}
+	// A new life starts at the world spawn or the join, wherever home is.
+	l.night, l.home = nightState{}, newHomeState(l.cfg)
 	if w := l.warrior; w != nil {
 		w.reset()
 	}

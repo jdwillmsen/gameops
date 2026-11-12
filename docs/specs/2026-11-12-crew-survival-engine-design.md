@@ -81,6 +81,14 @@ unit's protected stock.
   long-range goal, craftable but not yet fetchable.
 - **P4, memory and ledger**: persisted memory, the goal ledger, multi-unit roles.
 
+## Status
+
+- P0 night rule (rung 4): shipped behind `NIGHT_SHELTER` (JDW-353): bed when the
+  respawn point has one next to it, else a shelter, resumed at dawn.
+- P0 respawn awareness: the bed tap now works on the live server (the server
+  answers only from about 2.6 blocks), and `HOME_POS` walks a unit home after a
+  join or a death.
+
 ## Verification
 
 Every rung and skill has simulator tests. Add a survival scorecard to the

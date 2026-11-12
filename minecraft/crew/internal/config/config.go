@@ -131,6 +131,12 @@ type Config struct {
 	InvKeepBlocks int
 	InvKeepFiller int
 	InvSpareTools int
+	// NightShelter makes the unit spend the night in its bed, or walled in
+	// where it stands when it has none, and carry on at dawn.
+	NightShelter bool
+	// Home is where the unit walks on its own after a join or a death has put
+	// it at the world spawn; nil leaves it where it is.
+	Home *[3]int32
 
 	// SkinRole is the unit's job (miner, chopper, ...), which picks its
 	// outfit. A warrior's outfit follows Role instead. Empty or unknown gives
@@ -336,6 +342,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	nightShelter, err := boolDefault("NIGHT_SHELTER", false)
+	if err != nil {
+		return Config{}, err
+	}
+	home, err := positionOptional("HOME_POS")
+	if err != nil {
+		return Config{}, err
+	}
 	joinDelay, err := intInRange("JOIN_DELAY_S", 0, 0, 600)
 	if err != nil {
 		return Config{}, err
@@ -401,10 +415,12 @@ func Load() (Config, error) {
 		InvKeepFiller: invKeepFiller,
 		InvSpareTools: invSpareTools,
 
-		SkinRole:   strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
-		SkinDir:    strings.TrimSpace(os.Getenv("SKIN_DIR")),
-		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
-		JoinDelayS: joinDelay,
+		SkinRole:     strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
+		SkinDir:      strings.TrimSpace(os.Getenv("SKIN_DIR")),
+		WorkPlan:     strings.TrimSpace(os.Getenv("WORK_PLAN")),
+		JoinDelayS:   joinDelay,
+		NightShelter: nightShelter,
+		Home:         home,
 	}, nil
 }
 

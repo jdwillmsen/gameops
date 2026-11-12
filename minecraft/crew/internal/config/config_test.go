@@ -60,6 +60,8 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		"EAT":              "yes please",
 		"KIT_CHEST":        "1,2",
 		"KIT_FOOD":         "0",
+		"HOME_POS":         "1,2",
+		"NIGHT_SHELTER":    "dusk",
 		"CREW_ROLE":        "wizard",
 		"CREW_SQUAD":       "9lives",
 		"RETREAT_HEALTH":   "0",
@@ -788,5 +790,29 @@ func TestCombatBaselineBarsAreNotCheckedWhenItIsOff(t *testing.T) {
 	t.Setenv("COMBAT_RESUME_HEALTH", "3")
 	if _, err := Load(); err != nil {
 		t.Errorf("a switched-off baseline refused its bars: %v", err)
+	}
+}
+
+func TestNightShelterAndHomeAreOffUnlessSet(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.NightShelter || cfg.Home != nil {
+		t.Fatalf("defaults = night %v home %v, err %v", cfg.NightShelter, cfg.Home, err)
+	}
+	t.Setenv("NIGHT_SHELTER", "true")
+	t.Setenv("HOME_POS", " 12, 64 ,-30 ")
+	cfg, err = Load()
+	if err != nil || !cfg.NightShelter || cfg.Home == nil || *cfg.Home != [3]int32{12, 64, -30} {
+		t.Fatalf("set = night %v home %v, err %v", cfg.NightShelter, cfg.Home, err)
+	}
+}
+
+func TestHomePosRejectsWhatIsNotAPosition(t *testing.T) {
+	for _, v := range []string{"1,2", "1,2,3,4", "a,b,c", "~1,2,3"} {
+		setRequired(t)
+		t.Setenv("HOME_POS", v)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HOME_POS") {
+			t.Errorf("HOME_POS=%q: err = %v", v, err)
+		}
 	}
 }

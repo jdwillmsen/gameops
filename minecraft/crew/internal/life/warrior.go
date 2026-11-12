@@ -507,6 +507,10 @@ func (l *Life) warriorFight(ctx context.Context, a skill.Actuator, s belief.Snap
 	l.stopKit(a)
 	l.stopInventory(a)
 	l.stopRecover()
+	l.stopHome()
+	if l.stopNight(a) {
+		return nil
+	}
 	if l.eat.active && !w.healing {
 		// A meal the idle rotation started, cut short by the fight.
 		l.stopEating(a, s)
