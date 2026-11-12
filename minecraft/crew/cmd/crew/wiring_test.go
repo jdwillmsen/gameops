@@ -290,6 +290,24 @@ func TestLifeConfigCarriesTheKitReachGearAndRecovery(t *testing.T) {
 	}
 }
 
+func TestLifeConfigTurnsTheInventoryManagerOnOnlyWhenAsked(t *testing.T) {
+	world := blocks.New(noNames{}, 1)
+	if lc := lifeConfig(config.Config{InvChest: &[3]int32{1, 2, 3}}, world); lc.Inventory != nil {
+		t.Error("inventory manager is on by default")
+	}
+	lc := lifeConfig(config.Config{InvManage: true, InvChest: &[3]int32{1, 2, 3}, InvReach: 120, InvFullSlots: 6, InvKeepFood: 10, InvKeepBlocks: 20, InvKeepFiller: 30, InvSpareTools: 2}, world)
+	i := lc.Inventory
+	if i == nil || i.Chest == nil || *i.Chest != (protocol.BlockPos{1, 2, 3}) || i.Reach != 120 {
+		t.Fatalf("inventory = %+v", i)
+	}
+	if p := i.Policy; p.FullSlots != 6 || p.KeepFood != 10 || p.KeepBlocks != 20 || p.KeepFiller != 30 || p.SpareTools != 2 {
+		t.Errorf("policy = %+v", p)
+	}
+	if lc := lifeConfig(config.Config{InvManage: true}, world); lc.Inventory == nil || lc.Inventory.Chest != nil {
+		t.Errorf("with no chest, inventory = %+v; want drops only", lc.Inventory)
+	}
+}
+
 // Only a warrior with crew-control to reach joins a squad; anything else
 // keeps the reactive defence and no client.
 func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {

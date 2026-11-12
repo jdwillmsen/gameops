@@ -118,6 +118,18 @@ type Config struct {
 	// RecoverDrops sends a unit that died back to pick up what it dropped.
 	RecoverDrops bool
 
+	// InvManage keeps the pack in order: junk and surplus filler dropped,
+	// surplus stored in InvChest (the kit chest when unset) before the pack
+	// fills. The rest is the reserve each class keeps.
+	InvManage     bool
+	InvChest      *[3]int32
+	InvReach      int
+	InvFullSlots  int
+	InvKeepFood   int
+	InvKeepBlocks int
+	InvKeepFiller int
+	InvSpareTools int
+
 	// SkinRole is the unit's job (miner, chopper, ...), which picks its
 	// outfit. A warrior's outfit follows Role instead. Empty or unknown gives
 	// the plain name-coloured skin.
@@ -276,6 +288,41 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	invManage, err := boolDefault("INV_MANAGE", false)
+	if err != nil {
+		return Config{}, err
+	}
+	invChest, err := positionOptional("INV_CHEST")
+	if err != nil {
+		return Config{}, err
+	}
+	if invChest == nil {
+		invChest = kitChest
+	}
+	invReach, err := intInRange("INV_REACH", 96, 8, 160)
+	if err != nil {
+		return Config{}, err
+	}
+	invFullSlots, err := intInRange("INV_FULL_SLOTS", 4, 1, 16)
+	if err != nil {
+		return Config{}, err
+	}
+	invKeepFood, err := intInRange("INV_KEEP_FOOD", 24, 0, 256)
+	if err != nil {
+		return Config{}, err
+	}
+	invKeepBlocks, err := intInRange("INV_KEEP_BLOCKS", 128, 0, 1024)
+	if err != nil {
+		return Config{}, err
+	}
+	invKeepFiller, err := intInRange("INV_KEEP_FILLER", 64, 0, 1024)
+	if err != nil {
+		return Config{}, err
+	}
+	invSpareTools, err := intInRange("INV_SPARE_TOOLS", 1, 0, 4)
+	if err != nil {
+		return Config{}, err
+	}
 	joinDelay, err := intInRange("JOIN_DELAY_S", 0, 0, 600)
 	if err != nil {
 		return Config{}, err
@@ -323,10 +370,20 @@ func Load() (Config, error) {
 		KitGear:  kitGear,
 
 		RecoverDrops: recoverDrops,
-		SkinRole:     strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
-		SkinDir:      strings.TrimSpace(os.Getenv("SKIN_DIR")),
-		WorkPlan:     strings.TrimSpace(os.Getenv("WORK_PLAN")),
-		JoinDelayS:   joinDelay,
+
+		InvManage:     invManage,
+		InvChest:      invChest,
+		InvReach:      invReach,
+		InvFullSlots:  invFullSlots,
+		InvKeepFood:   invKeepFood,
+		InvKeepBlocks: invKeepBlocks,
+		InvKeepFiller: invKeepFiller,
+		InvSpareTools: invSpareTools,
+
+		SkinRole:   strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
+		SkinDir:    strings.TrimSpace(os.Getenv("SKIN_DIR")),
+		WorkPlan:   strings.TrimSpace(os.Getenv("WORK_PLAN")),
+		JoinDelayS: joinDelay,
 	}, nil
 }
 

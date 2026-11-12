@@ -621,3 +621,53 @@ func TestKitReachGearAndDropRecoveryHaveSafeDefaults(t *testing.T) {
 		}
 	}
 }
+
+func TestInventoryManagerIsOffByDefaultAndTunable(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.InvManage || cfg.InvChest != nil || cfg.InvFullSlots != 4 || cfg.InvKeepFood != 24 ||
+		cfg.InvKeepBlocks != 128 || cfg.InvKeepFiller != 64 || cfg.InvSpareTools != 1 || cfg.InvReach != 96 {
+		t.Fatalf("defaults = %+v, err %v", cfg, err)
+	}
+	t.Setenv("KIT_CHEST", "1,2,3")
+	t.Setenv("INV_MANAGE", "true")
+	cfg, err = Load()
+	if err != nil || !cfg.InvManage || cfg.InvChest == nil || *cfg.InvChest != [3]int32{1, 2, 3} {
+		t.Fatalf("chest = %v, err %v; want the kit chest when INV_CHEST is unset", cfg.InvChest, err)
+	}
+	t.Setenv("INV_CHEST", "4,5,6")
+	t.Setenv("INV_FULL_SLOTS", "6")
+	t.Setenv("INV_KEEP_FOOD", "0")
+	t.Setenv("INV_KEEP_BLOCKS", "256")
+	t.Setenv("INV_KEEP_FILLER", "32")
+	t.Setenv("INV_SPARE_TOOLS", "0")
+	t.Setenv("INV_REACH", "120")
+	cfg, err = Load()
+	if err != nil || *cfg.InvChest != [3]int32{4, 5, 6} || cfg.InvFullSlots != 6 || cfg.InvKeepFood != 0 ||
+		cfg.InvKeepBlocks != 256 || cfg.InvKeepFiller != 32 || cfg.InvSpareTools != 0 || cfg.InvReach != 120 {
+		t.Fatalf("set = %+v, err %v", cfg, err)
+	}
+}
+
+func TestInventoryManagerSettingsAreRangeChecked(t *testing.T) {
+	for name, bad := range map[string][]string{
+		"INV_FULL_SLOTS":  {"0", "17"},
+		"INV_KEEP_FOOD":   {"-1", "257"},
+		"INV_KEEP_BLOCKS": {"1025"},
+		"INV_KEEP_FILLER": {"-1"},
+		"INV_SPARE_TOOLS": {"5"},
+		"INV_REACH":       {"7", "161"},
+		"INV_CHEST":       {"1,2"},
+		"INV_MANAGE":      {"maybe"},
+	} {
+		for _, v := range bad {
+			t.Run(name+"="+v, func(t *testing.T) {
+				setRequired(t)
+				t.Setenv(name, v)
+				if _, err := Load(); err == nil || !strings.Contains(err.Error(), name) {
+					t.Errorf("err = %v", err)
+				}
+			})
+		}
+	}
+}
