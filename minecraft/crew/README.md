@@ -488,8 +488,10 @@ fails the task with `the shelter was breached`. It fails with `not enough
 blocks to shelter (need N)` when no cell within reach can be closed with what
 it carries, `no standing spot to shelter within 16 blocks` when none is safe,
 and is refused up front, by day, with `it is already day`. `progress` counts
-blocks placed. The decision to start one belongs to the Life reflex's tending
-step: `life.ShouldShelter` says whether a unit with no bed should dig in.
+blocks placed. The leaving column must have open air behind it, else the task
+fails with `no safe exit from the shelter`. `life.ShouldShelter` is the pure
+decision helper for when a unit with no bed should dig in; the Life reflex does
+not call it yet, so a shelter task has to be queued by hand.
 
 A self-sustaining wood loop is one `WORK_PLAN`: gather saplings, plant them,
 then fell what has grown, searching when no tree is loaded, and craft:
