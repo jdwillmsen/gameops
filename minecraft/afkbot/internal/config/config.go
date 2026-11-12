@@ -103,6 +103,14 @@ type Config struct {
 	Facing    float32
 	HasFacing bool
 
+	// Stow makes the bot hold an empty hotbar slot once spawned (STOW=true).
+	Stow bool
+
+	// Seat is where the bot looks for a seat entity to mount (SEAT=x,y,z).
+	// HasSeat is false when SEAT is unset.
+	Seat    [3]float32
+	HasSeat bool
+
 	// Presence is the zero value, and the reconciler is off, unless
 	// PRESENCE_URL is set.
 	Presence Presence
@@ -171,6 +179,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	stow, err := parseStow(os.Getenv("STOW"))
+	if err != nil {
+		return Config{}, err
+	}
+	seat, hasSeat, err := parseSeat(os.Getenv("SEAT"))
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Host:           host,
 		Port:           port,
@@ -184,6 +201,9 @@ func Load() (Config, error) {
 		SkinDir:        strings.TrimSpace(os.Getenv("SKIN_DIR")),
 		Facing:         facing,
 		HasFacing:      hasFacing,
+		Stow:           stow,
+		Seat:           seat,
+		HasSeat:        hasSeat,
 		Presence:       presence,
 	}, nil
 }
@@ -347,4 +367,37 @@ func parseFacing(raw string) (yaw float32, set bool, err error) {
 		return 0, false, fmt.Errorf("FACING: %q is not north, south, east, west or a yaw in [0, 360)", raw)
 	}
 	return float32(deg), true, nil
+}
+
+// parseStow reads STOW. Empty means off.
+func parseStow(raw string) (bool, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("STOW: %q is not a boolean", raw)
+	}
+	return v, nil
+}
+
+// parseSeat reads SEAT as x,y,z block coordinates. Empty means no seat.
+func parseSeat(raw string) (seat [3]float32, set bool, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return seat, false, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) != 3 {
+		return seat, false, fmt.Errorf("SEAT: %q is not x,y,z", raw)
+	}
+	for i, part := range parts {
+		v, perr := strconv.ParseFloat(strings.TrimSpace(part), 32)
+		if perr != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			return seat, false, fmt.Errorf("SEAT: %q is not x,y,z", raw)
+		}
+		seat[i] = float32(v)
+	}
+	return seat, true, nil
 }
