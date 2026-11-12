@@ -50,7 +50,12 @@ const (
 	mWalk
 	mBreak
 	mPickup
+	mSeek
 )
+
+// maxSeekRounds is how many times in a row a seeking Mine may look further
+// afield without breaking a block in between before it gives up.
+const maxSeekRounds = 4
 
 // Mine collects an item by breaking the nearest reachable block of a kind.
 type Mine struct {
@@ -62,6 +67,7 @@ type Mine struct {
 	qty    int
 	radius int
 	area   *Area
+	seek   *seeker
 
 	started  bool
 	baseline int
@@ -78,6 +84,9 @@ type Mine struct {
 	// pillar, where walking to a drop would mean leaving.
 	hold   bool
 	felled []protocol.BlockPos
+	// cut lists the blocks the skill broke, in order, for a caller that wants
+	// to know where they stood.
+	cut []protocol.BlockPos
 	// Blocks broken from the ground, whose drops may still be on their way.
 	broken int
 
@@ -113,6 +122,22 @@ type MineOption func(*Mine)
 // misplaced unit cannot dig up anything outside the area it was given.
 func InArea(a Area) MineOption { return func(m *Mine) { m.area = &a } }
 
+// seeker is the search a Mine falls back on when nothing is in reach.
+type seeker struct {
+	box    Area
+	accept *Area
+	rounds int
+	ex     *Explore
+}
+
+// Seeking makes a Mine that finds no block it can reach look further, as
+// Explore does, instead of giving up: it walks the box for one it can stand
+// beside, skipping those it already found out of reach, and carries on. accept
+// confines which sightings count and may be nil.
+func Seeking(box Area, accept *Area) MineOption {
+	return func(m *Mine) { m.seek = &seeker{box: box, accept: accept} }
+}
+
 // Chancy marks a block whose item drops rarely, like a sapling from leaves:
 // up to maxMisses breaks in a row may bring nothing before the skill gives up,
 // and each waits only briefly for a drop to show.
@@ -142,6 +167,9 @@ func NewMineBlockWith(world path.Blocks, self func() belief.Snapshot, block, ite
 
 func (m *Mine) Name() string { return "mine_block" }
 
+// Cut lists the blocks the skill has broken, in order.
+func (m *Mine) Cut() []protocol.BlockPos { return append([]protocol.BlockPos(nil), m.cut...) }
+
 // toolStack finds a matching stack on the hotbar, the only place the server
 // lets the unit select from.
 func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) { return hotbarTool(s, m.tool) }
@@ -150,6 +178,11 @@ func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) { return hotbarT
 // may have changed, but the baseline, the blocks ruled out and the misses
 // stay: they are what the skill has learned.
 func (m *Mine) Resume() {
+	if m.phase == mSeek && m.seek != nil && m.seek.ex != nil {
+		m.seek.ex.Resume()
+		m.nav, m.breakStarted, m.sessionOpen, m.selected = nil, false, false, false
+		return
+	}
 	m.phase, m.nav, m.target = mFind, nil, protocol.BlockPos{}
 	m.breakStarted, m.sessionOpen, m.selected = false, false, false
 	m.waited, m.pickInit = 0, false
@@ -206,6 +239,8 @@ func (m *Mine) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = m.breakStep(a, snap, p)
 		case mPickup:
 			o = m.pickupStep(a, have, p)
+		case mSeek:
+			o = m.seekStep(ctx, a)
 		}
 		if !o.again {
 			return o.st, o.err
@@ -289,7 +324,37 @@ func (m *Mine) find(a Actuator, p act.Pose) outcome {
 			return next
 		}
 	}
-	return m.failed(a, m.noSource())
+	return m.noReach(a, p)
+}
+
+// noReach is what a Mine does when no block of its kind can be reached from
+// where it stands: fail, or, when it was given a search box, look further.
+func (m *Mine) noReach(a Actuator, p act.Pose) outcome {
+	if m.seek == nil || m.hold || m.seek.rounds >= maxSeekRounds {
+		return m.failed(a, m.noSource())
+	}
+	m.seek.rounds++
+	tried := map[protocol.BlockPos]bool{}
+	for _, b := range m.candidates(p, true) {
+		tried[b] = true
+	}
+	m.seek.ex = newExplore(m.world, m.self, m.block, m.seek.box, m.seek.accept, tried)
+	m.phase, m.nav = mSeek, nil
+	return next
+}
+
+func (m *Mine) seekStep(ctx context.Context, a Actuator) outcome {
+	st, err := m.seek.ex.Step(ctx, a)
+	switch st {
+	case Running:
+		return outcome{st: Running}
+	case Done:
+		m.seek.ex = nil
+		m.walkFails, m.phase = 0, mFind
+		return next
+	}
+	m.seek.ex = nil
+	return m.failed(a, err)
 }
 
 func (m *Mine) aim(b protocol.BlockPos, phase minePhase) {
@@ -320,7 +385,7 @@ func (m *Mine) walk(a Actuator) outcome {
 		// An unreachable block is not a failed skill; another may be reachable.
 		m.skip[m.target] = true
 		if m.walkFails++; m.walkFails >= maxWalkFails {
-			return m.failed(a, m.noSource())
+			return m.noReach(a, a.Pose())
 		}
 		m.phase = mFind
 	}
@@ -355,6 +420,12 @@ func (m *Mine) breakStep(a Actuator, snap belief.Snapshot, p act.Pose) outcome {
 	if name, known := m.world.Block(m.target); known && name != m.block {
 		m.sessionOpen = false
 		m.lastBreak = m.waited
+		if m.breakStarted {
+			m.cut = append(m.cut, m.target)
+			if m.seek != nil {
+				m.seek.rounds = 0
+			}
+		}
 		if m.hold {
 			m.phase = mFind
 			return next

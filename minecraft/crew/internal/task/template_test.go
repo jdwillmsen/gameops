@@ -255,11 +255,12 @@ func TestGatherAcceptsOakLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
-	if err != nil || len(skills) != 2 {
+	if err != nil || len(skills) != 3 {
 		t.Fatalf("skills %v, err %v", skills, err)
 	}
-	if skills[0].Name() != "fell_tree" || skills[1].Name() != "deposit_chest" {
-		t.Errorf("skills = %s, %s: oak logs are felled, not just mined", skills[0].Name(), skills[1].Name())
+	if skills[0].Name() != "fell_tree" || skills[1].Name() != "replant" || skills[2].Name() != "deposit_chest" {
+		t.Errorf("skills = %s, %s, %s: oak logs are felled, then the trunks replanted, then deposited",
+			skills[0].Name(), skills[1].Name(), skills[2].Name())
 	}
 }
 
@@ -686,11 +687,19 @@ func skillNames(t *testing.T, body string) string {
 
 func TestGatherWithSearchExploresFirst(t *testing.T) {
 	got := skillNames(t, string(searchBody(`{"min":{"x":0,"y":60,"z":0},"max":{"x":99,"y":90,"z":99}}`)))
-	if got != "explore,fell_tree,deposit_chest" {
+	if got != "explore,fell_tree,replant,deposit_chest" {
 		t.Errorf("skills = %s", got)
 	}
 	if got := skillNames(t, `{"template":"gather_and_deposit","item":"oak_log","qty":4,"chest":{"x":1,"y":2,"z":3}}`); strings.Contains(got, "explore") {
 		t.Errorf("a gather with no search explores: %s", got)
+	}
+}
+
+func TestSaplingGatherWithSearchExploresAndIsNotReplanted(t *testing.T) {
+	body := `{"template":"gather_and_deposit","item":"oak_sapling","qty":4,"chest":{"x":1,"y":2,"z":3},` +
+		`"search":{"min":{"x":0,"y":60,"z":0},"max":{"x":99,"y":90,"z":99}}}`
+	if got := skillNames(t, body); got != "explore,mine_block,deposit_chest" {
+		t.Errorf("skills = %s", got)
 	}
 }
 
