@@ -321,3 +321,34 @@ func TestWithdrawnStackKeepsTheChestsItemData(t *testing.T) {
 		t.Errorf("slot 2 = %+v, %v, want the enchanted pickaxe with its data", it, ok)
 	}
 }
+
+func wearResponse(armourSlot byte, armourID int32, invSlot byte) *packet.ItemStackResponse {
+	return &packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{ContainerInfo: []protocol.StackResponseContainerInfo{
+		{Container: protocol.FullContainerName{ContainerID: protocol.ContainerArmor}, SlotInfo: []protocol.StackResponseSlotInfo{{Slot: armourSlot, Count: 1, StackNetworkID: armourID}}},
+		{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory}, SlotInfo: []protocol.StackResponseSlotInfo{{Slot: invSlot, Count: 0}}},
+	}}}}
+}
+
+func TestAPieceMovedOntoTheArmourSlotsIsWorn(t *testing.T) {
+	tr := withItems(t)
+	tr.ItemNames([]protocol.ItemEntry{{Name: "minecraft:iron_helmet", RuntimeID: 400}})
+	tr.Apply(slotPacket(0, 5, stack(400, 1, 31)))
+	tr.Apply(wearResponse(0, 31, 5))
+	s := tr.Snapshot()
+	if len(s.Armour) != 1 || s.Armour[0].Slot != "helmet" || s.Armour[0].Name != "iron_helmet" {
+		t.Fatalf("armour = %+v", s.Armour)
+	}
+	if _, still := find(s.Inventory, 5); still {
+		t.Error("the worn piece is still in the inventory")
+	}
+}
+
+func TestAWornPieceIsFoundByTheSlotItLeftWhenTheServerReissuesItsID(t *testing.T) {
+	tr := withItems(t)
+	tr.ItemNames([]protocol.ItemEntry{{Name: "minecraft:iron_boots", RuntimeID: 403}})
+	tr.Apply(slotPacket(0, 7, stack(403, 1, 31)))
+	tr.Apply(wearResponse(3, 99, 7))
+	if s := tr.Snapshot(); len(s.Armour) != 1 || s.Armour[0].Slot != "boots" || s.Armour[0].Name != "iron_boots" {
+		t.Fatalf("armour = %+v", s.Armour)
+	}
+}

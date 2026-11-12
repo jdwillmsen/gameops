@@ -2,6 +2,7 @@ package belief
 
 import (
 	"sync"
+	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -103,17 +104,20 @@ func (e Entity) withFlags(md protocol.EntityMetadata) Entity {
 	return e
 }
 
-// Entities is who and what is around the unit, built only from packets. Items
-// and other drops are left out: nothing here acts on them.
+// Entities is who and what is around the unit, built only from packets. Item
+// entities are kept apart from the rest (see Dropped), so nothing that walks
+// the entities for threats meets them.
 type Entities struct {
 	mu     sync.RWMutex
 	self   uint64
 	ents   map[uint64]Entity
 	unique map[int64]uint64
+	drops  map[uint64]Dropped
+	now    func() time.Time
 }
 
 func NewEntities() *Entities {
-	return &Entities{ents: map[uint64]Entity{}, unique: map[int64]uint64{}}
+	return &Entities{ents: map[uint64]Entity{}, unique: map[int64]uint64{}, drops: map[uint64]Dropped{}, now: time.Now}
 }
 
 // Spawn starts a session; the unit itself is never listed.
@@ -135,6 +139,7 @@ func (e *Entities) Reset() {
 func (e *Entities) clearLocked() {
 	clear(e.ents)
 	clear(e.unique)
+	clear(e.drops)
 }
 
 // Each calls f for every entity under a read lock, so f must be quick and must
@@ -158,6 +163,7 @@ func (e *Entities) Get(id uint64) (Entity, bool) {
 func (e *Entities) Apply(pk packet.Packet) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.applyDropLocked(pk)
 	switch p := pk.(type) {
 	case *packet.AddActor:
 		if p.EntityRuntimeID == e.self {
