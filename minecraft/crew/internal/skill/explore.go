@@ -390,25 +390,7 @@ func (e *Explore) standNearColumn(wp protocol.BlockPos, pose act.Pose, inBox boo
 // groundAt is the standable cell in a column nearest the height y0, within the
 // scan band; only the loaded cells are read.
 func (e *Explore) groundAt(x, z, y0 int32) (protocol.BlockPos, bool) {
-	for d := int32(0); d <= scanBelow+scanAbove; d++ {
-		for _, y := range [2]int32{y0 + d, y0 - d} {
-			if d == 0 && y != y0 {
-				continue
-			}
-			if y < y0-scanBelow || y > y0+scanAbove {
-				continue
-			}
-			c := protocol.BlockPos{x, y, z}
-			below, known := e.world.Block(protocol.BlockPos{x, y - 1, z})
-			if !known || path.Passable(below) {
-				continue
-			}
-			if path.Standable(e.world, c) {
-				return c, true
-			}
-		}
-	}
-	return protocol.BlockPos{}, false
+	return groundNear(e.world, x, z, y0)
 }
 
 // maxTravelFails is how many hops toward the box may fail before the search
