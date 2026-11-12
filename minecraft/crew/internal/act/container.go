@@ -426,6 +426,7 @@ func (a *Actuator) applyContainerLocked(pk packet.Packet) {
 			}
 			if r.Status == StatusOK {
 				a.applyWindow0Locked(r, item)
+				a.applyFurnaceLocked(r, item)
 			}
 			if tk, ok := a.takes[r.RequestID]; ok {
 				delete(a.takes, r.RequestID)

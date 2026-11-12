@@ -31,8 +31,10 @@ type furnaceSim struct {
 	// with this status when non-zero.
 	ignoreOpens int
 	refuse      uint8
-	// stall stops the furnace cooking, as one with no fuel does.
+	// stall stops the furnace cooking, as one with no fuel does; cookCap
+	// stops it once that many items are made, as a slow one does.
 	stall   bool
+	cookCap int
 	clicks  int
 	opens   int
 	cooked  int
@@ -168,11 +170,17 @@ func (f *furnaceSim) request(req protocol.ItemStackRequest) {
 		if src.count == 0 {
 			*src = slotStack{}
 		}
-		f.r.send(&packet.InventorySlot{WindowID: uint32(f.window), Slot: uint32(dstIdx), NewItem: instance(*dst)})
-		f.reply(req.RequestID, 0, protocol.StackResponseContainerInfo{
-			Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
-			SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: v.Source.Slot, Count: byte(src.count), StackNetworkID: src.id}},
-		})
+		// The answer carries the new counts of both slots and no slot update
+		// follows it, as the real server's does not for requests the unit issues.
+		f.reply(req.RequestID, 0,
+			protocol.StackResponseContainerInfo{
+				Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: v.Source.Slot, Count: byte(src.count), StackNetworkID: src.id}},
+			},
+			protocol.StackResponseContainerInfo{
+				Container: protocol.FullContainerName{ContainerID: v.Destination.Container.ContainerID},
+				SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: v.Destination.Slot, Count: byte(dst.count), StackNetworkID: dst.id}},
+			})
 	case *protocol.TakeStackRequestAction:
 		srcIdx := f.slotOf(v.Source.Container.ContainerID)
 		src, dst := &f.slots[srcIdx], &f.r.inv[v.Destination.Slot]
@@ -199,7 +207,6 @@ func (f *furnaceSim) request(req protocol.ItemStackRequest) {
 		if src.count == 0 {
 			*src = slotStack{}
 		}
-		f.r.send(&packet.InventorySlot{WindowID: uint32(f.window), Slot: uint32(srcIdx), NewItem: instance(*src)})
 		f.reply(req.RequestID, 0,
 			protocol.StackResponseContainerInfo{
 				Container: protocol.FullContainerName{ContainerID: v.Source.Container.ContainerID},
@@ -214,7 +221,7 @@ func (f *furnaceSim) request(req protocol.ItemStackRequest) {
 
 // cook advances the fire by a tick.
 func (f *furnaceSim) cook() {
-	if f.stall {
+	if f.stall || (f.cookCap > 0 && f.cooked >= f.cookCap) {
 		return
 	}
 	out, can := f.recipes[f.slots[0].item]
@@ -537,5 +544,35 @@ func TestSmeltOutputsAreClosedAndSorted(t *testing.T) {
 		if in[i-1] >= in[i] {
 			t.Errorf("inputs not sorted at %d: %v", i, in)
 		}
+	}
+}
+
+// The furnace is slow: when the unit comes back for five it holds three. The
+// server answers the take with the count left and sends no slot update, so the
+// window must follow the answer or the unit takes again against a stack ID the
+// server has retired and the task fails.
+func TestSmeltCollectsInRoundsWhenTheFurnaceIsShort(t *testing.T) {
+	r, w, f := smeltRig(t)
+	r.give(0, idRawIron, 5)
+	r.give(1, idCoal, 4)
+	f.cookCap = 3
+	prev := r.onTick
+	r.onTick = func() {
+		prev()
+		// The unit has taken the three and left: the furnace carries on.
+		if f.cookCap > 0 && f.opens >= 2 && !f.open && f.slots[2].count == 0 {
+			f.cookCap = 0
+		}
+	}
+	log := &capture{}
+	st, err := r.run(newSmelt(t, w, r, "raw_iron", 5, log), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if got := r.have("iron_ingot"); got != 5 {
+		t.Errorf("iron ingots = %d, want 5", got)
+	}
+	if len(events(log, "smelt_wait")) == 0 {
+		t.Error("the unit never waited for the rest")
 	}
 }
