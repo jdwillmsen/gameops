@@ -374,3 +374,71 @@ func TestShaftDoesNotPlaceTorchesUnlessAsked(t *testing.T) {
 		t.Errorf("%d torches placed without Torches set", n)
 	}
 }
+
+// The path planner counts a cell above lava as standable, so an ore whose drop
+// would fall onto a pool, or come to rest beside liquid, is left alone: going
+// for the drop would walk the unit into it.
+func TestShaftLeavesOreWhoseDropWouldNeedAWalkNearLiquid(t *testing.T) {
+	ore := protocol.BlockPos{12, -1, 11}
+	for _, c := range []struct {
+		name  string
+		setup func(w simWorld)
+		why   string
+	}{
+		{"drop falls onto lava", func(w simWorld) {
+			w[protocol.BlockPos{12, -2, 11}] = "air"
+			w[protocol.BlockPos{12, -3, 11}] = "air"
+			w[protocol.BlockPos{12, -4, 11}] = "lava"
+		}, "lava"},
+		{"lava beside the cell it rests in", func(w simWorld) {
+			w[protocol.BlockPos{13, -2, 12}] = "lava"
+		}, "lava"},
+		{"water beside the cell it rests in", func(w simWorld) {
+			w[protocol.BlockPos{13, -2, 11}] = "water"
+		}, "water"},
+		{"lava under a stand beside the drop", func(w simWorld) {
+			w[protocol.BlockPos{11, -3, 11}] = "lava"
+		}, "lava"},
+		{"gravel over the ore", func(w simWorld) {
+			w[protocol.BlockPos{12, 0, 11}] = "gravel"
+		}, "falling"},
+	} {
+		w := mineWorld()
+		w[ore] = "coal_ore"
+		c.setup(w)
+		r := shaftRig(t, w)
+		log := &capture{}
+		st, err := r.run(newShaft(t, w, r, oreSpec(4, OreCoal), log), 8000)
+		if st != Done || err != nil {
+			t.Fatalf("%s: status %v, err %v", c.name, st, err)
+		}
+		if n := w[ore]; n != "coal_ore" {
+			t.Errorf("%s: the ore was broken (%q)", c.name, n)
+		}
+		skipped := events(log, "mine_ore_skipped")
+		if len(skipped) != 1 || skipped[0]["why"] != c.why {
+			t.Errorf("%s: skip events = %v, want one for %s", c.name, skipped, c.why)
+		}
+		if got := chestCount(r, idCoal); got != 0 {
+			t.Errorf("%s: coal in the chest = %d", c.name, got)
+		}
+	}
+}
+
+func TestShaftStillTakesOreWithASafeDrop(t *testing.T) {
+	w := mineWorld()
+	ore := protocol.BlockPos{12, -1, 11}
+	w[ore] = "coal_ore"
+	// A hole under the ore, lava three cells further down and clear of every
+	// cell the unit could stand in to take the drop.
+	w[protocol.BlockPos{12, -2, 11}] = "air"
+	w[protocol.BlockPos{12, -6, 11}] = "lava"
+	r := shaftRig(t, w)
+	st, err := r.run(newShaft(t, w, r, oreSpec(4, OreCoal), nil), 8000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if n := w[ore]; n != "air" {
+		t.Errorf("a safe ore was left (%q)", n)
+	}
+}

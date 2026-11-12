@@ -179,7 +179,11 @@ func (m *MineShaft) nextOre(p act.Pose, tier int) (protocol.BlockPos, OreKind, b
 			// Breaking it would lose the drop: not ruled out, since another
 			// stand may be beside it.
 		default:
-			if why := m.hazard(c); why != "" {
+			why := m.hazard(c)
+			if why == "" {
+				why = m.dropHazard(c)
+			}
+			if why != "" {
 				m.oreSkip[c] = true
 				m.emit("mine_ore_skipped", map[string]any{"kind": kind.Name, "why": why})
 				continue
@@ -188,6 +192,36 @@ func (m *MineShaft) nextOre(p act.Pose, tier int) (protocol.BlockPos, OreKind, b
 		}
 	}
 	return protocol.BlockPos{}, OreKind{}, false
+}
+
+// dropHazard says why an ore's drop must not be gone after, or "". The drop
+// falls to rest in whatever open cells lie below the ore and the unit then
+// walks to a cell beside it; the path planner does not avoid lava (it counts a
+// cell above a lava block as standable), so the ore is left unless liquid is
+// clear of the fall, the rest cell and every cell the unit could stand in to
+// pick it up. A falling block over the ore is left too: opening the ore lets it
+// drop through the head cell onto the unit.
+func (m *MineShaft) dropHazard(c protocol.BlockPos) string {
+	rest := dropRestAt(m.world, c)
+	for y := c.Y(); y >= rest.Y(); y-- {
+		if kind := m.beside(protocol.BlockPos{c.X(), y, c.Z()}); kind != "" {
+			return kind
+		}
+	}
+	// Two below the rest cell: a stand one lower rests on the cell under it.
+	for dy := int32(-2); dy <= 1; dy++ {
+		for dx := int32(-1); dx <= 1; dx++ {
+			for dz := int32(-1); dz <= 1; dz++ {
+				if kind := m.beside(protocol.BlockPos{rest.X() + dx, rest.Y() + dy, rest.Z() + dz}); kind != "" {
+					return kind
+				}
+			}
+		}
+	}
+	if name, _ := m.world.Block(up(c, 1)); isFalling(name) {
+		return "falling"
+	}
+	return ""
 }
 
 // ore looks for ore to take from where the unit stands.
