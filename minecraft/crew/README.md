@@ -439,6 +439,16 @@ and takes the pillar apart. The pillar needs one hotbar stack holding at least
 as many blocks as the pillar is tall; without one, the unit only takes logs it
 can reach from the ground.
 
+Once the logs are cut the unit replants: for every trunk it felled it sets a
+sapling (`oak_sapling` for `oak_log`) from its inventory on the grass or dirt
+where the trunk stood, so the grove regrows. It steps off the cell first, since
+the server refuses a block placed into the placer's own body. A trunk whose
+ground is not grass or dirt, or that has no room above it, is skipped, and a
+unit carrying no sapling skips the step. The step is its own skill, `replant`,
+between the gather and the deposit; its `progress` and result text
+(`replanted N oak_sapling`) count the saplings put back. Leaves are not
+cleared: they decay once the logs are gone.
+
 `area` is optional: an inclusive box `{"min": {x,y,z}, "max": {x,y,z}}` with
 min at most max on each axis and at most 64 blocks on an axis. When set, the
 unit only ever breaks blocks inside it and fails with `no reachable <block> in
@@ -461,8 +471,18 @@ ground, failing with `cannot reach the search area` if those hops stall.
 `oak_sapling` is also a gather item: the unit breaks `oak_leaves` by hand (no
 tool) for the sapling that drops about one time in twenty. It tolerates 120
 empty breaks in a row, where every other item gives up after 3, and waits only
-about a second for a drop after each leaf. It fails with `no reachable
-oak_leaves` once no leaf is within reach.
+about a second for a drop after each leaf. A sapling that lands in the
+inventory any other way, as when leaves decay beside a felled tree and the unit
+walks over the drop, counts toward `qty` like one it broke a leaf for.
+
+With `search` set, a unit that finds no leaf it can stand beside within 24
+blocks does not give up: it searches the box as a log gather does, leaving out
+the leaves it already found out of reach (canopy with nowhere to stand), and
+carries on from the leaves it finds. A sighting only counts if a standable cell
+reaches it, so the hand-off to mining is to leaves it can break. It makes up to
+four such searches in a row without a break between them, then fails with `no
+oak_leaves found in search area`. Without `search` it fails with `no reachable
+oak_leaves within 24 blocks` once no leaf is within reach.
 
 `plant_trees` sets saplings out on a grid:
 
@@ -495,12 +515,20 @@ the bed; the unit does not craft one. The unit walks within reach, taps the
 bed and is done once the server sets the respawn point, at any hour. At night
 the server also puts the unit to sleep and it stays in bed until dawn wakes it,
 or until a fight takes it out. With monsters nearby the server refuses sleep
-but still sets the point, so the visit ends done. It fails with `no bed at the
-target` when the block is not a bed, `the bed's chunk is not loaded`, a
-no-path or no-standing-spot error when it cannot get near, and `the server did
-not set the respawn point` when its tap goes unanswered. `progress` is 1 once
+but still sets the point, so the visit ends done. It fails with `the bed's
+chunk is not loaded`, a no-path or no-standing-spot error when it cannot get
+near, and `the server did not set the respawn point` when its tap goes
+unanswered. `progress` is 1 once
 the point is set. The unit's state reports `spawn_point`, `spawn_known` and
 `sleeping`.
+
+A plan that repeats after a death meets a bed that is not there to be found
+yet (the world is sent again) or was rebuilt a block off. When the target is
+not a bed the visit looks for one within three blocks sideways and two up,
+re-scanning for about two seconds. It uses the bed it finds; if there is none
+it ends done, not failed, with the result `no bed at the target; skipped` and
+`progress` 0, and sets no respawn point, so the plan goes on. `the bed's chunk
+is not loaded` still fails.
 
 `shelter` makes the unit safe until morning without a bed:
 
@@ -628,6 +656,16 @@ fetch a tool:
 same item, so tools stay put, and takes up to each count: a chest short of an
 item ends the visit with what it had. A deposit fails naming the item when the
 inventory holds less than asked.
+
+A chest set against a bed or a wall may have standable cells in reach that
+cannot be walked to (the other side of the wall). Withdraw and deposit plan a
+path to each candidate cell, nearest the unit first, and walk to the first that
+has one; a walk that fails part-way rules out that cell and tries another. When
+no candidate can be reached, as while the chunk beside the chest is still
+loading, the visit waits about two seconds and tries again, up to five times,
+then fails with `getting to the chest: ... no path`. A chest with nothing
+standable within reach at all still fails at once with `no standing spot within
+reach of the chest`.
 
 `mine_shaft` digs a staircase down from an entrance, tunnels branches off its
 bottom, climbs out and deposits everything it gained in one chest. It needs a
