@@ -9,7 +9,8 @@ type Combat struct {
 	Baseline bool
 	// FleeHealth, NightFleeHealth and ResumeHealth are the health bars: run at
 	// or under the first, or the second for an under-geared unit at dusk and
-	// night, and fight again only once back at the third.
+	// night, and fight again only once back at the third. RETREAT_HEALTH, when
+	// higher than a flee bar, takes its place.
 	FleeHealth      int
 	NightFleeHealth int
 	ResumeHealth    int
@@ -30,8 +31,26 @@ const (
 	defaultResumeHealth    = 12
 	defaultMinArmour       = 8
 	fullHealth             = 20
-	maxMinArmour           = 30
+	// maxResumeHealth restates life's cap: regeneration reaches no higher,
+	// so a higher bar could keep a unit that cannot regenerate fleeing.
+	maxResumeHealth = 18
+	maxMinArmour    = 30
 )
+
+// withRetreat checks the bars as the unit will run them: the reflex's
+// RETREAT_HEALTH raises the flee bars when it is higher, so the resume bar
+// must clear that too.
+func (c Combat) withRetreat(retreat int) error {
+	if !c.Baseline {
+		return nil
+	}
+	flee := max(c.FleeHealth, retreat)
+	night := max(c.NightFleeHealth, flee)
+	if c.ResumeHealth <= night {
+		return fmt.Errorf("COMBAT_RESUME_HEALTH (%d) must exceed the flee bars in force (day %d, night %d); RETREAT_HEALTH (%d) raises them", c.ResumeHealth, flee, night, retreat)
+	}
+	return nil
+}
 
 func combatSettings() (Combat, error) {
 	var c Combat
@@ -45,7 +64,7 @@ func combatSettings() (Combat, error) {
 	if c.NightFleeHealth, err = intInRange("COMBAT_NIGHT_FLEE_HEALTH", defaultNightFleeHealth, 1, fullHealth-1); err != nil {
 		return Combat{}, err
 	}
-	if c.ResumeHealth, err = intInRange("COMBAT_RESUME_HEALTH", defaultResumeHealth, 2, fullHealth); err != nil {
+	if c.ResumeHealth, err = intInRange("COMBAT_RESUME_HEALTH", defaultResumeHealth, 2, maxResumeHealth); err != nil {
 		return Combat{}, err
 	}
 	if c.MinArmour, err = intInRange("COMBAT_MIN_ARMOUR", defaultMinArmour, 0, maxMinArmour); err != nil {

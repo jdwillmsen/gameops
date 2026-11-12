@@ -32,6 +32,8 @@ var coverSteps = [...]float64{3, 5, 7}
 type baselineState struct {
 	// fleeing is the health latch, held from the flee bar to ResumeHealth.
 	fleeing bool
+	// fledAt is the tick the latch tripped.
+	fledAt uint64
 
 	// The decision of the tick that last ran Engaged, for Fight to carry out.
 	decidedAt uint64
@@ -56,11 +58,20 @@ var baselineUnits = unitScratch[baselineState]{init: func(s *baselineState) {
 
 func (l *Life) baselineOn() bool { return l.cfg.Combat != nil && l.warrior == nil }
 
+// combat is the baseline with its flee bars raised to the reflex's retreat
+// health, so the higher of COMBAT_FLEE_HEALTH and RETREAT_HEALTH is the bar.
+func (l *Life) combat() CombatBaseline {
+	c := *l.cfg.Combat
+	c.FleeHealth = max(c.FleeHealth, l.retreatAt())
+	c.NightFleeHealth = max(c.NightFleeHealth, c.FleeHealth)
+	return c
+}
+
 // baselineReset forgets the latch and the shield, as after a death: the
 // server drops a held use with the body.
 func (l *Life) baselineReset() {
 	if st, ok := baselineUnits.has(l); ok {
-		st.fleeing, st.shield, st.shieldItem = false, false, belief.Item{}
+		st.fleeing, st.fledAt, st.shield, st.shieldItem = false, 0, false, belief.Item{}
 		st.decidedAt, st.target, st.stance, st.track = 0, 0, stanceFight, nil
 		clear(st.arrows)
 		clear(st.creepers.tracks)
@@ -74,15 +85,23 @@ func (l *Life) baselineNote(s belief.Snapshot) {
 	if !l.baselineOn() {
 		return
 	}
-	c, st := l.cfg.Combat, baselineUnits.of(l)
+	c, st := l.combat(), baselineUnits.of(l)
 	night, under := isNight(s), c.underGeared(s)
 	was := st.fleeing
 	st.fleeing = c.latch(was, s.Health, s.HealthKnown, night, under)
+	// A unit that cannot regenerate would otherwise hold the latch for good;
+	// it is let go once health is over the bar, which is where it fought
+	// before the latch, and trips again if it is hurt further.
+	timedOut := st.fleeing && was && l.tick-st.fledAt > fleeHoldTicks && s.Health > c.fleeBar(night, under)
+	if timedOut {
+		st.fleeing = false
+	}
 	switch {
 	case st.fleeing && !was:
+		st.fledAt = l.tick
 		l.logEvent("combat_flee", map[string]any{"health": s.Health, "night": night, "under_geared": under})
 	case !st.fleeing && was:
-		l.logEvent("combat_resume", map[string]any{"health": s.Health})
+		l.logEvent("combat_resume", map[string]any{"health": s.Health, "timed_out": timedOut})
 	}
 }
 
@@ -116,7 +135,7 @@ func (l *Life) baselineMode(p act.Pose, s belief.Snapshot, e belief.Entity, m mo
 	if !l.baselineOn() || e.ID == 0 {
 		return m
 	}
-	c, st := l.cfg.Combat, baselineUnits.of(l)
+	c, st := l.combat(), baselineUnits.of(l)
 	in := l.situationOf(st, p, s, e)
 	sn := c.decide(in)
 	st.decidedAt, st.target, st.stance, st.in = l.tick, e.ID, sn, in

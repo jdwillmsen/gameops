@@ -333,6 +333,9 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	if err := combat.withRetreat(vitals[0]); err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,

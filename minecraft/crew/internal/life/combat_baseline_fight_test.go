@@ -240,7 +240,99 @@ func TestBaselineFleeLatchHoldsUntilHealthIsRegained(t *testing.T) {
 	}
 }
 
+// A fleeing unit with a mob already within a blow cannot outrun it, so it
+// fights instead of taking hits in the back.
+func TestBaselineFleeingUnitFightsAMobInReach(t *testing.T) {
+	r := baselineRig(t, start, nil)
+	r.geared()
+	r.setHealth(5)
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{21.5, 1, 20.5})
+	r.run(30)
+	if !r.baseline().fleeing {
+		t.Fatal("the latch did not trip")
+	}
+	r.setHealth(9)
+	r.run(30)
+	if r.l.mode != modeFight {
+		t.Errorf("mode %v with the mob in reach, want fight", r.l.mode)
+	}
+	if len(r.out.attacks()) == 0 {
+		t.Error("a fleeing unit with a zombie beside it never struck back")
+	}
+}
+
+// RETREAT_HEALTH raises the baseline's flee bar when it is the higher of the
+// two, and COMBAT_FLEE_HEALTH keeps it when that is.
+func TestBaselineFleeBarIsTheHigherOfFleeAndRetreatHealth(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		retreat, flee int
+		health        float32
+		want          mode
+	}{
+		{"retreat bar higher: retreats at 7", 8, 6, 7, modeRetreat},
+		{"retreat bar higher: fights at 9", 8, 6, 9, modeFight},
+		{"flee bar higher: retreats at 7", 4, 8, 7, modeRetreat},
+		{"both at default: fights at 7", 6, 6, 7, modeFight},
+		{"retreat unset keeps the flee bar", 0, 6, 7, modeFight},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := DefaultCombatBaseline()
+			cb.FleeHealth = float32(tc.flee)
+			cb.NightFleeHealth = max(cb.NightFleeHealth, cb.FleeHealth)
+			cfg := defaults
+			cfg.Combat = &cb
+			cfg.Vitals.RetreatHealth = tc.retreat
+			r := newRig(t, cfg, start)
+			r.tracker.ItemNames(gearTable)
+			r.tracker.SetClock(6000, true, 0)
+			r.geared()
+			r.setHealth(tc.health)
+			r.spawn(50, "minecraft:zombie", mgl32.Vec3{23.5, 1, 20.5})
+			r.step()
+			if r.l.mode != tc.want {
+				t.Errorf("mode %v, want %v", r.l.mode, tc.want)
+			}
+		})
+	}
+}
+
+// A unit that cannot regenerate does not hold the latch for good: past the
+// hold it fights again at a health over the flee bar, and a further hit
+// trips it once more.
+func TestBaselineLatchIsLetGoOfAfterTheHoldWithoutRegeneration(t *testing.T) {
+	r := baselineRig(t, start, nil)
+	r.geared()
+	r.setHealth(5)
+	r.step()
+	if !r.baseline().fleeing {
+		t.Fatal("the latch did not trip")
+	}
+	r.setHealth(9)
+	r.step()
+	if !r.baseline().fleeing {
+		t.Fatal("the latch released before the hold ran out")
+	}
+	r.l.tick += fleeHoldTicks + 1
+	r.step()
+	if r.baseline().fleeing {
+		t.Error("the latch outlived the hold at a health over the flee bar")
+	}
+	r.setHealth(5)
+	r.step()
+	if !r.baseline().fleeing {
+		t.Error("the latch did not trip again at the flee bar")
+	}
+	// Under the flee bar the hold does not release it.
+	r.l.tick += fleeHoldTicks + 1
+	r.step()
+	if !r.baseline().fleeing {
+		t.Error("the latch let go of a unit still under the flee bar")
+	}
+}
+
 func TestBaselineNightRaisesTheFleeBarOfAnUnderGearedUnit(t *testing.T) {
+	// The mob starts out of reach: a fleeing unit fights one that is in it.
 	mode7 := func(night, geared bool) mode {
 		r := baselineRig(t, start, nil)
 		if night {
@@ -252,7 +344,7 @@ func TestBaselineNightRaisesTheFleeBarOfAnUnderGearedUnit(t *testing.T) {
 			r.give(0, 312, 1)
 		}
 		r.setHealth(8)
-		r.spawn(50, "minecraft:zombie", mgl32.Vec3{22.5, 1, 20.5})
+		r.spawn(50, "minecraft:zombie", mgl32.Vec3{24.5, 1, 20.5})
 		r.step()
 		return r.l.mode
 	}

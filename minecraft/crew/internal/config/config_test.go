@@ -698,6 +698,10 @@ func TestCombatBaselineRejectsBadValues(t *testing.T) {
 		{"COMBAT_FLEE_HEALTH", "0", "COMBAT_FLEE_HEALTH"},
 		{"COMBAT_FLEE_HEALTH", "abc", "COMBAT_FLEE_HEALTH"},
 		{"COMBAT_RESUME_HEALTH", "21", "COMBAT_RESUME_HEALTH"},
+		// Above what natural regeneration reaches.
+		{"COMBAT_RESUME_HEALTH", "19", "COMBAT_RESUME_HEALTH"},
+		// RETREAT_HEALTH raises the flee bars over the resume bar of 12.
+		{"RETREAT_HEALTH", "12", "COMBAT_RESUME_HEALTH"},
 		{"COMBAT_MIN_ARMOUR", "-1", "COMBAT_MIN_ARMOUR"},
 		{"COMBAT_SHIELD", "maybe", "COMBAT_SHIELD"},
 		{"COMBAT_AVOID_NIGHT", "2", "COMBAT_AVOID_NIGHT"},
@@ -713,6 +717,19 @@ func TestCombatBaselineRejectsBadValues(t *testing.T) {
 				t.Errorf("err = %v, want one naming %s", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCombatBaselineRetreatHealthBelowTheResumeBarIsAccepted(t *testing.T) {
+	setRequired(t)
+	t.Setenv("RETREAT_HEALTH", "11")
+	if _, err := Load(); err != nil {
+		t.Errorf("RETREAT_HEALTH=11 refused: %v", err)
+	}
+	t.Setenv("COMBAT_RESUME_HEALTH", "18")
+	t.Setenv("RETREAT_HEALTH", "17")
+	if _, err := Load(); err != nil {
+		t.Errorf("RETREAT_HEALTH=17 with a resume bar of 18 refused: %v", err)
 	}
 }
 
