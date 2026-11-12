@@ -87,6 +87,9 @@ type Mine struct {
 	// cut lists the blocks the skill broke, in order, for a caller that wants
 	// to know where they stood.
 	cut []protocol.BlockPos
+	// minTier is the lowest pickaxe tier that harvests the block; below it a
+	// break drops nothing.
+	minTier int
 	// Blocks broken from the ground, whose drops may still be on their way.
 	broken int
 
@@ -145,6 +148,11 @@ func Chancy(maxMisses int) MineOption {
 	return func(m *Mine) { m.missLimit, m.pickupWait = maxMisses, chancyPickupTicks }
 }
 
+// NeedTier says the block drops its item only to a pickaxe of at least this
+// tier (see pickaxeTier): 1 for iron ore, 2 for diamond ore. The skill then
+// holds the best pickaxe it has and refuses to start with a weaker one.
+func NeedTier(tier int) MineOption { return func(m *Mine) { m.minTier = tier } }
+
 // NewMineBlock breaks blocks until qty more of item are in the inventory.
 // tool is a name suffix: "pickaxe" matches any "*_pickaxe". A radius of zero
 // or less means 24.
@@ -172,7 +180,14 @@ func (m *Mine) Cut() []protocol.BlockPos { return append([]protocol.BlockPos(nil
 
 // toolStack finds a matching stack on the hotbar, the only place the server
 // lets the unit select from.
-func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) { return hotbarTool(s, m.tool) }
+func (m *Mine) toolStack(s belief.Snapshot) (belief.Item, bool) {
+	if m.tool != "pickaxe" {
+		return hotbarTool(s, m.tool)
+	}
+	// Any pickaxe digs, and the best one digs fastest and harvests the most.
+	it, tier, ok := bestPickaxe(s)
+	return it, ok && tier >= m.minTier
+}
 
 // Resume goes back to finding a block. Where the unit stands and what it holds
 // may have changed, but the baseline, the blocks ruled out and the misses
@@ -188,6 +203,14 @@ func (m *Mine) Resume() {
 	m.waited, m.pickInit = 0, false
 }
 
+// noTool is the failure of a unit with nothing to break the block with.
+func (m *Mine) noTool() error {
+	if m.minTier > 0 {
+		return fmt.Errorf("no %s or better in inventory", pickaxeOfTier(m.minTier))
+	}
+	return fmt.Errorf("no %s in inventory", m.tool)
+}
+
 func (m *Mine) Ready(s belief.Snapshot) error {
 	if err := overworld(s); err != nil {
 		return err
@@ -196,7 +219,7 @@ func (m *Mine) Ready(s belief.Snapshot) error {
 		return nil
 	}
 	if _, ok := m.toolStack(s); !ok {
-		return fmt.Errorf("no %s in inventory", m.tool)
+		return m.noTool()
 	}
 	return nil
 }

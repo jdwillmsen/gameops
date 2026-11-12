@@ -76,3 +76,16 @@ func bestPickaxe(s belief.Snapshot) (belief.Item, int, bool) {
 	}
 	return best, bestTier, found
 }
+
+// pickaxeOfTier names the weakest pickaxe of a tier.
+func pickaxeOfTier(tier int) string {
+	switch {
+	case tier <= 0:
+		return "wooden_pickaxe"
+	case tier == 1:
+		return "stone_pickaxe"
+	case tier == 2:
+		return "iron_pickaxe"
+	}
+	return "diamond_pickaxe"
+}
