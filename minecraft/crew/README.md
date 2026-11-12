@@ -514,6 +514,47 @@ then fell what has grown, searching when no tree is loaded, and craft:
 A step that fails is skipped and the plan goes on to the next, so a full grove
 or an empty forest costs one turn, not the loop.
 
+`bootstrap` takes a unit that holds nothing, or only logs, to a table, a chest,
+wooden and stone tools and a furnace, in one task:
+
+```json
+{"template": "bootstrap",
+ "table": {"x": 10, "y": 64, "z": 10}, "chest": {"x": 12, "y": 64, "z": 10},
+ "search": {"min": {"x": -200, "y": 60, "z": -200}, "max": {"x": 199, "y": 90, "z": 199}}}
+```
+
+`table` is required, `chest` and `search` are optional, and both cells must be
+free. The chain it runs, with what each step costs (an item the unit already
+holds is skipped, and logs and cobblestone it holds are not gathered again):
+
+1. Fell logs (bare-handed unless it holds an axe), searching first when
+   `search` is set. Seven logs cover everything below; the count is worked out
+   when the task starts from `DemandFor`.
+2. Craft planks (of the wood it holds most of, else oak) and 10 sticks: five
+   for the wooden tools, five for the stone ones.
+3. Craft a crafting table (4 planks) and place it at `table`.
+4. Stand beside the table, craft the chest (8 planks) and the wooden pickaxe,
+   axe and sword (3, 3 and 2 planks), then place the chest at `chest`.
+5. Mine 16 cobblestone with the new pickaxe (searching for stone first when
+   `search` is set), walk back beside the table, craft the stone pickaxe, axe
+   and sword (3, 3 and 2 cobblestone) and a furnace (8 cobblestone). The
+   furnace is carried, not placed.
+
+A table or chest already standing at its cell is used, not crafted again, so
+the task can be queued twice. The task fails where a step does (no stone within reach, a cell that is
+not free); every craft is skipped when the unit already
+holds enough of its item, so queueing it again resumes the chain.
+`bootstrap` is not yet in crew-control's template list, so its tasks show as
+`other` in that service's metrics and logs.
+
+The tool ladder is a pure helper in `internal/task`: `BestCraftable(snapshot,
+kind)` is the best wooden, stone or iron tool of a kind (`pickaxe`, `axe`,
+`sword`) the unit holds or could craft from what it carries, and
+`NextUpgrade(snapshot, kind)` is that tool only when it beats the best one held
+(`""` when there is nothing to gain). Both count logs and planks as one pool and
+ignore whether a table is in reach. `DemandFor(targets, inventory)` prices any
+target set of chain items in planks, sticks, logs, cobblestone and iron ingots.
+
 `haul` empties source chests into one destination chest, waiting for items to
 arrive and making as many trips as the inventory needs. It ends when every
 item has been moved the requested number of times:

@@ -90,7 +90,8 @@ type Chest struct {
 // Template is a task request: gather_and_deposit fills Item, Qty and Chest, and
 // optionally Area and Search; plant_trees fills Item, Qty, Area and Spacing;
 // haul fills Items, From and To; withdraw and deposit fill Items and Chest;
-// place_block fills Block and Item; use_bed fills Block.
+// place_block fills Block and Item; use_bed fills Block; bootstrap fills Block
+// (the table cell), To (the optional chest cell) and Search.
 type Template struct {
 	Template string `json:"template"`
 	Item     string `json:"item"`
@@ -275,6 +276,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseBed(body)
 	case shelterTemplate:
 		return parseShelter(body)
+	case bootstrapTemplate:
+		return parseBootstrap(body)
 	case buildTemplate:
 		return parseBuild(body)
 	case repairTemplate:
@@ -813,6 +816,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	if t.Template == equipTemplate {
 		return []skill.Skill{skill.NewEquip(self, t.Item)}, nil
+	}
+	if t.Template == bootstrapTemplate && t.Block != nil {
+		return expandBootstrap(t, world, self, opts), nil
 	}
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil
