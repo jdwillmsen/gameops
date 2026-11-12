@@ -18,6 +18,7 @@ func TestReasonCode(t *testing.T) {
 		{"furnace did not open within 300 ticks", ReasonKitChestTimeout},
 		{"no furnace at the target", ReasonNoReachableTarget},
 		{"the furnace made no iron_ingot", ReasonNoProgress},
+		{"the dive found 3 of 8 raw_iron", ReasonNoProgress},
 		{"no standing spot within reach of the furnace", ReasonNoReachableTarget},
 		{"placing the furnace: no solid neighbour to place against", ReasonPlacementFailed},
 		{"no pickaxe in inventory", ReasonMissingTool},

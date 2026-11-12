@@ -60,6 +60,23 @@ func (m *MineShaft) goalsMet() bool {
 	return true
 }
 
+// goalShortfall names the first goal item (in name order, for a stable answer)
+// the shaft gained less of than asked, with what it gained and what was asked.
+func (m *MineShaft) goalShortfall() (item string, gained, wanted int) {
+	names := make([]string, 0, len(m.spec.OreGoal))
+	for n := range m.spec.OreGoal {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	snap := m.self()
+	for _, n := range names {
+		if got := max(count(snap, n)-m.base[n], 0); got < m.spec.OreGoal[n] {
+			return n, got, m.spec.OreGoal[n]
+		}
+	}
+	return "", 0, 0
+}
+
 // afterArrival is where the shaft goes from a stand once any torch is done.
 func (m *MineShaft) afterArrival() {
 	m.phase = shSeg
