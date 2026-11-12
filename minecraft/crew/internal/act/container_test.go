@@ -358,3 +358,41 @@ func TestWithdrawResponseUpdatesBelief(t *testing.T) {
 		t.Errorf("slot 9 = %+v, want 16 cobblestone", got)
 	}
 }
+
+func TestEquipPlacesOnePieceOnAnEmptyArmourSlot(t *testing.T) {
+	a, s := opened(t)
+	id, err := a.Equip(beliefItem(5, "iron_boots", 1, 31), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, ok := s.last(t).(*packet.ItemStackRequest)
+	if !ok || len(req.Requests) != 1 || req.Requests[0].RequestID != id || len(req.Requests[0].Actions) != 1 {
+		t.Fatalf("sent %#v", s.last(t))
+	}
+	pl, ok := req.Requests[0].Actions[0].(*protocol.PlaceStackRequestAction)
+	if !ok {
+		t.Fatalf("action %T", req.Requests[0].Actions[0])
+	}
+	if pl.Count != 1 ||
+		pl.Source.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory || pl.Source.Slot != 5 || pl.Source.StackNetworkID != 31 ||
+		pl.Destination.Container.ContainerID != protocol.ContainerArmor || pl.Destination.Slot != 3 || pl.Destination.StackNetworkID != 0 {
+		t.Errorf("place = %+v", pl)
+	}
+}
+
+func TestEquipRejectsWhatIsNotAPieceOrASlot(t *testing.T) {
+	a, _ := opened(t)
+	for _, c := range []struct {
+		it   belief.Item
+		slot int
+	}{
+		{beliefItem(5, "iron_boots", 1, 31), 4},
+		{beliefItem(5, "iron_boots", 1, 31), -1},
+		{beliefItem(40, "iron_boots", 1, 31), 0},
+		{beliefItem(5, "iron_boots", 0, 31), 0},
+	} {
+		if _, err := a.Equip(c.it, c.slot); err == nil {
+			t.Errorf("Equip(%+v, %d) accepted", c.it, c.slot)
+		}
+	}
+}

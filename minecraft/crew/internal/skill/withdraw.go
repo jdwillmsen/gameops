@@ -34,6 +34,7 @@ const (
 	wWalk
 	wOpen
 	wTake
+	wWear
 	wDrain
 )
 
@@ -46,8 +47,11 @@ type Withdraw struct {
 	log   Logger
 	// groups ask for items by ranking rather than by name.
 	groups []group
-	// slots bounds the inventory slots withdrawn items may land in.
-	slots int
+	// slots bounds the inventory slots withdrawn items may land in, except
+	// for the items in anywhere.
+	slots    int
+	anywhere map[string]bool
+	wear     bool
 
 	phase wPhaseState
 
@@ -75,6 +79,12 @@ type wPhaseState struct {
 	before   int
 	settling bool
 	rejected map[int]bool
+	// The armour piece in flight, and the pieces the server turned down.
+	wearPending bool
+	wearReq     int32
+	wearSlot    int
+	wearSettle  bool
+	wearSkip    map[int]bool
 }
 
 // NewWithdrawChest takes up to want[item] of each listed item out of the
@@ -86,14 +96,14 @@ func NewWithdrawChest(world ChestWorld, self func() belief.Snapshot, chest proto
 	for _, f := range opts {
 		f(&o)
 	}
-	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log, groups: o.groups, slots: inventorySlots}
+	w := &Withdraw{world: world, self: self, chest: chest, want: map[string]int{}, log: o.log, groups: o.groups, slots: inventorySlots, anywhere: o.anywhere, wear: o.wear}
 	if o.hotbar {
 		w.slots = hotbarSlots
 	}
 	for k, v := range want {
 		w.want[k] = v
 	}
-	w.phase = wPhaseState{taken: map[string]int{}, rejected: map[int]bool{}}
+	w.phase = wPhaseState{taken: map[string]int{}, rejected: map[int]bool{}, wearSkip: map[int]bool{}}
 	return w
 }
 
@@ -121,6 +131,7 @@ func (w *Withdraw) Resume() {
 	ph := &w.phase
 	ph.p, ph.nav, ph.opened, ph.waited, ph.clicks = wStart, nil, false, 0, 0
 	ph.pending, ph.settling, ph.drain = false, false, nil
+	ph.wearPending, ph.wearSettle = false, false
 }
 
 func (w *Withdraw) Step(ctx context.Context, a Actuator) (Status, error) {
@@ -142,6 +153,8 @@ func (w *Withdraw) Step(ctx context.Context, a Actuator) (Status, error) {
 			o = w.open(a, snap)
 		case wTake:
 			o = w.take(a, snap)
+		case wWear:
+			o = w.wearing(a, snap)
 		case wDrain:
 			o = w.drain(a)
 		}
@@ -343,6 +356,10 @@ func (w *Withdraw) take(a Actuator, snap belief.Snapshot) outcome {
 		ph.pending, ph.reqID, ph.item, ph.n, ph.toSlot, ph.before, ph.waited = true, id, name, n, to.Slot, count(snap, name), 0
 		return w.idle(a)
 	}
+	if w.wear {
+		ph.p, ph.waited = wWear, 0
+		return next
+	}
 	return w.finish(a)
 }
 
@@ -385,14 +402,33 @@ func (w *Withdraw) left(name string, present map[string]bool) int {
 // left alone, so a tool is never displaced. The returned Item names the stack
 // to merge onto, or only the slot when it is empty.
 func (w *Withdraw) destination(s belief.Snapshot, item string, rejected map[int]bool) (to belief.Item, room int, ok bool) {
+	limit := w.slots
+	if w.anywhere[item] {
+		limit = inventorySlots
+	}
 	used := map[int]bool{}
 	for _, it := range s.Inventory {
 		used[it.Slot] = true
-		if it.Name == item && it.Count < fullStack && it.Slot < w.slots && !rejected[it.Slot] {
+		if it.Name == item && it.Count < fullStack && it.Slot < limit && !rejected[it.Slot] {
 			return it, fullStack - it.Count, true
 		}
 	}
-	for slot := 0; slot < w.slots; slot++ {
+	// An item that may go anywhere starts past the hotbar, which the items
+	// that must be held are waiting for.
+	order := make([]int, 0, limit)
+	if w.anywhere[item] {
+		for slot := hotbarSlots; slot < limit; slot++ {
+			order = append(order, slot)
+		}
+		for slot := 0; slot < hotbarSlots; slot++ {
+			order = append(order, slot)
+		}
+	} else {
+		for slot := 0; slot < limit; slot++ {
+			order = append(order, slot)
+		}
+	}
+	for _, slot := range order {
 		if !used[slot] && !rejected[slot] {
 			return belief.Item{Slot: slot}, fullStack, true
 		}
@@ -413,4 +449,82 @@ func (w *Withdraw) finish(a Actuator) outcome {
 	}
 	w.seen, w.hasSeen = ChestSeen{Chest: w.chest, Items: items, At: time.Now()}, true
 	return outcome{st: Done}
+}
+
+// armourSlotOf says which worn slot a piece goes on, or -1.
+func armourSlotOf(name string) int {
+	switch {
+	case hasSuffix(name, "helmet"):
+		return 0
+	case hasSuffix(name, "chestplate"):
+		return 1
+	case hasSuffix(name, "leggings"):
+		return 2
+	case hasSuffix(name, "boots"):
+		return 3
+	}
+	return -1
+}
+
+var wornNames = [4]string{"helmet", "chest", "legs", "boots"}
+
+func isWorn(s belief.Snapshot, slot int) bool {
+	for _, p := range s.Armour {
+		if p.Slot == wornNames[slot] {
+			return true
+		}
+	}
+	return false
+}
+
+// wearing puts on the armour the visit took, one piece at a time. A piece the
+// server will not wear, or an actuator that cannot, leaves it in the
+// inventory: the visit still brought it.
+func (w *Withdraw) wearing(a Actuator, snap belief.Snapshot) outcome {
+	ph := &w.phase
+	eq, ok := a.(Equipper)
+	if !ok {
+		return w.finish(a)
+	}
+	if open, _, pos := a.Container(); !open || pos != w.chest {
+		return w.finish(a)
+	}
+	if ph.wearPending {
+		status, answered := a.Response(ph.wearReq)
+		if !answered {
+			if ph.waited++; ph.waited >= answerTicks {
+				return w.finish(a)
+			}
+			return w.idle(a)
+		}
+		ph.wearPending, ph.waited = false, 0
+		if status == act.StatusOK {
+			ph.wearSettle = true
+		} else {
+			ph.wearSkip[ph.wearSlot] = true
+		}
+	}
+	if ph.wearSettle {
+		// Belief reads the same answer, so wait until it shows the piece.
+		if !isWorn(snap, ph.wearSlot) {
+			if ph.waited++; ph.waited >= answerTicks {
+				return w.finish(a)
+			}
+			return w.idle(a)
+		}
+		ph.wearSettle, ph.waited = false, 0
+	}
+	for _, it := range snap.Inventory {
+		slot := armourSlotOf(it.Name)
+		if slot < 0 || ph.taken[it.Name] == 0 || isWorn(snap, slot) || ph.wearSkip[slot] {
+			continue
+		}
+		id, err := eq.Equip(it, slot)
+		if err != nil {
+			return w.finish(a)
+		}
+		ph.wearPending, ph.wearReq, ph.wearSlot, ph.waited = true, id, slot, 0
+		return w.idle(a)
+	}
+	return w.finish(a)
 }

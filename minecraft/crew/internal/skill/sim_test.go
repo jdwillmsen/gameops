@@ -50,6 +50,12 @@ var itemTable = []protocol.ItemEntry{
 	{Name: "minecraft:bread", RuntimeID: 340},
 	{Name: "minecraft:cooked_beef", RuntimeID: 341},
 	{Name: "minecraft:stone_sword", RuntimeID: 343},
+	{Name: "minecraft:iron_helmet", RuntimeID: 400},
+	{Name: "minecraft:iron_chestplate", RuntimeID: 401},
+	{Name: "minecraft:iron_leggings", RuntimeID: 402},
+	{Name: "minecraft:iron_boots", RuntimeID: 403},
+	{Name: "minecraft:diamond_chestplate", RuntimeID: 404},
+	{Name: "minecraft:iron_pickaxe", RuntimeID: 410},
 }
 
 // simWorld is the block map the skills and the simulated server share.
@@ -171,6 +177,8 @@ type rig struct {
 	chestClosed bool
 
 	refusePickups bool
+	// refuseWear turns every armour request down.
+	refuseWear bool
 	// leafDropEvery makes every nth broken leaf block drop a sapling; zero
 	// means none do.
 	leafDropEvery int
@@ -338,6 +346,12 @@ func (r *rig) stock(item string) {
 			return
 		}
 	}
+}
+
+func (r *rig) Equip(from belief.Item, slot int) (int32, error) {
+	id, err := r.Actuator.Equip(from, slot)
+	r.pump()
+	return id, err
 }
 
 func (r *rig) Deposit(from belief.Item, count int, to byte) (int32, error) {
@@ -706,6 +720,10 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 		if !ok {
 			continue
 		}
+		if pl.Destination.Container.ContainerID == protocol.ContainerArmor {
+			r.onWear(req.RequestID, pl)
+			continue
+		}
 		if pl.Source.Container.ContainerID == protocol.ContainerCombinedHotBarAndInventory &&
 			pl.Destination.Container.ContainerID == protocol.ContainerCombinedHotBarAndInventory {
 			r.onMove(req.RequestID, pl)
@@ -750,6 +768,27 @@ func (r *rig) onRequest(p *packet.ItemStackRequest) {
 			},
 		}}})
 	}
+}
+
+// onWear answers a piece put on: the armour slot and the inventory slot it
+// left, with no slot update, as the server does.
+func (r *rig) onWear(id int32, pl *protocol.PlaceStackRequestAction) {
+	src := &r.inv[pl.Source.Slot]
+	if r.refuseWear || src.count == 0 || src.id != pl.Source.StackNetworkID {
+		r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{Status: act.StatusBadSource, RequestID: id}}})
+		return
+	}
+	worn := src.id
+	*src = slotStack{}
+	r.send(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{
+		RequestID: id,
+		ContainerInfo: []protocol.StackResponseContainerInfo{
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerArmor},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: pl.Destination.Slot, Count: 1, StackNetworkID: worn}}},
+			{Container: protocol.FullContainerName{ContainerID: protocol.ContainerCombinedHotBarAndInventory},
+				SlotInfo: []protocol.StackResponseSlotInfo{{Slot: pl.Source.Slot, Count: 0}}},
+		},
+	}}})
 }
 
 // onTake answers a withdraw the way the lab server does: the chest slot's
