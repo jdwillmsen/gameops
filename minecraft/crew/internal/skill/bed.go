@@ -210,6 +210,12 @@ func (u *UseBed) tap(a Actuator, snap belief.Snapshot) outcome {
 		return next
 	}
 	if u.waited++; u.waited >= answerTicks {
+		// A tap after a fight may get no second SetSpawnPosition for a bed
+		// that is already the respawn point; that is not a failure.
+		if u.set {
+			u.phase = bdSleep
+			return next
+		}
 		return u.failed(errBedNotSet)
 	}
 	if u.taps < 2 && u.waited == redoBedTicks {
