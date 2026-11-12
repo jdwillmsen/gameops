@@ -137,12 +137,8 @@ func (c *creeperTactic) Engage(ctx context.Context, f *Fight) (bool, error) {
 	e := f.Target
 	m := c.units.of(l)
 	m.prune(l)
-	t := m.observe(l.tick, e)
 	d := horizontal(f.Pose.Feet, e.Pos)
-	if !e.FlagsKnown && d <= igniteWithin && !t.moving && l.tick-t.movedAt >= stillTicks {
-		t.litUntil = max(t.litUntil, t.movedAt+fuseTicks+fuseGrace)
-	}
-	lit := l.tick < t.litUntil || e.Ignited
+	t, lit := m.look(l.tick, e, d)
 	charged := c.isCharged(e)
 
 	if c.ranged && w.role == RoleRanger && l.rangerArmed(f.Snapshot) {
@@ -343,6 +339,17 @@ func (m *creeperMemory) prune(l *Life) {
 			delete(m.tracks, id)
 		}
 	}
+}
+
+// look notes the creeper and says whether its fuse is believed burning, from
+// the flags when the server sent them, else from a stop close by or the
+// unit's own blow.
+func (m *creeperMemory) look(tick uint64, e belief.Entity, d float64) (*creeperTrack, bool) {
+	t := m.observe(tick, e)
+	if !e.FlagsKnown && d <= igniteWithin && !t.moving && tick-t.movedAt >= stillTicks {
+		t.litUntil = max(t.litUntil, t.movedAt+fuseTicks+fuseGrace)
+	}
+	return t, tick < t.litUntil || e.Ignited
 }
 
 // observe notes where a creeper is this tick and whether it has moved.

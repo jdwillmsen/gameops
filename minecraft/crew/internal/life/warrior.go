@@ -461,31 +461,37 @@ func (l *Life) arrowIncoming(p act.Pose) bool {
 
 func (l *Life) scanArrows(p act.Pose) bool {
 	w := l.warrior
-	incoming := false
 	if w.arrows == nil {
 		w.arrows = map[uint64]arrowSample{}
 	}
-	if len(w.arrows) > 16 {
-		for id, a := range w.arrows {
-			if a.tick < l.tick-1 {
-				delete(w.arrows, id)
+	return scanArrowSamples(l.ents, w.arrows, l.tick, p.Feet, w.p.ArrowNear*1.5)
+}
+
+// scanArrowSamples says whether any arrow within near of feet is closer than
+// it was a tick ago, and records this tick's positions in samples.
+func scanArrowSamples(ents *belief.Entities, samples map[uint64]arrowSample, tick uint64, feet mgl32.Vec3, near float64) bool {
+	incoming := false
+	if len(samples) > 16 {
+		for id, a := range samples {
+			if a.tick < tick-1 {
+				delete(samples, id)
 			}
 		}
 	}
-	l.ents.Each(func(e belief.Entity) {
+	ents.Each(func(e belief.Entity) {
 		if name(e.Type) != "arrow" {
 			return
 		}
-		d := e.Pos.Sub(p.Feet).Len()
-		if float64(d) > w.p.ArrowNear*1.5 {
+		d := e.Pos.Sub(feet).Len()
+		if float64(d) > near {
 			return
 		}
-		if a, ok := w.arrows[e.ID]; ok && a.tick == l.tick-1 {
-			if d < a.pos.Sub(p.Feet).Len() {
+		if a, ok := samples[e.ID]; ok && a.tick == tick-1 {
+			if d < a.pos.Sub(feet).Len() {
 				incoming = true
 			}
 		}
-		w.arrows[e.ID] = arrowSample{pos: e.Pos, tick: l.tick}
+		samples[e.ID] = arrowSample{pos: e.Pos, tick: tick}
 	})
 	return incoming
 }
