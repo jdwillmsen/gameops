@@ -36,6 +36,9 @@ const (
 	recoverVoidY = -60
 	// An item rests within this of the floor for the unit to be level with it.
 	recoverLevel = 1.5
+	// The walk is judged from the centre of a cell and the pickup from the
+	// item itself, which lies up to 0.7 off that centre.
+	recoverWithin = recoverPickup - 0.7
 )
 
 var (
@@ -80,6 +83,7 @@ type Recover struct {
 	quiet    int
 	target   uint64
 	attempts int
+	navCell  protocol.BlockPos
 	skip     map[uint64]bool
 }
 
@@ -163,7 +167,7 @@ func (r *Recover) Step(ctx context.Context, a Actuator) (Status, error) {
 
 func (r *Recover) walk(a Actuator) (Status, error) {
 	if r.nav == nil {
-		r.nav = newNavigator(r.world, cellOf(r.at), recoverPickup)
+		r.nav = newNavigator(r.world, cellOf(r.at), recoverWithin)
 	}
 	st, err := r.nav.step(a)
 	if st == Failed {
@@ -195,6 +199,10 @@ func (r *Recover) sweep(a Actuator) (Status, error) {
 	if item.ID != r.target {
 		r.target, r.attempts, r.nav = item.ID, 0, nil
 	}
+	if cell := cellOf(item.Pos); r.nav != nil && cell != r.navCell {
+		// An item that drifted, as in water, needs a new route.
+		r.nav = nil
+	}
 	if r.attempts++; r.attempts > recoverItemTicks {
 		r.skip[item.ID] = true
 		r.target, r.nav = 0, nil
@@ -207,7 +215,8 @@ func (r *Recover) sweep(a Actuator) (Status, error) {
 		return r.idle(a)
 	}
 	if r.nav == nil {
-		r.nav = newNavigator(r.world, cellOf(item.Pos), recoverPickup)
+		r.navCell = cellOf(item.Pos)
+		r.nav = newNavigator(r.world, r.navCell, recoverWithin)
 	}
 	st, err := r.nav.step(a)
 	switch st {
