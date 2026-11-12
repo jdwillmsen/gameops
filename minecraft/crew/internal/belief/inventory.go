@@ -127,6 +127,7 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 				continue
 			}
 			leftBehind := t.leftInContainer(r)
+			t.wearLocked(r)
 			for _, c := range r.ContainerInfo {
 				if c.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
 					continue
@@ -163,6 +164,53 @@ func (t *Tracker) applyInventoryLocked(pk packet.Packet) bool {
 		return false
 	}
 	return true
+}
+
+// wearLocked folds a piece moved onto the armour slots into belief. The
+// response names the stack by ID alone, and the stack is still in the
+// inventory slot it left until that slot's own info is applied, so the item is
+// read from there; it must run before the inventory slots are.
+func (t *Tracker) wearLocked(r protocol.ItemStackResponse) {
+	for _, c := range r.ContainerInfo {
+		if c.Container.ContainerID != protocol.ContainerArmor {
+			continue
+		}
+		for _, s := range c.SlotInfo {
+			if int(s.Slot) >= armourSlots {
+				continue
+			}
+			if s.Count == 0 {
+				t.armour[s.Slot] = stackRef{}
+				continue
+			}
+			if from, ok := t.wornFrom(r, s.StackNetworkID); ok {
+				from.count, from.stackID = int(s.Count), s.StackNetworkID
+				t.armour[s.Slot] = from
+			}
+		}
+	}
+}
+
+// wornFrom finds the inventory stack a response moved onto the armour: the
+// one that kept the stack ID, else the one the same response emptied, because
+// a server may issue the worn piece a new ID.
+func (t *Tracker) wornFrom(r protocol.ItemStackResponse, id int32) (stackRef, bool) {
+	for _, from := range t.inv {
+		if !from.empty() && from.stackID == id {
+			return from, true
+		}
+	}
+	for _, c := range r.ContainerInfo {
+		if c.Container.ContainerID != protocol.ContainerCombinedHotBarAndInventory {
+			continue
+		}
+		for _, s := range c.SlotInfo {
+			if s.Count == 0 && int(s.Slot) < inventorySize && !t.inv[s.Slot].empty() {
+				return t.inv[s.Slot], true
+			}
+		}
+	}
+	return stackRef{}, false
 }
 
 // noteOpened remembers which item a stack in the open container is, because
