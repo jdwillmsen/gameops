@@ -598,7 +598,9 @@ func retreatBlocks(m mode) float64 {
 func (l *Life) stowShield(a skill.Actuator) {
 	if l.warrior != nil {
 		l.lowerShield(a)
+		return
 	}
+	l.baselineLowerShield(a)
 }
 
 // healFood is what a hurt warrior eats: a golden apple first, then the

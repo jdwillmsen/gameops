@@ -85,6 +85,9 @@ type Config struct {
 	// Inventory, when set, keeps the unit's pack in order: junk dropped,
 	// surplus stored in a chest before the pack fills.
 	Inventory *Inventory
+	// Combat, when set, has a unit without a warrior role fight by the
+	// combat baseline; nil leaves the plain reactive defence.
+	Combat *CombatBaseline
 }
 
 type mode uint8
@@ -239,6 +242,7 @@ func (l *Life) Reset() {
 	l.idle, l.swim = idleState{}, swimState{}
 	l.eat, l.kit, l.rec, l.rest = eatState{}, kitState{}, recoverState{}, restState{}
 	l.inv = invState{}
+	l.baselineReset()
 	if w := l.warrior; w != nil {
 		w.reset()
 	}

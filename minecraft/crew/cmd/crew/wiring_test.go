@@ -445,3 +445,26 @@ func TestCreativeInventorySentBeforeTheActuatorReachesIt(t *testing.T) {
 		t.Errorf("stone: err = %v, want ErrHotbarFull: the table or the mode never reached the actuator", err)
 	}
 }
+
+func TestLifeConfigCarriesTheCombatBaselineAndItsDefaultsMatchLife(t *testing.T) {
+	world := blocks.New(noNames{}, 1)
+	if lc := lifeConfig(config.Config{}, world); lc.Combat != nil {
+		t.Errorf("baseline on with it switched off: %+v", lc.Combat)
+	}
+	t.Setenv("MC_HOST", "h")
+	t.Setenv("MC_USERNAME", "u")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lc := lifeConfig(cfg, world)
+	if lc.Combat == nil {
+		t.Fatal("baseline off by default")
+	}
+	if want := life.DefaultCombatBaseline(); *lc.Combat != want {
+		t.Errorf("config defaults %+v differ from life's %+v", *lc.Combat, want)
+	}
+	if err := lc.Combat.Validate(); err != nil {
+		t.Error(err)
+	}
+}

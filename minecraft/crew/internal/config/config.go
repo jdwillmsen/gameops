@@ -117,6 +117,8 @@ type Config struct {
 	KitGear  bool
 	// RecoverDrops sends a unit that died back to pick up what it dropped.
 	RecoverDrops bool
+	// Combat is the combat baseline of a unit with no warrior role.
+	Combat Combat
 
 	// InvManage keeps the pack in order: junk and surplus filler dropped,
 	// surplus stored in InvChest (the kit chest when unset) before the pack
@@ -327,6 +329,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	combat, err := combatSettings()
+	if err != nil {
+		return Config{}, err
+	}
 
 	return Config{
 		Host:           host,
@@ -370,6 +376,7 @@ func Load() (Config, error) {
 		KitGear:  kitGear,
 
 		RecoverDrops: recoverDrops,
+		Combat:       combat,
 
 		InvManage:     invManage,
 		InvChest:      invChest,
