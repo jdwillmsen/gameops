@@ -248,6 +248,12 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	if l.warrior != nil {
 		return l.warriorFight(ctx, a, s)
 	}
+	if l.fightMeal(a, s) {
+		l.stopKit(a)
+		l.stopInventory(a)
+		l.stopRecover()
+		return l.eating(a, s)
+	}
 	l.stopEating(a, s)
 	l.stopKit(a)
 	l.stopInventory(a)

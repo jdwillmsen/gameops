@@ -101,6 +101,55 @@ func TestLoadParsesTheVitalsThresholds(t *testing.T) {
 	}
 }
 
+func TestTaskMinFoodStopsShortOfAFullUnit(t *testing.T) {
+	for value, ok := range map[string]bool{"18": true, "19": true, "20": false, "21": false} {
+		t.Run(value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("TASK_MIN_FOOD", value)
+			_, err := Load()
+			if (err == nil) != ok {
+				t.Errorf("TASK_MIN_FOOD=%s: err = %v, want ok=%v", value, err, ok)
+			}
+		})
+	}
+}
+
+// The reflex's rest, top-up meal and golden apple are defaults for workers; a
+// warrior has its own rules, so they start off for one.
+func TestWarriorsStartWithTheWorkerVitalsOff(t *testing.T) {
+	for _, tc := range []struct {
+		role string
+		want [5]int
+	}{
+		{"", [5]int{6, 4, 10, 12, 16}},
+		{"vanguard", [5]int{6, 0, 0, 0, 0}},
+		{"striker", [5]int{6, 0, 0, 0, 0}},
+		{"ranger", [5]int{6, 0, 0, 0, 0}},
+	} {
+		t.Run("role="+tc.role, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv("CREW_ROLE", tc.role)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := [5]int{cfg.RetreatHealth, cfg.EmergencyHealth, cfg.RestBelow, cfg.TaskMinHealth, cfg.TaskMinFood}; got != tc.want {
+				t.Errorf("vitals = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	t.Run("a variable turns one back on for a warrior", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("CREW_ROLE", "vanguard")
+		t.Setenv("REST_BELOW", "8")
+		t.Setenv("EMERGENCY_HEALTH", "3")
+		cfg, err := Load()
+		if err != nil || cfg.RestBelow != 8 || cfg.EmergencyHealth != 3 || cfg.TaskMinHealth != 0 {
+			t.Errorf("cfg = %d/%d/%d, err %v", cfg.RestBelow, cfg.EmergencyHealth, cfg.TaskMinHealth, err)
+		}
+	})
+}
+
 func TestLoadParsesTheWarriorRole(t *testing.T) {
 	for _, role := range []string{"", "vanguard", "striker", "ranger"} {
 		t.Run("role="+role, func(t *testing.T) {

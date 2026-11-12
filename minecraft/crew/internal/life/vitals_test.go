@@ -327,3 +327,164 @@ func TestResetEndsARest(t *testing.T) {
 		t.Errorf("rest = %+v after a reset", r.l.rest)
 	}
 }
+
+// A rest that does not see health fall would stand a unit in fire until it
+// died, where its task or idle walk would have moved it off.
+func TestARestEndsWhenHealthFalls(t *testing.T) {
+	for name, tc := range map[string]struct {
+		drops  []float32
+		reason string
+		ends   bool
+	}{
+		"steady health keeps resting":   {[]float32{9, 9, 9}, "", false},
+		"regenerating keeps resting":    {[]float32{9, 10, 11}, "", false},
+		"a fall of one point ends it":   {[]float32{9, 8}, "hurt", true},
+		"a fall after regenerating":     {[]float32{9, 10, 10, 9}, "hurt", true},
+		"a fall straight to near death": {[]float32{9, 2}, "hurt", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := restRig(t, testVitals, tc.drops[0])
+			for _, h := range tc.drops {
+				r.setHealth(h)
+				r.run(2)
+			}
+			if r.l.rest.active == tc.ends {
+				t.Fatalf("rest active = %v, want %v: %+v", r.l.rest.active, !tc.ends, r.log.lines)
+			}
+			if !tc.ends {
+				return
+			}
+			var got any
+			for _, l := range r.log.lines {
+				if l.event == "rest_done" {
+					got = l.fields["reason"]
+				}
+			}
+			if got != tc.reason {
+				t.Errorf("rest_done reason = %v, want %s", got, tc.reason)
+			}
+			if r.l.Tending(r.tracker.Snapshot(), false) {
+				t.Error("the unit rests again at once, with the same hazard under it")
+			}
+		})
+	}
+}
+
+func TestARestOverFireDoesNotRunToDeath(t *testing.T) {
+	r := restRig(t, testVitals, 9)
+	h := float32(9)
+	for i := 0; i < 300; i++ {
+		if i%20 == 0 && h > 1 {
+			h--
+			r.setHealth(h)
+		}
+		r.run(1)
+	}
+	if h-1 > 0 && r.l.rest.active {
+		t.Errorf("still resting at %v health with health falling one point in 20 ticks", h)
+	}
+	if got := r.l.rest.ticks; got > 40 {
+		t.Errorf("rested %d ticks while taking damage", got)
+	}
+}
+
+// A unit at full food cannot eat, so a TASK_MIN_FOOD of 19 or 20 must not
+// start a meal that can only fail and repeat.
+func TestAFullUnitStartsNoMeal(t *testing.T) {
+	for name, tc := range map[string]struct {
+		minFood int
+		hunger  float32
+		eats    bool
+	}{
+		"top-up bar 20 at full food":    {20, 20, false},
+		"top-up bar 19 at full food":    {19, 20, false},
+		"top-up bar 19 at 19":           {19, 19, true},
+		"top-up bar 20 at 19":           {20, 19, true},
+		"top-up bar 16 at 17":           {16, 17, false},
+		"hurt eats from 17 at full bar": {0, 17, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t, vitalsConfig(Vitals{TaskMinFood: tc.minFood}), start)
+			r.give(1, idBread, 3)
+			r.setHunger(tc.hunger)
+			r.setHealth(20)
+			r.l.working = false
+			_, ok := r.l.wantsMeal(r.tracker.Snapshot())
+			if ok != tc.eats {
+				t.Errorf("wantsMeal = %v, want %v", ok, tc.eats)
+			}
+		})
+	}
+}
+
+func fightRig(t *testing.T, v Vitals, health float32, apples bool) *rig {
+	t.Helper()
+	r := newRig(t, vitalsConfig(v), start)
+	r.give(0, 301, 1)
+	if apples {
+		r.give(2, idGapple, 2)
+	}
+	r.setHunger(20)
+	r.setHealth(health)
+	r.spawn(50, "minecraft:zombie", mgl32.Vec3{21.5, 1, 20.5})
+	return r
+}
+
+// The apple is for the moment a unit is about to die, which is mostly in a
+// fight.
+func TestAnEmergencyGoldenAppleIsEatenInAFight(t *testing.T) {
+	for name, tc := range map[string]struct {
+		health float32
+		apples bool
+		eats   bool
+	}{
+		"in an emergency":     {3, true, true},
+		"just above the line": {5, true, false},
+		"no apple to eat":     {3, false, false},
+		"at the line exactly": {4, true, true},
+		"healthy":             {20, true, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := fightRig(t, testVitals, tc.health, tc.apples)
+			r.run(6)
+			if got := r.uses() > 0; got != tc.eats {
+				t.Errorf("ate an apple = %v, want %v (uses %d)", got, tc.eats, r.uses())
+			}
+		})
+	}
+}
+
+// A meal a fight cut short backs the plain meals off, but not the apple.
+func TestAnAbortedMealDoesNotHoldBackTheEmergencyApple(t *testing.T) {
+	r := fightRig(t, testVitals, 3, true)
+	r.l.eat.blockedUntil = r.l.tick + eatFailBackoff
+	r.run(6)
+	if r.uses() == 0 {
+		t.Error("the apple waited out a meal back-off")
+	}
+}
+
+func TestAFailedAppleIsNotRetriedEveryFewTicksInAFight(t *testing.T) {
+	r := fightRig(t, testVitals, 3, true)
+	// The server never accepts it: no count change, hunger already full.
+	r.run(eatTicks + eatSettleTicks + 10)
+	if !r.logged("eat_failed") {
+		t.Fatalf("the meal never failed: %+v", r.log.lines)
+	}
+	n := r.uses()
+	r.run(200)
+	if r.uses() != n {
+		t.Errorf("a failed apple was retried inside its back-off: %d uses, then %d", n, r.uses())
+	}
+}
+
+func TestAMealStartedBeforeAFightIsCutShortUnlessItIsTheApple(t *testing.T) {
+	r := fightRig(t, testVitals, 12, true)
+	r.give(1, idBread, 3)
+	r.setHunger(10)
+	r.l.eat = eatState{active: true, phase: eatHold, slot: 1, food: belief.Item{Slot: 1, Name: "bread", Count: 3}, startCount: 3, startHunger: 10}
+	r.run(2)
+	if r.l.eat.active {
+		t.Error("a bread meal went on through a fight")
+	}
+}

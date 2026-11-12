@@ -32,7 +32,8 @@ type Vitals struct {
 	// away from a threat instead of fighting.
 	RetreatHealth int
 	// EmergencyHealth is the health at or below which a golden apple is eaten
-	// whatever the hunger. It is the only time one is eaten by this reflex.
+	// whatever the hunger, in a fight too. It is the only time one is eaten by
+	// this reflex.
 	EmergencyHealth int
 	// RestBelow is the health under which a unit with no mob near stands still
 	// to heal, pausing a running task. Zero never pauses a task for it.
@@ -107,6 +108,17 @@ func (l *Life) emergency(s belief.Snapshot) bool {
 	return n > 0 && s.HealthKnown && s.Health <= float32(n)
 }
 
+// emergencyMeal is the golden apple to eat now: the unit is in an emergency,
+// holds one on the hotbar, and the last apple has had its cooldown. It is
+// not held back by a meal that was aborted or failed, which the apple's own
+// gate replaces.
+func (l *Life) emergencyMeal(s belief.Snapshot) (belief.Item, bool) {
+	if !l.cfg.Eat || !l.emergency(s) || l.tick < l.eat.appleUntil {
+		return belief.Item{}, false
+	}
+	return emergencyApple(s.Inventory)
+}
+
 // emergencyApple is the golden apple on the hotbar, if any.
 func emergencyApple(inv []belief.Item) (belief.Item, bool) {
 	for _, it := range inv {
@@ -138,6 +150,9 @@ func (l *Life) eatLimit(s belief.Snapshot, working bool) float32 {
 type restState struct {
 	active bool
 	ticks  int
+	// health is the health at the previous rest tick, so a rest notices the
+	// unit being damaged by something no mob check sees.
+	health float32
 	// blockedUntil is the tick before which no rest starts.
 	blockedUntil uint64
 }
@@ -186,10 +201,12 @@ func (l *Life) hostileNear(s belief.Snapshot) bool {
 func (l *Life) resting(s belief.Snapshot, working bool) {
 	r := &l.rest
 	if !r.active {
-		r.active, r.ticks = true, 0
+		r.active, r.ticks, r.health = true, 0, s.Health
 		l.logEvent("rest", map[string]any{"health": s.Health, "hunger": s.Hunger, "working": working})
 	}
 	r.ticks++
+	hurt := s.Health < r.health
+	r.health = s.Health
 	reason := ""
 	switch {
 	case s.Health >= float32(max(restUntilHealth, int(l.restBelow(working)))):
@@ -198,6 +215,10 @@ func (l *Life) resting(s belief.Snapshot, working bool) {
 		reason = "hungry"
 	case l.hostileNear(s):
 		reason = "threat"
+	case hurt:
+		// Fire, a cactus, magma or a bush: standing still would be dying
+		// where the task or the idle walk would have moved the unit off it.
+		reason = "hurt"
 	case r.ticks >= restMaxTicks:
 		reason = "timeout"
 	}
@@ -208,7 +229,7 @@ func (l *Life) resting(s belief.Snapshot, working bool) {
 	switch reason {
 	case "threat":
 		r.blockedUntil = l.tick + restThreatBackoff
-	case "hungry", "timeout":
+	case "hungry", "timeout", "hurt":
 		r.blockedUntil = l.tick + restBackoff
 	}
 	l.logEvent("rest_done", map[string]any{"reason": reason, "ticks": r.ticks, "health": s.Health})
