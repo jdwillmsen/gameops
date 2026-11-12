@@ -350,3 +350,53 @@ beside both pockets were still stone and the pockets intact. Confirmed:
 
 Not live-checked: a fight mid-shaft (the sim resumes at 12 points), sand,
 a hazard that appears after a cell is opened, and ore other than stone.
+
+## 2026-11-12: safe mining and the iron age (JDW-351)
+
+**Decision.** The stair shaft grows into a miner: it lights its way, takes ore
+and stops when it has enough; a smelt skill cooks what it finds; and
+`iron_age` chains stone tools to iron tools. An `enchanting_table` template and
+`task.Ladder` mark the next rungs. See "Safe mining and progression" in the
+README for the fields and the chain.
+
+**Why one skill, not a new one.** `mine_shaft` already has the hard parts: the
+hazard checks, gravel settling, bridging, climbing out of a trap and the
+deposit. Torches and ore are two phases between its steps (`shTorch`, `shOre`),
+off unless the spec asks, so `mine_shaft` behaves as before. The `mine_ore`
+template names the new fields rather than adding them to `mine_shaft`, because
+its limits differ (a dive to diamond depth is longer and wider than a lab
+shaft).
+
+**Light is modelled, not read.** The server sends block names, never light
+values, so `blockLight` floods torch, lava, lantern and glowstone light through
+open cells at one level per cell. It errs dark (unloaded cells stop it), and the
+threshold of 8 puts a torch about every three stair steps. Skylight is not
+modelled: the first two steps below the entrance never get a torch.
+
+**Ore is taken only when it can be had safely.** Exposed, in reach, harvestable
+by the best pickaxe held, collectable, not a floor of the unit's own stair, and
+passing the same hazard check as a dug cell. Ore sealed in stone is left:
+reaching it would mean digging toward a cell the plan did not clear. A vein
+running into the wall is taken as far as its drops can be reached.
+
+**Smelting closes the window.** A Bedrock furnace cooks with nobody at it, so
+the unit loads it, closes it, waits and comes back, rather than holding a
+window open for ten seconds an item. Cook time is 200 ticks an item plus
+slack, with two more waits for a slow server.
+
+**Rejected.**
+- Digging toward ore seen through stone: it is the unit reading the world as a
+  player cannot, and the dig has no hazard view of what lies between.
+- Placing the carried furnace at the stand: a furnace in the tunnel blocks it.
+  The template takes a cell instead, like `bootstrap`'s table.
+- One dive for coal and iron: torches need coal, which the unit may not have on
+  the way down, so the first dive is for coal and the second, down the same
+  stair, for iron.
+- Fuel from a mix of stacks: a furnace's fuel slot holds one kind, and mixing
+  needs a second load for a few planks.
+
+**Needs a live check.** The furnace window's container ids and slot numbers
+(the sim follows the content order); that the server wants the fuel quoted by
+stack id as the sim does; torch placement on a stair step; the break-and-collect
+of an ore beside the stair under the server's drop timing.
+

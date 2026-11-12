@@ -74,7 +74,11 @@ unit's protected stock.
   surplus, craft table/chests/tools, wood-to-stone tool upgrade.
 - **P2, wood economy**: search and planting hardening (survives deaths, resumes),
   tree-farm upkeep.
-- **P3, food and metal**: crops, animals, furnace/smelting, iron tier.
+- **P3, food and metal**: crops, animals, furnace/smelting, iron tier. Furnace,
+  smelting, torch-lit ore dives and the stone-to-iron chain (`iron_age`) are
+  built (JDW-351; README "Safe mining and progression"); crops and animals are
+  not. The enchanting table (4 obsidian, 2 diamonds, 1 book) is the ladder's
+  long-range goal, craftable but not yet fetchable.
 - **P4, memory and ledger**: persisted memory, the goal ledger, multi-unit roles.
 
 ## Verification
