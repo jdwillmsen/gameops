@@ -21,6 +21,13 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CREW_HARNESS` | `false` | Test harness only, for a throwaway preview server: opens the `interact_entity`, `attack_entity` and `equip_item` task templates and lists every known entity (position, tamed, sitting, owner, target) in `/v1/state`. Never set it on the lab |
 | `IDLE_RADIUS` | `8` | How far from where it went idle a wander may stray, in blocks (1 to 32) |
 | `DEFEND` | `true` | Fight hostile mobs, retreat at low health and from creepers, and step back from a player's blow |
+| `COMBAT_BASELINE` | `true` | A unit with no warrior role fights by the combat baseline (see Combat baseline); `false` leaves the plain reactive defence. The other `COMBAT_*` settings are read either way and ignored when it is off |
+| `COMBAT_FLEE_HEALTH` | `6` | Health (half-hearts, 1 to 18) at or under which the unit walks away from a fight |
+| `COMBAT_NIGHT_FLEE_HEALTH` | `8` | The same bar at dusk and night for an under-geared unit; at least `COMBAT_FLEE_HEALTH` |
+| `COMBAT_RESUME_HEALTH` | `12` | Health (2 to 20) a unit that fled must regain before it fights again; above the night bar |
+| `COMBAT_MIN_ARMOUR` | `8` | Armour rating (0 to 30; full leather 7, iron 15, diamond 20) under which, or with no sword or axe on the hotbar, the unit counts as under-geared |
+| `COMBAT_AVOID_NIGHT` | `true` | An under-geared unit gives ground at dusk and night instead of going out to meet a mob |
+| `COMBAT_SHIELD` | `true` | Raise a shield from the hotbar against arrows |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
 | `RETREAT_HEALTH` | `6` | Health (out of 20) at or below which the reactive defence walks away from a threat instead of fighting (1 to 20; see Health and food) |
 | `EMERGENCY_HEALTH` | `4` | Health at or below which a golden apple is eaten whatever the hunger; the only time one is (0 to 20, `0` never) |
@@ -110,7 +117,7 @@ With `DEFEND` the unit watches the entities the server announces:
   every 10 ticks with the best hotbar weapon (sword, then axe, then a tool,
   then a fist). Neutral mobs such as an enderman are fought only after they
   hurt the unit.
-- At 6 health (3 hearts) or less, and from a creeper within 5 blocks, the unit
+- At 6 health (3 hearts) or less (`COMBAT_FLEE_HEALTH`), and from a creeper within 5 blocks, the unit
   walks away instead. A retreat that cannot shake the threat for 10 s, or has
   nowhere to go, turns into a fight.
 - A player is never attacked, and neither are passive mobs. A player's blow
@@ -119,6 +126,43 @@ With `DEFEND` the unit watches the entities the server announces:
   chest, aborting a break), the unit fights, and the skill then resumes from
   its start with its progress kept. Fight time does not count toward
   `TASK_TIMEOUT_S`.
+
+### Combat baseline
+
+With `COMBAT_BASELINE` (on by default) a unit with no warrior role runs the
+rules below on top of `DEFEND`; a warrior keeps its own engine. They live in
+`internal/life/combat_baseline*.go`: `decide` is a pure function of a
+situation, so every row is a table test.
+
+- **Weapon and armour.** The best hotbar weapon is used as before. The unit is
+  *under-geared* when it holds no sword or axe, or its worn armour rates under
+  `COMBAT_MIN_ARMOUR` (defence points per piece, pieces under 15% durability
+  not counted).
+- **Flee and heal.** The unit walks away at `COMBAT_FLEE_HEALTH` or less, and
+  the flight is latched until health is back to `COMBAT_RESUME_HEALTH`, so it
+  does not turn round at the first heart. The default flee bar is the
+  reflex's own low-health bar; the resume bar is a health regeneration reaches
+  once the eat reflex has fed a hurt unit (it eats from food 17, regeneration
+  needs 18). A unit that cannot outrun the threat for 10 s, or has nowhere to
+  go, fights anyway. Logged as `combat_flee` and `combat_resume`.
+- **Night.** At dusk and night in the overworld an under-geared unit flees
+  from `COMBAT_NIGHT_FLEE_HEALTH` and gives ground to any mob it has not yet
+  come to blows with (an archer by breaking its line of sight). Cornered, or
+  with the mob already in reach, it fights.
+- **Creepers.** A creeper is backed away from, never meleed once its fuse is
+  lit or it is charged. The fuse is read from the actor flags, else from the
+  creeper standing still inside 3.5 blocks. A lit creeper outranks a nearer
+  mob as the target; a charged one is watched from 12.5 blocks and a lit one
+  from 7.5, not 5. Cornered, an unlit creeper in reach takes one blow and then
+  counts as lit; a cornered unit at or under the flee bar, or facing a lit or
+  charged creeper, holds still facing it.
+- **Skeletons, strays and bogged.** The unit closes on one that has shot it
+  along a zigzag (40 degrees off the bearing, swapping side every 8 ticks,
+  straight inside 3 blocks), raising a shield from the hotbar while an arrow
+  closes or the archer's head is on it, and swings with the shield down. A
+  weave that stops closing hands the walk to the pathing layer. A fleeing or
+  night-avoiding unit walks to the nearest reachable cell out of the archer's
+  line instead. Wither skeletons are melee mobs.
 
 Logs carry only events and types (`defend_started`, `hurt_by`,
 `defend_ended`), never positions. `defend_ended` carries `ticks` and a
