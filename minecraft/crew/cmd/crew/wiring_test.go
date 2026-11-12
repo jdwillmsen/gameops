@@ -272,6 +272,17 @@ func TestLifeConfigTurnsTheKitOnOnlyWithAChest(t *testing.T) {
 	}
 }
 
+func TestLifeConfigCarriesTheKitReachGearAndRecovery(t *testing.T) {
+	world := blocks.New(noNames{}, 1)
+	lc := lifeConfig(config.Config{KitChest: &[3]int32{1, 2, 3}, KitFood: 8, KitReach: 200, KitGear: true, RecoverDrops: true}, world)
+	if lc.Kit == nil || lc.Kit.Reach != 200 || !lc.Kit.Gear || !lc.Recover {
+		t.Errorf("config = %+v, kit %+v", lc, lc.Kit)
+	}
+	if lc := lifeConfig(config.Config{}, world); lc.Recover {
+		t.Error("recovery is on by default")
+	}
+}
+
 // Only a warrior with crew-control to reach joins a squad; anything else
 // keeps the reactive defence and no client.
 func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {
