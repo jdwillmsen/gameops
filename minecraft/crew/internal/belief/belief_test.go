@@ -372,3 +372,47 @@ func TestCreativeIsForgottenOnSpawnAndReset(t *testing.T) {
 		t.Error("creative survived a reset")
 	}
 }
+
+func TestSpawnPointComesFromPlayerSpawnPackets(t *testing.T) {
+	tr := spawned(t)
+	if s := tr.Snapshot(); s.SpawnKnown || s.SpawnSets != 0 {
+		t.Fatalf("a fresh session already knows a spawn point: %+v", s)
+	}
+	tr.Apply(&packet.SetSpawnPosition{SpawnType: packet.SpawnTypeWorld, Position: protocol.BlockPos{9, 9, 9}})
+	if tr.Snapshot().SpawnKnown {
+		t.Error("the world spawn was taken for the unit's own")
+	}
+	tr.Apply(&packet.SetSpawnPosition{SpawnType: packet.SpawnTypePlayer, Position: protocol.BlockPos{10, 64, -20}})
+	tr.Apply(&packet.SetSpawnPosition{SpawnType: packet.SpawnTypePlayer, Position: protocol.BlockPos{10, 64, -20}})
+	s := tr.Snapshot()
+	if !s.SpawnKnown || s.SpawnPoint != [3]int32{10, 64, -20} || s.SpawnSets != 2 {
+		t.Errorf("spawn = %v known %v sets %d", s.SpawnPoint, s.SpawnKnown, s.SpawnSets)
+	}
+}
+
+func TestSleepingFollowsOwnActorFlags(t *testing.T) {
+	tr := spawned(t)
+	sleep := func(id uint64, on bool) {
+		var v int64
+		if on {
+			v = 1 << (protocol.EntityDataFlagSleeping - 64)
+		}
+		tr.Apply(&packet.SetActorData{EntityRuntimeID: id, EntityMetadata: protocol.EntityMetadata{protocol.EntityDataKeyFlagsTwo: v}})
+	}
+	sleep(self+1, true)
+	if tr.Snapshot().Sleeping {
+		t.Error("another entity put the unit to bed")
+	}
+	sleep(self, true)
+	if !tr.Snapshot().Sleeping {
+		t.Error("the unit's own sleeping flag was missed")
+	}
+	tr.Apply(&packet.SetActorData{EntityRuntimeID: self, EntityMetadata: protocol.EntityMetadata{}})
+	if !tr.Snapshot().Sleeping {
+		t.Error("an update without the flag word woke the unit")
+	}
+	sleep(self, false)
+	if tr.Snapshot().Sleeping {
+		t.Error("the unit still sleeps after the flag cleared")
+	}
+}

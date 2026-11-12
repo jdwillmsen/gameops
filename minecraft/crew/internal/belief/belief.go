@@ -65,6 +65,18 @@ type Snapshot struct {
 	Armour []ArmourPiece `json:"armour,omitempty"`
 	// Env is the day phase, biome and rain as the server announced them.
 	Env Env `json:"env"`
+	// SpawnPoint is where the server says the unit respawns, from a
+	// SetSpawnPosition of the player kind. Since 1.16 the server sends the
+	// player's position at the time, not the bed's, so a bed and its point
+	// are near each other rather than equal.
+	SpawnPoint [3]int32 `json:"spawn_point"`
+	SpawnKnown bool     `json:"spawn_known"`
+	// SpawnSets counts the player spawn points the server has set, so a
+	// skill can tell a fresh answer from a point that was already there.
+	SpawnSets int `json:"-"`
+	// Sleeping is the unit's own sleeping flag, which the server clears at
+	// dawn.
+	Sleeping bool `json:"sleeping"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -161,6 +173,24 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 		t.s.Creative = p.GameType == gameTypeCreative
+	case *packet.SetSpawnPosition:
+		// The world spawn is not where the unit comes back to.
+		if p.SpawnType != packet.SpawnTypePlayer {
+			return
+		}
+		t.s.SpawnPoint, t.s.SpawnKnown = [3]int32{p.Position.X(), p.Position.Y(), p.Position.Z()}, true
+		t.s.SpawnSets++
+	case *packet.SetActorData:
+		if p.EntityRuntimeID != t.self {
+			return
+		}
+		// Flags past the 64th ride in a second word; an update without it
+		// leaves the flag as it was.
+		flags, ok := p.EntityMetadata[protocol.EntityDataKeyFlagsTwo].(int64)
+		if !ok {
+			return
+		}
+		t.s.Sleeping = flags&(1<<(protocol.EntityDataFlagSleeping-64)) != 0
 	case *packet.ChangeDimension:
 		t.s.Dimension, t.s.Position = p.Dimension, p.Position
 		// The old dimension's columns would answer for the new one.
