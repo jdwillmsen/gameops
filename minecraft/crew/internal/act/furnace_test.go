@@ -150,3 +150,77 @@ func TestFurnaceTakeRefusesAnEmptySlotAndBadArguments(t *testing.T) {
 		t.Error("took with no container open")
 	}
 }
+
+func furnaceInfo(container byte, slot byte, count byte, id int32) protocol.StackResponseContainerInfo {
+	return protocol.StackResponseContainerInfo{
+		Container: protocol.FullContainerName{ContainerID: container},
+		SlotInfo:  []protocol.StackResponseSlotInfo{{Slot: slot, Count: count, StackNetworkID: id}},
+	}
+}
+
+// The server answers a take with the counts left and sends no slot update, so
+// a second take must be quoted the answer's stack, not the one it opened with.
+func TestFurnaceTakeFoldsTheAnswerIntoTheWindow(t *testing.T) {
+	a, s := furnaceOpen(t, stack(90, ironIng, 5))
+	id, err := a.FurnaceTake(FurnaceResult, 3, beliefItem(9, "iron_ingot", 0, 0), 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: id, Status: StatusOK,
+		ContainerInfo: []protocol.StackResponseContainerInfo{furnaceInfo(protocol.ContainerFurnaceResult, byte(FurnaceResult), 2, 91)}}}})
+	if got := a.ContainerContent()[FurnaceResult]; got.Stack.Count != 2 || got.StackNetworkID != 91 || got.Stack.NetworkID != ironIng {
+		t.Fatalf("result slot after the take = %+v, want 2 ingots in stack 91", got)
+	}
+	if _, err := a.FurnaceTake(FurnaceResult, 3, beliefItem(9, "iron_ingot", 3, 55), 9); err == nil {
+		t.Error("took 3 from the 2 that are left")
+	}
+	if _, err := a.FurnaceTake(FurnaceResult, 2, beliefItem(9, "iron_ingot", 3, 55), 9); err != nil {
+		t.Fatal(err)
+	}
+	if tk := lastRequest(t, s).(*protocol.TakeStackRequestAction); tk.Source.StackNetworkID != 91 {
+		t.Errorf("second take quoted stack %d, want the answer's 91", tk.Source.StackNetworkID)
+	}
+}
+
+func TestFurnaceTakeClearsASlotTheAnswerEmptied(t *testing.T) {
+	a, _ := furnaceOpen(t, stack(90, ironIng, 3))
+	id, _ := a.FurnaceTake(FurnaceResult, 3, beliefItem(9, "iron_ingot", 0, 0), 9)
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: id, Status: StatusOK,
+		ContainerInfo: []protocol.StackResponseContainerInfo{furnaceInfo(protocol.ContainerFurnaceResult, byte(FurnaceResult), 0, 0)}}}})
+	if got := a.ContainerContent()[FurnaceResult]; got.Stack.Count != 0 || got.Stack.NetworkID != 0 {
+		t.Errorf("result slot = %+v, want it empty", got)
+	}
+	if _, err := a.FurnaceTake(FurnaceResult, 1, beliefItem(9, "iron_ingot", 0, 0), 9); err == nil {
+		t.Error("took from a slot the answer emptied")
+	}
+}
+
+func TestFurnaceLoadFoldsTheAnswerIntoTheWindow(t *testing.T) {
+	a, s := furnaceOpen(t, protocol.ItemInstance{})
+	a.itemIDs = map[string]int32{"coal": coalItem}
+	id, err := a.FurnaceLoad(beliefItem(2, "coal", 10, 31), 3, FurnaceFuel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: id, Status: StatusOK,
+		ContainerInfo: []protocol.StackResponseContainerInfo{furnaceInfo(protocol.ContainerFurnaceFuel, byte(FurnaceFuel), 3, 77)}}}})
+	if got := a.ContainerContent()[FurnaceFuel]; got.Stack.Count != 3 || got.StackNetworkID != 77 || got.Stack.NetworkID != coalItem {
+		t.Fatalf("fuel slot after the load = %+v, want 3 coal in stack 77", got)
+	}
+	if _, err := a.FurnaceLoad(beliefItem(2, "coal", 7, 31), 2, FurnaceFuel); err != nil {
+		t.Fatal(err)
+	}
+	if pl := lastRequest(t, s).(*protocol.PlaceStackRequestAction); pl.Destination.StackNetworkID != 77 {
+		t.Errorf("second load merged onto stack %d, want the answer's 77", pl.Destination.StackNetworkID)
+	}
+}
+
+func TestFurnaceRefusedAnswerLeavesTheWindowAlone(t *testing.T) {
+	a, _ := furnaceOpen(t, stack(90, ironIng, 5))
+	id, _ := a.FurnaceTake(FurnaceResult, 3, beliefItem(9, "iron_ingot", 0, 0), 9)
+	a.Apply(&packet.ItemStackResponse{Responses: []protocol.ItemStackResponse{{RequestID: id, Status: 49,
+		ContainerInfo: []protocol.StackResponseContainerInfo{furnaceInfo(protocol.ContainerFurnaceResult, byte(FurnaceResult), 0, 0)}}}})
+	if got := a.ContainerContent()[FurnaceResult]; got.Stack.Count != 5 {
+		t.Errorf("result slot = %+v after a refusal", got)
+	}
+}

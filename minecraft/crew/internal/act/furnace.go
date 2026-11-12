@@ -146,3 +146,51 @@ func (a *Actuator) FurnaceWindow() bool {
 	defer a.mu.Unlock()
 	return a.cont.open && len(a.cont.slots) >= furnaceSlots
 }
+
+// furnaceSlotOf names the furnace slot a response's container stands for.
+func furnaceSlotOf(container byte) (FurnaceSlot, bool) {
+	switch container {
+	case protocol.ContainerFurnaceIngredient:
+		return FurnaceIngredient, true
+	case protocol.ContainerFurnaceFuel:
+		return FurnaceFuel, true
+	case protocol.ContainerFurnaceResult:
+		return FurnaceResult, true
+	}
+	return 0, false
+}
+
+// applyFurnaceLocked folds an accepted answer's furnace slot changes into the
+// open window's cache. The server answers a request with the new counts and
+// stack IDs and sends no slot update, so without this the next take quotes the
+// stack ID from before the last one and is refused. As for the unit's own
+// inventory, a slot that held a stack keeps its item, an emptied one is
+// cleared, and one the request filled gets the item the request carried.
+func (a *Actuator) applyFurnaceLocked(r protocol.ItemStackResponse, item int32) {
+	if !a.cont.open || len(a.cont.slots) < furnaceSlots {
+		return
+	}
+	for _, c := range r.ContainerInfo {
+		slot, ok := furnaceSlotOf(c.Container.ContainerID)
+		if !ok {
+			continue
+		}
+		for _, s := range c.SlotInfo {
+			cur := a.cont.slots[slot]
+			switch {
+			case s.Count == 0:
+				a.cont.slots[slot] = protocol.ItemInstance{}
+			case cur.Stack.NetworkID != 0 && cur.Stack.Count > 0:
+				a.cont.slots[slot] = protocol.ItemInstance{
+					StackNetworkID: s.StackNetworkID,
+					Stack:          protocol.ItemStack{ItemType: cur.Stack.ItemType, Count: uint16(s.Count)},
+				}
+			case item != 0:
+				a.cont.slots[slot] = protocol.ItemInstance{
+					StackNetworkID: s.StackNetworkID,
+					Stack:          protocol.ItemStack{ItemType: protocol.ItemType{NetworkID: item}, Count: uint16(s.Count)},
+				}
+			}
+		}
+	}
+}
