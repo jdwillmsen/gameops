@@ -688,7 +688,8 @@ creative, the unit takes the tick ahead of its queued task or work plan:
   blocks away or no longer there counts as none. The server refuses sleep
   until about tick 12542, so a visit that ends with the unit still awake is
   repeated every 5 seconds, up to 16 times a night, and only then does the
-  unit dig in instead.
+  unit dig in instead. A bed visit that fails (no spot to stand beside the
+  bed, say) sends it to dig in after 5 seconds.
 - With no bed it walls itself in where it stands (`shelter`) and digs out at
   dawn. It needs blocks in its inventory; with too few, `night_failed` is
   logged and the next try is a minute later.

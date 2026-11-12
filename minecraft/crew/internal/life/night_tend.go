@@ -51,8 +51,10 @@ type nightState struct {
 	startedAt uint64
 	// blockedUntil is the tick before which no visit starts.
 	blockedUntil uint64
-	// bedVisits counts tonight's bed visits.
+	// bedVisits counts tonight's bed visits, and bedFailed says one failed, so
+	// the bed is not trusted for the rest of the night.
 	bedVisits int
+	bedFailed bool
 	// resume says a fight interrupted the visit, which then replans.
 	resume bool
 }
@@ -89,13 +91,13 @@ func (l *Life) wantsNight(s belief.Snapshot) bool {
 		return true
 	}
 	if s.Env.DayPhase == belief.PhaseDay {
-		n.bedVisits = 0
+		n.bedVisits, n.bedFailed = 0, false
 	}
 	if !nightFree(s, s.Env) || l.tick < n.blockedUntil {
 		return false
 	}
 	bed, haveBed := l.bedFor(s)
-	haveBed = haveBed && n.bedVisits < nightMaxBedVisits
+	haveBed = haveBed && !n.bedFailed && n.bedVisits < nightMaxBedVisits
 	var kind nightKind
 	switch {
 	case ShouldSleep(s, s.Env, haveBed):
@@ -148,8 +150,18 @@ func (l *Life) endNight(err error) {
 	n := &l.night
 	kind := n.kind
 	n.visit = nil
+	// A walk home that the night interrupted starts its clock over.
+	if l.home.visit != nil {
+		l.home.startedAt, l.home.resume = l.tick, true
+	}
 	if err != nil {
 		l.logEvent("night_failed", map[string]any{"kind": kind.String(), "error": err.Error()})
+		if kind == nightBed {
+			// A bed that cannot be used tonight sends the unit to dig in soon,
+			// not a minute from now.
+			n.bedFailed, n.blockedUntil = true, l.tick+nightRetryBackoff
+			return
+		}
 		n.blockedUntil = l.tick + nightFailBackoff
 		return
 	}

@@ -325,3 +325,51 @@ func TestASleepingUnitDoesNotTryToEat(t *testing.T) {
 		t.Error("wants a meal in bed")
 	}
 }
+
+// A bed that cannot be used sends the unit to dig in at once, not after the
+// minute a failed shelter waits.
+func TestAFailedBedVisitFallsBackToTheShelterSoon(t *testing.T) {
+	nr := newNightRig(t)
+	nr.w.over[protocol.BlockPos{20, 1, 25}] = "red_bed"
+	nr.setSpawn(protocol.BlockPos{19, 1, 24})
+	nr.build = func(k nightKind) *fakeVisit {
+		if k == nightBed {
+			return &fakeVisit{name: "night", doneAfter: 2, err: errors.New("no standing spot within reach of the bed")}
+		}
+		return &fakeVisit{name: "night", doneAfter: 1 << 30}
+	}
+	nr.clock(tickNight)
+	nr.run(nightRetryBackoff + 20)
+	if len(nr.asked) != 2 || nr.asked[0].kind != nightBed || nr.asked[1].kind != nightShelter {
+		t.Fatalf("asked = %+v, want the bed and then a shelter", nr.asked)
+	}
+}
+
+func TestANightVisitDoesNotUseUpTheWalkHomesTime(t *testing.T) {
+	nr := newNightRig(t)
+	home := protocol.BlockPos{5, 1, 5}
+	nr.l.cfg.Home = &home
+	nr.l.home = newHomeState(nr.l.cfg)
+	trip := &fakeVisit{name: "go_home", doneAfter: 1 << 30}
+	nr.l.makeHome = func() skill.Skill { return trip }
+	nr.run(10)
+	if trip.steps == 0 {
+		t.Fatal("the trip never started")
+	}
+	// Dusk comes, and the night visit keeps the unit for longer than the trip's
+	// budget would allow.
+	night := &fakeVisit{name: "night", doneAfter: homeLimit + 100}
+	nr.build = func(nightKind) *fakeVisit { return night }
+	nr.l.night.blockedUntil = 0
+	nr.clock(tickNight)
+	nr.run(homeLimit + 150)
+	if nr.count("night_done") != 1 {
+		t.Fatalf("log = %+v", nr.log.lines)
+	}
+	nr.clock(tickDawn)
+	steps := trip.steps
+	nr.run(50)
+	if nr.count("home_failed") != 0 || trip.steps <= steps {
+		t.Errorf("the trip was dropped after the night: failed %d, steps %d -> %d", nr.count("home_failed"), steps, trip.steps)
+	}
+}
