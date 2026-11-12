@@ -85,6 +85,7 @@ type wPhaseState struct {
 	wearSlot    int
 	wearSettle  bool
 	wearSkip    map[int]bool
+	worn        int
 }
 
 // NewWithdrawChest takes up to want[item] of each listed item out of the
@@ -513,6 +514,7 @@ func (w *Withdraw) wearing(a Actuator, snap belief.Snapshot) outcome {
 			return w.idle(a)
 		}
 		ph.wearSettle, ph.waited = false, 0
+		ph.worn++
 	}
 	for _, it := range snap.Inventory {
 		slot := armourSlotOf(it.Name)
@@ -525,6 +527,12 @@ func (w *Withdraw) wearing(a Actuator, snap belief.Snapshot) outcome {
 		}
 		ph.wearPending, ph.wearReq, ph.wearSlot, ph.waited = true, id, slot, 0
 		return w.idle(a)
+	}
+	if ph.full && ph.worn > 0 {
+		// Wearing freed slots that the withdrawals skipped for want of room.
+		ph.worn = 0
+		ph.p = wTake
+		return next
 	}
 	return w.finish(a)
 }

@@ -430,3 +430,24 @@ func TestWithdrawWithoutWearOnlyCarriesThePiece(t *testing.T) {
 		t.Errorf("armour %+v, helmets held %d", r.self().Armour, r.have("iron_helmet"))
 	}
 }
+
+func TestWithdrawRetriesPiecesSkippedForRoomOnceWearingFreesSlots(t *testing.T) {
+	w := haulWorld()
+	r := haulRig(t, w)
+	gearChest(r)
+	for slot := 1; slot < 35; slot++ {
+		r.give(slot, idCobblestone, 64)
+	}
+	// Slot 35 is the only one free; slot 0 holds the pick.
+	s := NewWithdrawChest(w, r.self, srcA, nil, IntoHotbar(), Anywhere(gearNames...), Wear(), OneOf(1, helmets...), OneOf(1, bootsBest...))
+	if st, err := r.run(s, 2500); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	got := map[string]bool{}
+	for _, p := range r.self().Armour {
+		got[p.Slot] = true
+	}
+	if !got["helmet"] || !got["boots"] {
+		t.Errorf("worn = %v, want both pieces", got)
+	}
+}
