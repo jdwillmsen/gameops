@@ -24,12 +24,16 @@ const (
 	// redoBedTicks is how long a tap may go unanswered before it is sent
 	// once more, as a tap right after a join can be swallowed.
 	redoBedTicks = 60
+	// wakeWindow is how long the server has to take the unit out of bed after
+	// it was asked to.
+	wakeWindow = 40
 )
 
 var (
 	errNoBed       = errors.New("no bed at the target")
 	errBedNotSet   = errors.New("the server did not set the respawn point")
 	errBedUnloaded = errors.New("the bed's chunk is not loaded")
+	errBedNotWoken = errors.New("the unit did not leave the bed")
 )
 
 type bedPhase int
@@ -58,6 +62,7 @@ type UseBed struct {
 	// tap went out, so only a later one answers it.
 	setsBefore int
 	slept      bool
+	waking     bool
 	set        bool
 }
 
@@ -236,9 +241,18 @@ func (u *UseBed) sleep(a Actuator, snap belief.Snapshot) outcome {
 	switch {
 	case u.slept && !snap.Sleeping:
 		return outcome{st: Done}
+	case u.slept && u.waking:
+		if u.waited++; u.waited >= wakeWindow {
+			return u.failed(errBedNotWoken)
+		}
 	case u.slept:
 		if u.waited++; u.waited >= maxSleepTicks {
-			return outcome{st: Done}
+			// The server never woke the unit; leaving it in bed would hold it
+			// there through whatever task comes next.
+			if err := a.StopSleeping(); err != nil {
+				return u.failed(err)
+			}
+			u.waking, u.waited = true, 0
 		}
 	case snap.Env.DayPhase == belief.PhaseDay:
 		return outcome{st: Done}

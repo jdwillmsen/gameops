@@ -237,3 +237,44 @@ func TestUseBedResumedAfterTheSpawnWasSetIsNotAFailure(t *testing.T) {
 		t.Fatalf("status %v, err %v", st, err)
 	}
 }
+
+func TestUseBedWakesAUnitTheServerNeverWakes(t *testing.T) {
+	br := newBedRig(t, nightTicks)
+	br.wakeAt = 1 << 30
+	onWrite := br.onWrite
+	br.onWrite = func(pk packet.Packet) bool {
+		if p, ok := pk.(*packet.PlayerAction); ok && p.ActionType == protocol.PlayerActionStopSleeping {
+			br.wakeAt = 0
+		}
+		return onWrite(pk)
+	}
+	sk := br.skill(nil)
+	for i := 0; i < 400 && !br.self().Sleeping; i++ {
+		br.wakeAt = 1 << 30
+		if st, err := sk.Step(t.Context(), br); st != Running {
+			t.Fatalf("status %v, err %v before sleeping", st, err)
+		}
+	}
+	br.wakeAt = 1 << 30
+	if st, err := br.run(sk, maxSleepTicks+200); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if br.stopped != 1 || br.self().Sleeping {
+		t.Errorf("stopped %d times, sleeping %v: the unit was left in bed", br.stopped, br.self().Sleeping)
+	}
+}
+
+func TestUseBedFailsWhenTheServerKeepsTheUnitInBed(t *testing.T) {
+	br := newBedRig(t, nightTicks)
+	br.wakeAt = 1 << 30
+	sk := br.skill(nil)
+	for i := 0; i < 400 && !br.self().Sleeping; i++ {
+		br.wakeAt = 1 << 30
+		sk.Step(t.Context(), br)
+	}
+	br.wakeAt = 1 << 30
+	st, err := br.run(sk, maxSleepTicks+200)
+	if st != Failed || !errors.Is(err, errBedNotWoken) {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
