@@ -40,7 +40,8 @@ const (
 	kitLimit = 1200
 	// Farther than this from the chest a unit stays where it is: the walk
 	// leaves the loaded chunks and outlasts the visit limit, so it could only
-	// fail, and the task queue waits for the whole of a failing visit.
+	// fail, and the task queue waits for the whole of a failing visit. A Kit
+	// may set its own reach.
 	kitReach = 96
 	// The back-off after a failed visit doubles with each failure in a row, up
 	// to this, so a unit that cannot reach its kit stops spending its time on it.
@@ -66,12 +67,48 @@ var foodsBestFirst = func() []string {
 	return names
 }()
 
+// armourPieces are the four worn pieces, in the order of the armour slots.
+var armourPieces = [4]string{"helmet", "chestplate", "leggings", "boots"}
+
+// wornSlots name those slots as belief reports them.
+var wornSlots = [4]string{"helmet", "chest", "legs", "boots"}
+
+var armourMaterials = []string{"netherite", "diamond", "iron", "chainmail", "copper", "golden", "leather"}
+var toolMaterials = []string{"netherite", "diamond", "iron", "stone", "copper", "golden", "wooden"}
+
+// bestFirst lists a piece or tool in every material, best first.
+func bestFirst(materials []string, kind string) []string {
+	out := make([]string, len(materials))
+	for i, m := range materials {
+		out[i] = m + "_" + kind
+	}
+	return out
+}
+
+// gearNames is every armour piece and tool a gear visit may carry off the
+// hotbar.
+var gearNames = func() []string {
+	var out []string
+	for _, p := range armourPieces {
+		out = append(out, bestFirst(armourMaterials, p)...)
+	}
+	out = append(out, bestFirst(toolMaterials, "pickaxe")...)
+	return append(out, bestFirst(toolMaterials, "axe")...)
+}()
+
 // Kit is a chest a unit rearms from.
 type Kit struct {
 	Chest protocol.BlockPos
 	// Food is how many food items a visit takes at most.
 	Food  int
 	World skill.ChestWorld
+	// Reach is how far from the chest, in blocks, a unit still sets out for
+	// it; zero is kitReach.
+	Reach float64
+	// Gear adds armour, worn on the spot, and a pickaxe and an axe to what a
+	// visit takes. Left off, a unit without armour is not counted as missing
+	// anything, so a chest that stocks none is not walked to for nothing.
+	Gear bool
 }
 
 type kitState struct {
@@ -87,6 +124,8 @@ type kitState struct {
 	retryTries int
 	// fails counts the failed visits in a row, until one completes.
 	fails int
+	// asked is what the visit under way was started for.
+	asked kitMissing
 }
 
 // lacks says what the unit is missing that the kit holds: a sword or axe, and
@@ -105,6 +144,48 @@ func lacks(s belief.Snapshot) (weapon, food bool) {
 		}
 	}
 	return weapon, food
+}
+
+// kitMissing is everything a visit could bring.
+type kitMissing struct {
+	weapon, food bool
+	// armour is true for each worn slot that is empty.
+	armour       [4]bool
+	pickaxe, axe bool
+}
+
+func (m kitMissing) gear() bool {
+	return m.armour[0] || m.armour[1] || m.armour[2] || m.armour[3] || m.pickaxe || m.axe
+}
+
+func (m kitMissing) any() bool { return m.weapon || m.food || m.gear() }
+
+// missing says what a visit would bring. Armour and tools count only when the
+// kit carries them.
+func (l *Life) missing(s belief.Snapshot) kitMissing {
+	var m kitMissing
+	m.weapon, m.food = lacks(s)
+	if l.cfg.Kit == nil || !l.cfg.Kit.Gear {
+		return m
+	}
+	for i, slot := range wornSlots {
+		m.armour[i] = true
+		for _, p := range s.Armour {
+			if p.Slot == slot {
+				m.armour[i] = false
+			}
+		}
+	}
+	m.pickaxe, m.axe = true, true
+	for _, it := range s.Inventory {
+		switch {
+		case strings.HasSuffix(it.Name, "_pickaxe"):
+			m.pickaxe = false
+		case strings.HasSuffix(it.Name, "_axe"):
+			m.axe = false
+		}
+	}
+	return m
 }
 
 // hotbarFree says whether a hotbar slot is empty. Whatever a unit lacks has no
@@ -130,22 +211,31 @@ func (l *Life) kitWants(s belief.Snapshot, working bool) bool {
 	if k.visit != nil {
 		return true
 	}
-	weapon, food := lacks(s)
-	if !weapon && !food {
+	m := l.missing(s)
+	if !m.any() {
 		k.needing = false
 		return false
 	}
 	if !k.needing {
 		k.needing, k.needSince = true, l.tick
 	}
-	return !working && hotbarFree(s) && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks && l.kitInReach(s)
+	// A weapon and food go on the hotbar; with no slot free there only the
+	// gear can be brought.
+	if !hotbarFree(s) {
+		m.weapon, m.food = false, false
+	}
+	return !working && m.any() && l.tick >= k.blockedUntil && l.tick-k.needSince >= kitSettleTicks && l.kitInReach(s)
 }
 
 // kitInReach says whether the chest is near enough to walk to.
 func (l *Life) kitInReach(s belief.Snapshot) bool {
 	chest := l.cfg.Kit.Chest
 	dx, dz := float64(s.Position[0])-float64(chest.X()), float64(s.Position[2])-float64(chest.Z())
-	return math.Hypot(dx, dz) <= kitReach
+	reach := l.cfg.Kit.Reach
+	if reach <= 0 {
+		reach = kitReach
+	}
+	return math.Hypot(dx, dz) <= reach
 }
 
 // tendKit steps the visit to the chest by one tick, starting it first if none is
@@ -167,12 +257,16 @@ func (l *Life) tendKit(ctx context.Context, a skill.Actuator, s belief.Snapshot)
 func (l *Life) advanceKit(ctx context.Context, a skill.Actuator, s belief.Snapshot) (skill.Status, error) {
 	k := &l.kit
 	if k.visit == nil {
-		weapon, food := lacks(s)
+		m := l.missing(s)
+		if !hotbarFree(s) {
+			m.weapon, m.food = false, false
+		}
+		k.asked = m
 		n := 0
-		if food {
+		if m.food {
 			n = l.cfg.Kit.Food
 		}
-		k.visit, k.startedAt = l.newKit(weapon, n), l.tick
+		k.visit, k.startedAt = l.newKit(m, n), l.tick
 		if err := k.visit.Ready(s); err != nil {
 			return skill.Failed, err
 		}
@@ -219,17 +313,20 @@ func (l *Life) endKit(err error) {
 		return
 	}
 	k.retryTries, k.fails = 0, 0
-	weapon, food := lacks(l.self())
-	if !weapon && !food {
+	m := l.missing(l.self())
+	if !m.any() {
 		l.logEvent("kit_restocked", nil)
 		return
 	}
 	var missing []string
-	if weapon {
+	if m.weapon {
 		missing = append(missing, "weapon")
 	}
-	if food {
+	if m.food {
 		missing = append(missing, "food")
+	}
+	if m.gear() {
+		missing = append(missing, "gear")
 	}
 	event := "kit_empty"
 	if full != nil && full.Full() && !hotbarFree(l.self()) {
@@ -253,16 +350,30 @@ func (l *Life) stopKit(a skill.Actuator) {
 	k.blockedUntil = l.tick + kitAbortBackoff
 }
 
-func (l *Life) newKit(weapon bool, food int) skill.Skill {
+func (l *Life) newKit(m kitMissing, food int) skill.Skill {
 	if l.makeKit != nil {
-		return l.makeKit(weapon, food)
+		return l.makeKit(m.weapon, food)
 	}
 	opts := []skill.Option{skill.IntoHotbar()}
-	if weapon {
+	if m.weapon {
 		opts = append(opts, skill.OneOf(1, swords...))
 	}
 	if food > 0 {
 		opts = append(opts, skill.OneOf(food, foodsBestFirst...))
+	}
+	if m.gear() {
+		opts = append(opts, skill.Anywhere(gearNames...), skill.Wear())
+		for i, lacking := range m.armour {
+			if lacking {
+				opts = append(opts, skill.OneOf(1, bestFirst(armourMaterials, armourPieces[i])...))
+			}
+		}
+		if m.pickaxe {
+			opts = append(opts, skill.OneOf(1, bestFirst(toolMaterials, "pickaxe")...))
+		}
+		if m.axe {
+			opts = append(opts, skill.OneOf(1, bestFirst(toolMaterials, "axe")...))
+		}
 	}
 	if l.log != nil {
 		opts = append(opts, skill.WithLogger(l.log))
