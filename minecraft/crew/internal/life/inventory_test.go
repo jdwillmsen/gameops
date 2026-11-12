@@ -410,3 +410,43 @@ func TestEveryFoodTheManagerKeepsIsOneTheUnitEats(t *testing.T) {
 		}
 	}
 }
+
+func TestWhileATaskRunsOnlyJunkIsDropped(t *testing.T) {
+	r, _ := invRig(t, nil)
+	r.give(4, idCobble, 90)
+	r.give(5, idRotten, 3)
+	snap := r.tracker.Snapshot()
+	if !r.l.Tending(snap, true) || r.l.inv.move.Name != "rotten_flesh" {
+		t.Fatalf("working: next = %+v, want the junk", r.l.inv.move)
+	}
+	r.give(5, 0, 0)
+	if r.l.Tending(r.tracker.Snapshot(), true) {
+		t.Error("shed cobblestone under a running task that may be collecting it")
+	}
+	if !r.l.Tending(r.tracker.Snapshot(), false) || r.l.inv.move.Name != "cobblestone" {
+		t.Error("idle unit did not drop the cobblestone beyond the reserve")
+	}
+}
+
+func TestATripThatCannotStartAnyDepositIsAFailure(t *testing.T) {
+	r, stubs := invRig(t, chestAt())
+	r.l.makeDeposit = func(m inventory.Move) skill.Skill {
+		d := &notReady{depositStub{r: r, move: m}}
+		*stubs = append(*stubs, &d.depositStub)
+		return d
+	}
+	r.fillWithLoot(33)
+	r.run(30)
+	if !r.logged("inv_trip_failed") {
+		t.Errorf("log = %+v; want the skipped trip reported", r.log.lines)
+	}
+	n := len(*stubs)
+	r.run(600)
+	if len(*stubs) != n {
+		t.Error("retried inside the back-off")
+	}
+}
+
+type notReady struct{ depositStub }
+
+func (*notReady) Ready(belief.Snapshot) error { return errors.New("not in the overworld") }
