@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
@@ -150,7 +151,8 @@ func TestShelterAvoidsASideWithNoFloor(t *testing.T) {
 func TestShelterUsesAHillsideForFewerBlocks(t *testing.T) {
 	w := flatWorld(40)
 	w.fill("stone", 17, 1, 17, 23, 4, 23)
-	w.fill("air", 20, 1, 20, 21, 2, 20)
+	// The tunnel runs out to open ground, so leaving it at dawn has somewhere to go.
+	w.fill("air", 20, 1, 20, 23, 2, 20)
 	r := shelterRig(t, w, 2)
 	st, err := r.run(NewShelter(w, atNight(r, 60), 0), 2000)
 	if st != Done || err != nil {
@@ -206,5 +208,59 @@ func TestShelterReadyRefusesDaytime(t *testing.T) {
 	s.Dimension = 1
 	if err := sk.Ready(s); err == nil {
 		t.Error("ready outside the overworld")
+	}
+}
+
+func TestShelterFailsAfterOneRetryWhenTheBlockNeverAppears(t *testing.T) {
+	w := flatWorld(40)
+	r := shelterRig(t, w, 32)
+	clicks := 0
+	// A mob in the cell: the server takes the click and shows nothing.
+	r.onWrite = func(pk packet.Packet) bool {
+		if _, ok := pk.(*packet.InventoryTransaction); ok {
+			clicks++
+			return true
+		}
+		return false
+	}
+	st, err := r.run(NewShelter(w, atNight(r, -1), 0), 1000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "did not confirm") {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if clicks != 2 {
+		t.Errorf("clicked %d times, want the placement and one retry", clicks)
+	}
+}
+
+func TestShelterLeavesThroughAPlacedWallNotNaturalRock(t *testing.T) {
+	w := flatWorld(40)
+	w.fill("stone", 21, 1, 20, 22, 3, 20)
+	r := shelterRig(t, w, 32)
+	st, err := r.run(NewShelter(w, atNight(r, 60), 0), 2000)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if w[protocol.BlockPos{21, 1, 20}] != "stone" || w[protocol.BlockPos{21, 2, 20}] != "stone" {
+		t.Error("the natural wall was dug")
+	}
+	open := 0
+	for _, c := range ringCells(protocol.BlockPos{20, 1, 20}) {
+		if w[c] == "air" {
+			open++
+		}
+	}
+	if open != 2 {
+		t.Errorf("%d ring cells open, want one placed column", open)
+	}
+}
+
+func TestShelterFailsRatherThanLeaveBySealedRock(t *testing.T) {
+	w := flatWorld(40)
+	w.fill("stone", 18, 1, 18, 22, 4, 22)
+	w.fill("air", 19, 1, 19, 21, 2, 21)
+	r := shelterRig(t, w, 32)
+	st, err := r.run(NewShelter(w, atNight(r, 60), 0), 2000)
+	if st != Failed || err == nil || !strings.Contains(err.Error(), "no safe exit") {
+		t.Fatalf("status %v, err %v", st, err)
 	}
 }
