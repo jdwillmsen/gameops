@@ -514,14 +514,17 @@ func (m *Mine) pickupStep(a Actuator, have int, p act.Pose) outcome {
 // blocks deep.
 const maxDropFall = 8
 
-// dropRest is the cell a drop from the target comes to rest in. It falls
+// dropRest is the cell a drop from the target comes to rest in.
+func (m *Mine) dropRest() protocol.BlockPos { return dropRestAt(m.world, m.target) }
+
+// dropRestAt is the cell a drop from a broken block comes to rest in. It falls
 // straight down through open cells, so a block mined over a hole drops its item
 // to the bottom of the hole, not into the cell it left.
-func (m *Mine) dropRest() protocol.BlockPos {
-	c := m.target
+func dropRestAt(world path.Blocks, from protocol.BlockPos) protocol.BlockPos {
+	c := from
 	for i := 0; i < maxDropFall; i++ {
 		below := protocol.BlockPos{c.X(), c.Y() - 1, c.Z()}
-		if name, known := m.world.Block(below); !known || !path.Passable(name) {
+		if name, known := world.Block(below); !known || !path.Passable(name) {
 			break
 		}
 		c = below
@@ -533,7 +536,23 @@ func (m *Mine) dropRest() protocol.BlockPos {
 // it, or none if the unit is already close enough, in height as well, to
 // collect it.
 func (m *Mine) pickupCell(p act.Pose) (protocol.BlockPos, bool) {
-	rest := m.dropRest()
+	return pickupCellAt(m.world, m.dropRest(), p)
+}
+
+// collectable says the unit can come by a drop at rest: it is within range of
+// where the unit stands or there is a cell beside it to stand on. A drop in a
+// pocket with no headroom, two cells into a wall, is neither.
+func collectable(world path.Blocks, rest protocol.BlockPos, p act.Pose) bool {
+	if _, ok := pickupCellAt(world, rest, p); ok {
+		return true
+	}
+	drop := centre(rest)
+	return math.Hypot(float64(drop.X()-p.Feet.X()), float64(drop.Z()-p.Feet.Z())) <= pickupStand+0.5 &&
+		math.Abs(float64(p.Feet.Y())-float64(rest.Y())) <= 1
+}
+
+// pickupCellAt is pickupCell for a drop at rest.
+func pickupCellAt(world path.Blocks, rest protocol.BlockPos, p act.Pose) (protocol.BlockPos, bool) {
 	drop := centre(rest)
 	near := func(c mgl32.Vec3) float64 {
 		return math.Hypot(float64(drop.X()-c.X()), float64(drop.Z()-c.Z()))
@@ -546,7 +565,7 @@ func (m *Mine) pickupCell(p act.Pose) (protocol.BlockPos, bool) {
 		for dy := int32(-1); dy <= 1; dy++ {
 			for dz := int32(-1); dz <= 1; dz++ {
 				c := protocol.BlockPos{rest.X() + dx, rest.Y() + dy, rest.Z() + dz}
-				if d := near(centre(c)); d <= 1.0+1e-6 && d < bestD && path.Standable(m.world, c) {
+				if d := near(centre(c)); d <= 1.0+1e-6 && d < bestD && path.Standable(world, c) {
 					best, bestD, found = c, d, true
 				}
 			}

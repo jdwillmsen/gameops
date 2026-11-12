@@ -526,7 +526,8 @@ func (r *rig) onBroken(pos protocol.BlockPos) {
 	if falling(r.world[protocol.BlockPos{pos.X(), pos.Y() + 1, pos.Z()}]) {
 		r.falls = append(r.falls, fall{at: pos, left: max(r.fallDelay, 4)})
 	}
-	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone, "gravel": idGravel, "coal_ore": idCoal}
+	drops := map[string]int32{"stone": idCobblestone, "oak_log": idOakLog, "dirt": idDirt, "cobblestone": idCobblestone, "gravel": idGravel, "coal_ore": idCoal,
+		"iron_ore": idRawIron, "diamond_ore": idDiamond}
 	if name == "oak_leaves" && r.leafDropEvery > 0 {
 		if r.leafBreaks++; r.leafBreaks%r.leafDropEvery == 0 {
 			drops[name] = idSapling
