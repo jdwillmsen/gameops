@@ -126,7 +126,6 @@ func TestADeathTooFarOrInLavaOrAnotherDimensionIsSkipped(t *testing.T) {
 		{"far", nil, mgl32.Vec3{150, 1, 20}, "too_far"},
 		{"lava", func(r *rig) { r.w.over[protocol.BlockPos{20, 0, 20}] = "lava" }, respawnAt, "hazard"},
 		{"void", func(r *rig) { r.l.feet = mgl32.Vec3{20, -70, 20} }, respawnAt, "hazard"},
-		{"unloaded", func(r *rig) { r.w.size = 10 }, mgl32.Vec3{3.5, 1, 3.5}, "chunk_not_loaded"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -241,5 +240,39 @@ func TestANewDeathDropsTheTripForTheOldOne(t *testing.T) {
 	r.l.Engaged(r.a.Pose(), r.tracker.Snapshot())
 	if r.l.rec.visit != nil {
 		t.Error("the old trip survived a second death")
+	}
+}
+
+func TestATripHeldByAFightPastTheDropsLifetimeIsDropped(t *testing.T) {
+	r := recoverRig(t, true)
+	v := &stroll{r: r, left: 100000}
+	r.l.makeRecover = func(lastDeath) skill.Skill { return v }
+	r.perish()
+	r.respawnTo(respawnAt)
+	r.run(5)
+	if r.l.rec.visit == nil {
+		t.Fatal("no trip under way")
+	}
+	r.l.tick += recoverWindow + 1
+	r.run(3)
+	if r.l.rec.visit != nil || r.count("recover_failed") != 1 {
+		t.Errorf("trip kept past the window; log = %+v", r.log.lines)
+	}
+}
+
+func TestADeathWhoseChunkArrivesLateIsStillRecovered(t *testing.T) {
+	r := recoverRig(t, true)
+	r.perish()
+	size := r.w.size
+	r.w.size = 10 // the death point's column is not known yet
+	r.respawnTo(mgl32.Vec3{3.5, 1, 3.5})
+	r.run(20)
+	if r.count("recover_started") != 0 || len(reasons(r)) != 0 {
+		t.Fatalf("decided too early: %+v", r.log.lines)
+	}
+	r.w.size = size
+	r.run(5)
+	if r.count("recover_started") != 1 {
+		t.Errorf("never set out once the chunk loaded: %+v", r.log.lines)
 	}
 }
