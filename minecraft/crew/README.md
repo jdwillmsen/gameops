@@ -819,7 +819,10 @@ and an area up to 160 blocks on an axis, so a dive can reach diamond depth.
 `ores` lists 1 to 3 of `coal`, `iron` and `diamond`. `torches` lights the way.
 `goal` maps a dropped item (`coal`, `raw_iron`, `diamond`) to an amount; once
 every item has been gained since the task began, the unit stops digging, climbs
-out and deposits as usual. What the unit came with does not count.
+out and deposits as usual. What the unit came with does not count. The task is
+`done` only if the goal was met: a dive that ends short deposits what it found
+and fails with `the dive found <n> of <m> <item>` (`no_progress`), so a
+controller walking the ladder does not resubmit a `done` that gained nothing.
 
 - **Torches.** The skill models block light: torches, lava, lanterns and the
   like light the open cells around them, losing one level per cell and stopping
@@ -835,13 +838,18 @@ out and deposits as usual. What the unit came with does not count.
   pickaxe on its hotbar cannot harvest (coal needs any pickaxe, iron stone or
   better, diamond iron or better; logged `mine_ore_skipped`), ore sealed in
   stone, ore that is a floor of its own stair, ore whose break would admit lava
-  or water, and ore whose drop it could not walk to. Veins
+  or water, and ore whose drop it could not walk to. The drop falls up to eight
+  cells and the unit then walks beside it, and the path planner does not avoid
+  lava (a cell above it counts as standable), so ore is also left if any liquid
+  lies in the drop's fall, in the cell it comes to rest in, in the cells around
+  that or in the two below it, or if a gravel or sand block sits over the ore
+  (`mine_ore_skipped`, `why` `lava`, `water`, `magma` or `falling`). Veins
   that run into the wall are therefore only partly taken. It always holds its
   best pickaxe, and `mine_block` does too.
-- **Gathering.** `gather_and_deposit` also takes `coal`, `raw_iron` and
-  `diamond` from ore at the surface or in `search`; `raw_iron` and `diamond`
-  refuse to start without a stone or iron pickaxe, saying
-  `no stone_pickaxe or better in inventory`.
+- **No plain ore gathering.** `coal`, `raw_iron` and `diamond` are not items of
+  `gather_and_deposit` or `haul`: the plain mining skill walks to a block with
+  no lava, water or fall checks, so ore comes only from `mine_ore` and
+  `iron_age`, whose shaft makes them.
 
 **Smelting.** `smelt` cooks an item in the furnace at a cell:
 
@@ -858,7 +866,11 @@ run on its own (charcoal, then coal, then planks, logs or sticks; a stack too
 small is passed over, never mixed), closes the window so it cooks, idles for
 200 ticks per item plus slack, and opens it again to take the result. A result
 slot still empty gets two more waits before the task fails with
-`the furnace made no <item>`. A run resumed after a fight adds only what is
+`the furnace made no <item>`; one that holds fewer than were asked for is
+taken and the unit waits for the rest. The server answers every furnace request
+with the new counts and stack IDs and sends no slot update, so the actuator
+folds each answer into its copy of the open window; a second take then quotes
+the stack the first one left. A run resumed after a fight adds only what is
 missing from the furnace. Fuel and furnace are the unit's own: a missing one
 fails before anything moves with `no fuel in inventory` or `no furnace in
 inventory`.
@@ -875,8 +887,13 @@ carried furnace to an iron pickaxe, axe and sword:
 ```
 
 with an optional `search` box, as for `bootstrap`. The steps, with every
-quantity worked out when the task starts from what the unit holds (an item it
-has skips its step, and a unit with all three tools gets no task):
+quantity worked out when the task starts, not when it is submitted (a task
+queued behind others, or submitted before the unit spawned, is priced from what
+the unit holds when its turn comes; the chain is a `skill.Lazy` that expands on
+first start). An item the unit has skips its step, a unit with all three tools
+fails at the start with nothing to do, and one whose best pickaxe cannot do the
+dives (iron ore needs a stone pickaxe, coal any) fails with `no stone_pickaxe
+or better in inventory` before the first dive:
 
 1. Stop at once if neither a standing nor a carried crafting table and furnace
    exist; place a carried table.
@@ -887,7 +904,8 @@ has skips its step, and a unit with all three tools gets no task):
 4. Craft the torches the dive needs: about depth/3 + branches x length/6 + 2.
 5. Dive again down the same stair for raw iron, with torches, to a goal of the
    ingots still missing; withdraw it.
-6. Smelt the ingots.
+6. Smelt the ingots. With the coal short the smelt falls back on wood, but
+   never burns the sticks the iron tools still need.
 7. Stand beside the table and craft the iron tools that are missing.
 
 `enchanting_table` is the ladder's long-range goal:
@@ -896,7 +914,8 @@ has skips its step, and a unit with all three tools gets no task):
 {"template": "enchanting_table", "table": {"x": 10, "y": 64, "z": 12}, "at": {"x": 16, "y": 64, "z": 12}}
 ```
 
-It fails before walking, naming the first missing item, unless the unit holds 4
+Like `iron_age`, it decides at the start of the task whether the table is
+already held. It fails before walking, naming the first missing item, unless the unit holds 4
 `obsidian`, 2 `diamond` and a `book`; then it stands beside the crafting table,
 crafts an `enchanting_table` and, if `at` is given, places it there. Fetching
 obsidian (a diamond pickaxe and water or lava) and a book (paper and leather)
