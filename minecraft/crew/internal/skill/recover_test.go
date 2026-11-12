@@ -167,3 +167,26 @@ func TestRecoverResumesAfterAFight(t *testing.T) {
 		t.Errorf("logs = %d, want 2", r.have("oak_log"))
 	}
 }
+
+func TestRecoverFollowsAnItemThatDriftsToAnotherCell(t *testing.T) {
+	r, w, g := recoverRig(t)
+	g.drop(feetAt(21, 1, 20), idOakLog, 2)
+	s := NewRecover(w, r.self, g, feetAt(20, 1, 20), 0, 2)
+	moved := false
+	for i := 0; i < 1500; i++ {
+		st, err := s.Step(context.Background(), r)
+		if st != Running {
+			if st != Done || err != nil {
+				t.Fatalf("status %v, err %v", st, err)
+			}
+			break
+		}
+		if !moved && s.(*Recover).phase == rSweep {
+			g.items[0].Pos = feetAt(24, 1, 23)
+			moved = true
+		}
+	}
+	if !moved || r.have("oak_log") != 2 {
+		t.Errorf("moved %v, logs %d, want the drifted item picked up", moved, r.have("oak_log"))
+	}
+}
