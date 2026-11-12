@@ -105,20 +105,30 @@ func TestBootstrapDemandFromNothing(t *testing.T) {
 	}
 }
 
-func TestPlankItem(t *testing.T) {
+func TestPlankCrafts(t *testing.T) {
 	cases := map[string]struct {
-		held map[string]int
-		want string
+		held   map[string]int
+		felled int
+		need   int
+		want   []plankCraft
 	}{
-		"nothing makes oak":       {nil, "oak_planks"},
-		"the most plentiful log":  {map[string]int{"birch_log": 5, "oak_log": 2}, "birch_planks"},
-		"tie goes to the first":   {map[string]int{"spruce_log": 3, "birch_log": 3}, "birch_planks"},
-		"a stem makes planks":     {map[string]int{"crimson_stem": 4}, "crimson_planks"},
-		"other items are ignored": {map[string]int{"cobblestone": 30, "jungle_log": 1}, "jungle_planks"},
+		"nothing held, oak felled":    {nil, 7, 26, []plankCraft{{"oak_planks", 26}}},
+		"nothing needed":              {map[string]int{"oak_planks": 40}, 0, 0, nil},
+		"held oak logs only":          {map[string]int{"oak_log": 7}, 0, 26, []plankCraft{{"oak_planks", 26}}},
+		"held planks count in total":  {map[string]int{"oak_log": 7, "oak_planks": 4}, 0, 22, []plankCraft{{"oak_planks", 26}}},
+		"birch held, birch enough":    {map[string]int{"birch_log": 7}, 0, 26, []plankCraft{{"birch_planks", 26}}},
+		"stray birch log, oak felled": {map[string]int{"birch_log": 1}, 6, 26, []plankCraft{{"oak_planks", 24}, {"birch_planks", 2}}},
+		"the most plentiful first":    {map[string]int{"birch_log": 5, "oak_log": 2}, 0, 26, []plankCraft{{"birch_planks", 20}, {"oak_planks", 6}}},
+		"a tie goes to the first":     {map[string]int{"spruce_log": 3, "birch_log": 3}, 0, 8, []plankCraft{{"birch_planks", 8}}},
+		"a stem makes planks":         {map[string]int{"crimson_stem": 4}, 0, 8, []plankCraft{{"crimson_planks", 8}}},
+		"stripped wood is its wood":   {map[string]int{"stripped_oak_log": 2}, 0, 8, []plankCraft{{"oak_planks", 8}}},
+		"other items are ignored":     {map[string]int{"cobblestone": 30, "jungle_log": 1}, 0, 4, []plankCraft{{"jungle_planks", 4}}},
+		"planks of another wood held": {map[string]int{"birch_planks": 5}, 7, 21, []plankCraft{{"oak_planks", 21}}},
 	}
 	for name, c := range cases {
-		if got := plankItem(Inventory(c.held)); got != c.want {
-			t.Errorf("%s: got %s, want %s", name, got, c.want)
+		got := plankCrafts(Inventory(c.held), c.felled, c.need)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%s: got %v, want %v", name, got, c.want)
 		}
 	}
 }

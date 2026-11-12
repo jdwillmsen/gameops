@@ -201,8 +201,11 @@ func expandIronAge(t Template, world skill.ChestWorld, s belief.Snapshot, self f
 		}
 		add(skill.NewFell(world, self, "oak_log", "oak_log", tool, n, mineRadius, nil, opts...))
 	}
-	otherPlanks := inv.held(planksPool) - inv[plankItem(inv)]
-	craftTo(plankItem(inv), plan.demand.Gross[planksPool]-otherPlanks)
+	// Planks per wood, from the logs the unit will hold: the felled ones are
+	// oak, and a log makes planks of its own wood only.
+	for _, p := range plankCrafts(inv, plan.short[logsPool], plan.demand.Gross[planksPool]-inv.held(planksPool)) {
+		craftTo(p.item, p.total)
+	}
 	craftTo(itemStick, plan.demand.Gross[itemStick])
 
 	dive := func(ores []string, goal map[string]int, torches bool) error {

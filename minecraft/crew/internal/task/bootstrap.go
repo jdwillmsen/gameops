@@ -1,12 +1,15 @@
 package task
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/inventory"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
@@ -78,11 +81,12 @@ func bootstrapTargets(tableStands, chestStands, hasChest bool) map[string]int {
 }
 
 // expandBootstrap turns a unit holding anything into one with a table, a
-// chest, wooden and stone tools and a furnace. How much to gather is worked
-// out when the task starts, from what the unit holds then, so a unit that
-// already holds logs or tools gathers and crafts only the difference.
-func expandBootstrap(t Template, world skill.ChestWorld, self func() belief.Snapshot, opts []skill.Option) []skill.Skill {
-	inv := InventoryOf(self())
+// chest, wooden and stone tools and a furnace. It reads the inventory and the
+// world as they are when it is called, which the runner does as the task
+// starts (see bootstrapPlan), so a unit that already holds logs or tools
+// gathers and crafts only the difference.
+func expandBootstrap(t Template, world skill.ChestWorld, snapshot belief.Snapshot, self func() belief.Snapshot, opts []skill.Option) []skill.Skill {
+	inv := InventoryOf(snapshot)
 	table := protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}
 	var chest protocol.BlockPos
 	if t.To != nil {
@@ -105,9 +109,15 @@ func expandBootstrap(t Template, world skill.ChestWorld, self func() belief.Snap
 		box = &b
 	}
 	var out []skill.Skill
-	add := func(s ...skill.Skill) { out = append(out, s...) }
+	work := false
+	add := func(s ...skill.Skill) {
+		for _, sk := range s {
+			work = work || sk.Name() != "near"
+		}
+		out = append(out, s...)
+	}
 	craftTo := func(item string, n int) {
-		if n > 0 {
+		if n > 0 && inv[item] < n {
 			add(skill.NewCraft(world, self, item, min(n, maxCraftCount)))
 		}
 	}
@@ -117,23 +127,25 @@ func expandBootstrap(t Template, world skill.ChestWorld, self func() belief.Snap
 		}
 	}
 
-	if n := short[logsPool]; n > 0 {
-		// Bare hands fell a tree, slowly; an axe the unit holds is used.
+	felled := short[logsPool]
+	if felled > 0 {
+		// Bare hands fell a tree, slowly; an axe on the hotbar is used, and
+		// one in the pack cannot be held.
 		tool := ""
-		for name := range inv {
-			if strings.HasSuffix(name, "_axe") {
+		for _, it := range snapshot.Inventory {
+			if strings.HasSuffix(it.Name, "_axe") && it.Slot < hotbarSlots {
 				tool = "axe"
 			}
 		}
 		find("oak_log")
-		add(skill.NewFell(world, self, "oak_log", "oak_log", tool, n, mineRadius, nil, opts...))
+		add(skill.NewFell(world, self, "oak_log", "oak_log", tool, felled, mineRadius, nil, opts...))
 	}
 
-	planks := plankItem(inv)
-	// Planks of another wood the unit already holds pay for part of the
-	// demand, but the craft skill counts only the item it is asked for.
-	otherPlanks := inv.held(planksPool) - inv[planks]
-	craftTo(planks, demand.Gross[planksPool]-otherPlanks)
+	// The felled logs are oak, and a log makes planks of its own wood only, so
+	// the planks follow the logs the unit will hold, not a species it guessed.
+	for _, p := range plankCrafts(inv, felled, demand.Gross[planksPool]-inv.held(planksPool)) {
+		craftTo(p.item, p.total)
+	}
 	craftTo(itemStick, demand.Gross[itemStick])
 	if !tableStands {
 		craftTo(itemTable, 1)
@@ -153,6 +165,7 @@ func expandBootstrap(t Template, world skill.ChestWorld, self func() belief.Snap
 	}
 
 	if n := short[itemCobblestone]; n > 0 {
+		add(&hotbarGate{self: self, tool: "pickaxe"})
 		find("stone")
 		add(skill.NewMineBlockWith(world, self, "stone", itemCobblestone, "pickaxe", n, mineRadius))
 	}
@@ -161,7 +174,45 @@ func expandBootstrap(t Template, world skill.ChestWorld, self func() belief.Snap
 		craftTo(toolItem(ToolTiers[1], kind), 1)
 	}
 	craftTo(itemFurnace, 1)
+	// A unit that already has all of it only walks to its table and back; a
+	// repeat run does nothing at all.
+	if !work {
+		return []skill.Skill{settled{}}
+	}
 	return out
+}
+
+// settled is the whole of a bootstrap whose unit already has everything.
+type settled struct{}
+
+func (settled) Name() string                { return bootstrapTemplate }
+func (settled) Ready(belief.Snapshot) error { return nil }
+
+func (settled) Step(context.Context, skill.Actuator) (skill.Status, error) {
+	return skill.Done, nil
+}
+
+// hotbarSlots is how many inventory slots the hotbar spans.
+const hotbarSlots = 9
+
+// hotbarGate fails a bootstrap early and plainly when the tool its next step
+// swings is not on the hotbar. A freshly crafted tool lands in the first
+// empty slot, the hotbar's before the pack's, so only a unit whose hotbar is
+// full of kit can be without; moving a stack between slots is not something
+// the actuator can do yet.
+type hotbarGate struct {
+	self func() belief.Snapshot
+	tool string
+}
+
+func (g *hotbarGate) Name() string                { return "hotbar_gate" }
+func (g *hotbarGate) Ready(belief.Snapshot) error { return nil }
+
+func (g *hotbarGate) Step(context.Context, skill.Actuator) (skill.Status, error) {
+	if _, ok := inventory.BestTool(g.self().Inventory, g.tool, true); !ok {
+		return skill.Failed, fmt.Errorf("no %s on the hotbar: free a hotbar slot and run the bootstrap again", g.tool)
+	}
+	return skill.Done, nil
 }
 
 // standing says whether the world shows the block at the cell.

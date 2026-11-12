@@ -210,25 +210,58 @@ func NextUpgrade(s belief.Snapshot, kind string) (item string, ok bool) {
 	return "", false
 }
 
-// plankItem picks the planks to craft: those of the log the unit holds most
-// of, so a unit holding birch logs does not go looking for oak. Ties go to
-// the name that sorts first, and a unit with no logs makes oak.
-func plankItem(inv Inventory) string {
-	best, bestN := "oak", 0
-	names := make([]string, 0, len(inv))
-	for name := range inv {
-		names = append(names, name)
+// logSpecies is the wood a log, wood or stem block is made of, which names
+// the planks it makes.
+func logSpecies(name string) string {
+	species := strings.TrimPrefix(name, "stripped_")
+	for _, suffix := range []string{"_log", "_wood", "_stem", "_hyphae"} {
+		species = strings.TrimSuffix(species, suffix)
 	}
-	slices.Sort(names)
-	for _, name := range names {
-		if !craft.Tag("logs").Matches(name) || inv[name] <= bestN {
-			continue
+	return species
+}
+
+// plankCraft is a craft target: hold this many of the planks.
+type plankCraft struct {
+	item  string
+	total int
+}
+
+// plankCrafts plans the planks to craft for need more of them from the logs
+// the unit will hold: those in the inventory plus felled oak logs. A recipe
+// turns a log into planks of its own species only, so each species is crafted
+// separately, the most plentiful first, and a stray log of another wood is
+// used rather than left to fail the craft.
+func plankCrafts(inv Inventory, felled, need int) []plankCraft {
+	logs := map[string]int{}
+	for name, n := range inv {
+		if craft.Tag("logs").Matches(name) {
+			logs[logSpecies(name)] += n
 		}
-		species := name
-		for _, suffix := range []string{"_log", "_wood", "_stem"} {
-			species = strings.TrimSuffix(species, suffix)
-		}
-		best, bestN = species, inv[name]
 	}
-	return best + "_planks"
+	if felled > 0 {
+		logs["oak"] += felled
+	}
+	species := make([]string, 0, len(logs))
+	for sp := range logs {
+		species = append(species, sp)
+	}
+	slices.SortFunc(species, func(a, b string) int {
+		if logs[a] != logs[b] {
+			return logs[b] - logs[a]
+		}
+		return strings.Compare(a, b)
+	})
+	var out []plankCraft
+	for _, sp := range species {
+		if need <= 0 {
+			break
+		}
+		n := min(need, logs[sp]*chainRecipes[planksPool].out)
+		if n > 0 {
+			item := sp + "_planks"
+			out = append(out, plankCraft{item, inv[item] + n})
+			need -= n
+		}
+	}
+	return out
 }
