@@ -31,6 +31,10 @@ const (
 	// Nearest sightings kept per scan; a few are enough to find one that can
 	// be stood beside.
 	exploreCandidates = 24
+	// Sightings examined, nearest first, for one that can be stood beside.
+	// Canopy and cliff blocks outnumber the reachable ones, so the nearest few
+	// would hide a block just past them.
+	exploreExamined = 200
 	// Offsets tried around a waypoint column when it has nothing to stand on.
 	exploreNudge = 6
 	// The lab's walkable square; waypoints are clamped inside it.
@@ -59,6 +63,9 @@ type Explore struct {
 	// not stop beside a tree outside it.
 	box    Area
 	accept *Area
+	// exclude holds blocks already tried and found unreachable, so a search
+	// that is run again looks past them.
+	exclude map[protocol.BlockPos]bool
 
 	started bool
 	// travelFails counts hops toward the box that could not be made.
@@ -81,8 +88,12 @@ type Explore struct {
 // NewExplore is done once a block of the kind lies within reach of a walk from
 // where the unit stands. accept may be nil.
 func NewExplore(world path.Blocks, self func() belief.Snapshot, block string, box Area, accept *Area) Skill {
+	return newExplore(world, self, block, box, accept, nil)
+}
+
+func newExplore(world path.Blocks, self func() belief.Snapshot, block string, box Area, accept *Area, exclude map[protocol.BlockPos]bool) *Explore {
 	box = clampToLab(box)
-	return &Explore{world: world, self: self, block: block, box: box, accept: accept, visited: map[[2]int32]bool{}}
+	return &Explore{world: world, self: self, block: block, box: box, accept: accept, exclude: exclude, visited: map[[2]int32]bool{}}
 }
 
 func (e *Explore) Name() string { return "explore" }
@@ -141,7 +152,7 @@ func (e *Explore) scanStep(a Actuator) outcome {
 		e.arrived = append(e.arrived, feet)
 		e.points = e.grid()
 	}
-	e.sight = e.scan(feet)
+	e.sight = e.scan(feet, p)
 	if len(e.sight) == 0 {
 		return e.nextWaypoint(a)
 	}
@@ -154,8 +165,9 @@ func (e *Explore) scanStep(a Actuator) outcome {
 
 // scan lists the sightings of the block in the loaded cells around feet that
 // lie in the box, nearest first. Only a band of heights is read, and only once
-// per waypoint.
-func (e *Explore) scan(feet protocol.BlockPos) []protocol.BlockPos {
+// per waypoint. A sighting no standable cell reaches is left out: handing it
+// to the mining skill would only fail there.
+func (e *Explore) scan(feet protocol.BlockPos, pose act.Pose) []protocol.BlockPos {
 	x0, x1 := max(feet.X()-scanReach, e.box.Min.X()), min(feet.X()+scanReach, e.box.Max.X())
 	z0, z1 := max(feet.Z()-scanReach, e.box.Min.Z()), min(feet.Z()+scanReach, e.box.Max.Z())
 	y0, y1 := max(feet.Y()-scanBelow, e.box.Min.Y()), min(feet.Y()+scanAbove, e.box.Max.Y())
@@ -164,7 +176,7 @@ func (e *Explore) scan(feet protocol.BlockPos) []protocol.BlockPos {
 		for z := z0; z <= z1; z++ {
 			for y := y0; y <= y1; y++ {
 				b := protocol.BlockPos{x, y, z}
-				if name, known := e.world.Block(b); known && name == e.block && (e.accept == nil || e.accept.contains(b)) {
+				if name, known := e.world.Block(b); known && name == e.block && !e.exclude[b] && (e.accept == nil || e.accept.contains(b)) {
 					found = append(found, b)
 				}
 			}
@@ -175,10 +187,19 @@ func (e *Explore) scan(feet protocol.BlockPos) []protocol.BlockPos {
 		return dx*dx + dy*dy + dz*dz
 	}
 	sort.SliceStable(found, func(i, j int) bool { return d2(found[i]) < d2(found[j]) })
-	if len(found) > exploreCandidates {
-		found = found[:exploreCandidates]
+	if len(found) > exploreExamined {
+		found = found[:exploreExamined]
 	}
-	return found
+	var reachable []protocol.BlockPos
+	for _, b := range found {
+		if _, ok := standNear(e.world, b, pose, 0); ok {
+			reachable = append(reachable, b)
+			if len(reachable) == exploreCandidates {
+				break
+			}
+		}
+	}
+	return reachable
 }
 
 // approachStep walks to a cell beside the nearest sighting that has one.

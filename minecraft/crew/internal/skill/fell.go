@@ -142,6 +142,9 @@ func NewFell(world ChestWorld, self func() belief.Snapshot, block, item, tool st
 
 func (f *Fell) Name() string { return "fell_tree" }
 
+// Cut lists the logs the skill has broken, from the ground and from a pillar.
+func (f *Fell) Cut() []protocol.BlockPos { return f.mine.Cut() }
+
 func (f *Fell) Ready(s belief.Snapshot) error { return f.mine.Ready(s) }
 
 func (f *Fell) emit(event string, fields map[string]any) {

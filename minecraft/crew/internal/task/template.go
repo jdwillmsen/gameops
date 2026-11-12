@@ -11,6 +11,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -852,22 +853,47 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		accept = &a
 		mineOpts = append(mineOpts, skill.InArea(a))
 	}
+	var box *skill.Area
+	if t.Search != nil {
+		box = &skill.Area{
+			Min: protocol.BlockPos{t.Search.Min.X, t.Search.Min.Y, t.Search.Min.Z},
+			Max: protocol.BlockPos{t.Search.Max.X, t.Search.Max.Y, t.Search.Max.Z},
+		}
+	}
 	if src.Chancy {
 		mineOpts = append(mineOpts, skill.Chancy(skill.ChancyMisses))
+		// A leaf that cannot be reached from here is not the end of the
+		// search: the unit looks further, as it does for a log.
+		if box != nil {
+			mineOpts = append(mineOpts, skill.Seeking(*box, accept))
+		}
 	}
 	gather := skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...)
 	if src.Fell {
 		gather = skill.NewFell(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts, opts...)
 	}
-	out := []skill.Skill{gather, skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...)}
-	if t.Search != nil {
-		box := skill.Area{
-			Min: protocol.BlockPos{t.Search.Min.X, t.Search.Min.Y, t.Search.Min.Z},
-			Max: protocol.BlockPos{t.Search.Max.X, t.Search.Max.Y, t.Search.Max.Z},
+	out := []skill.Skill{gather}
+	if sapling, ok := saplingFor(src.Block); ok && src.Fell {
+		// The grove regrows only if what is cut is replanted; saplings the
+		// unit carries go back at the foot of each trunk.
+		if cut, ok := gather.(skill.Cutter); ok {
+			out = append(out, skill.NewReplant(world, self, cut, sapling, opts...))
 		}
-		out = append([]skill.Skill{skill.NewExplore(world, self, src.Block, box, accept)}, out...)
+	}
+	out = append(out, skill.NewDepositChest(world, self, chest, t.Item, t.Qty, opts...))
+	if box != nil {
+		out = append([]skill.Skill{skill.NewExplore(world, self, src.Block, *box, accept)}, out...)
 	}
 	return out, nil
+}
+
+// saplingFor names the sapling a kind of log grows from.
+func saplingFor(log string) (string, bool) {
+	kind, ok := strings.CutSuffix(log, "_log")
+	if !ok {
+		return "", false
+	}
+	return kind + "_sapling", true
 }
 
 func skillArea(a *Area) skill.Area {
