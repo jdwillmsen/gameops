@@ -66,6 +66,7 @@ type Deposit struct {
 	base    int
 	phase   depositPhase
 	nav     *navigator
+	reach   chestApproach
 
 	opened   bool
 	waited   int
@@ -174,11 +175,17 @@ func (d *Deposit) start(a Actuator) outcome {
 		d.phase = dOpen
 		return next
 	}
-	stand, ok := standCell(d.world, d.chest, p)
-	if !ok {
+	nav, res := d.reach.pick(d.world, d.chest, p)
+	switch res {
+	case approachNone:
 		return d.failed(a, errors.New("no standing spot within reach of the chest"))
+	case approachGiveUp:
+		return d.failed(a, d.reach.err())
+	case approachWait:
+		d.reach.pause()
+		return d.idle(a)
 	}
-	d.nav, d.phase = newNavigator(d.world, stand, arriveSlack), dWalk
+	d.nav, d.phase = nav, dWalk
 	return next
 }
 
@@ -215,6 +222,11 @@ func (d *Deposit) walk(a Actuator) outcome {
 	case Done:
 		d.phase = dOpen
 		return next
+	}
+	var te tickError
+	if !errors.As(err, &te) && d.reach.walkFailed(err) {
+		d.nav, d.phase = nil, dStart
+		return d.idle(a)
 	}
 	return d.failed(a, fmt.Errorf("getting to the chest: %w", err))
 }

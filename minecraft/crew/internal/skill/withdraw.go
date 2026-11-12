@@ -54,6 +54,7 @@ type Withdraw struct {
 	wear     bool
 
 	phase wPhaseState
+	reach chestApproach
 
 	seen    ChestSeen
 	hasSeen bool
@@ -209,11 +210,17 @@ func (w *Withdraw) start(a Actuator) outcome {
 		w.phase.p = wOpen
 		return next
 	}
-	stand, ok := standCell(w.world, w.chest, p)
-	if !ok {
+	nav, res := w.reach.pick(w.world, w.chest, p)
+	switch res {
+	case approachNone:
 		return w.failed(a, errors.New("no standing spot within reach of the chest"))
+	case approachGiveUp:
+		return w.failed(a, w.reach.err())
+	case approachWait:
+		w.reach.pause()
+		return w.idle(a)
 	}
-	w.phase.nav, w.phase.p = newNavigator(w.world, stand, arriveSlack), wWalk
+	w.phase.nav, w.phase.p = nav, wWalk
 	return next
 }
 
@@ -225,6 +232,11 @@ func (w *Withdraw) walk(a Actuator) outcome {
 	case Done:
 		w.phase.p = wOpen
 		return next
+	}
+	var te tickError
+	if !errors.As(err, &te) && w.reach.walkFailed(err) {
+		w.phase.nav, w.phase.p = nil, wStart
+		return w.idle(a)
 	}
 	return w.failed(a, fmt.Errorf("getting to the chest: %w", err))
 }
