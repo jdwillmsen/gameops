@@ -2,6 +2,7 @@ package skill
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
@@ -135,19 +136,63 @@ func TestUseBedFinishesWhenMonstersForbidSleep(t *testing.T) {
 	}
 }
 
-func TestUseBedFailsWithoutABedAtTheTarget(t *testing.T) {
+// A bed that is gone, as after a death in a repeating plan, is looked for and
+// then skipped: the visit ends done, says why, and never clicks anything.
+func TestUseBedSkipsCleanlyWithoutABedAtTheTarget(t *testing.T) {
 	for name, block := range map[string]string{"air": "air", "chest": "chest", "bedrock": "bedrock"} {
 		t.Run(name, func(t *testing.T) {
 			br := newBedRig(t, dayTicks)
 			br.world[bedPos] = block
-			st, err := br.run(br.skill(nil), 600)
-			if st != Failed || !errors.Is(err, errNoBed) {
+			sk := br.skill(nil)
+			st, err := br.run(sk, 600)
+			if st != Done || err != nil {
 				t.Fatalf("status %v, err %v", st, err)
+			}
+			if text, ok := sk.(Reporter).Report(); !ok || !strings.Contains(text, "no bed") {
+				t.Errorf("report = %q, %v", text, ok)
+			}
+			if sk.(Progresser).Progress() != 0 {
+				t.Error("a skipped visit counts as a respawn point set")
 			}
 			if br.taps != 0 || br.opens != 0 {
 				t.Errorf("clicked a %s: %d taps, %d opens", name, br.taps, br.opens)
 			}
 		})
+	}
+}
+
+// The bed reads as missing while the world is still being sent after a
+// respawn; the re-scan finds it once it is back.
+func TestUseBedRescansUntilTheBedIsBack(t *testing.T) {
+	br := newBedRig(t, dayTicks)
+	br.world[bedPos] = "air"
+	wake := br.onTick
+	br.onTick = func() {
+		if br.ticks == 10 {
+			br.world[bedPos] = "red_bed"
+		}
+		wake()
+	}
+	st, err := br.run(br.skill(nil), 800)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if br.taps != 1 || !br.self().SpawnKnown {
+		t.Errorf("taps %d, spawn known %v: the bed that came back was not used", br.taps, br.self().SpawnKnown)
+	}
+}
+
+// The bed was moved a block or two off the target (rebuilt after a death).
+func TestUseBedFindsABedBesideTheTarget(t *testing.T) {
+	br := newBedRig(t, dayTicks)
+	br.world[bedPos] = "air"
+	br.world[protocol.BlockPos{bedPos.X() + 2, bedPos.Y(), bedPos.Z()}] = "red_bed"
+	st, err := br.run(br.skill(nil), 800)
+	if st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+	if br.taps != 1 {
+		t.Errorf("taps = %d, want the neighbouring bed tapped", br.taps)
 	}
 }
 
