@@ -34,6 +34,7 @@ const (
 	plantTemplate    = "plant_trees"
 	bedTemplate      = "use_bed"
 	craftTemplate    = "craft"
+	shelterTemplate  = "shelter"
 	// The harness templates act on other entities, which a lab unit must never
 	// be asked to do, so they exist only after EnableHarness.
 	interactTemplate = "interact_entity"
@@ -58,6 +59,8 @@ const (
 	minSpacing     = 3
 	maxSpacing     = 16
 	maxPlantCount  = 64
+	// shelter: a wait shorter than this cannot span even the walls going up.
+	minShelterTicks = 100
 	// How far from the unit MineBlock looks for stone.
 	mineRadius = 24
 	// goto is confined to the lab's flat square, so a typo cannot send the
@@ -109,6 +112,10 @@ type Template struct {
 	Search *SearchBox `json:"search,omitempty"`
 	// Spacing is plant_trees' distance between saplings, in blocks.
 	Spacing int `json:"spacing,omitempty"`
+	// Until and MaxTicks are shelter's: what ends the wait and the most
+	// inputs to spend waiting.
+	Until    string `json:"until,omitempty"`
+	MaxTicks int    `json:"max_ticks,omitempty"`
 	// Box, when set, is what observe_blocks reads.
 	Box *Box `json:"box,omitempty"`
 
@@ -266,6 +273,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parsePlant(body)
 	case bedTemplate:
 		return parseBed(body)
+	case shelterTemplate:
+		return parseShelter(body)
 	case buildTemplate:
 		return parseBuild(body)
 	case repairTemplate:
@@ -394,6 +403,31 @@ func parseGather(body []byte) (Template, error) {
 		t.Search = &s
 	}
 	return t, nil
+}
+
+// parseShelter reads {"template":"shelter","until":"dawn"} with an optional
+// "max_ticks", how long to wait inside before leaving whatever the clock says.
+// Dawn is the only thing to wait for, so until may be left out but nothing
+// else is accepted, which keeps room for other conditions later.
+func parseShelter(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Until    string `json:"until"`
+		MaxTicks int    `json:"max_ticks"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Until != "" && raw.Until != "dawn" {
+		return Template{}, errors.New("until must be dawn")
+	}
+	if raw.MaxTicks == 0 {
+		raw.MaxTicks = skill.DefaultShelterTicks
+	}
+	if raw.MaxTicks < minShelterTicks || raw.MaxTicks > skill.MaxShelterTicks {
+		return Template{}, fmt.Errorf("max_ticks must be %d to %d", minShelterTicks, skill.MaxShelterTicks)
+	}
+	return Template{Template: raw.Template, Until: "dawn", MaxTicks: raw.MaxTicks}, nil
 }
 
 // plantable is the closed set of items plant_trees sets out.
@@ -785,6 +819,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	}
 	if t.Template == plantTemplate && t.Area != nil {
 		return []skill.Skill{skill.NewPlant(world, self, t.Item, skillArea(t.Area), t.Spacing, t.Qty, opts...)}, nil
+	}
+	if t.Template == shelterTemplate {
+		return []skill.Skill{skill.NewShelter(world, self, t.MaxTicks, opts...)}, nil
 	}
 	if t.Template == gotoTemplate && t.To != nil {
 		goal := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
