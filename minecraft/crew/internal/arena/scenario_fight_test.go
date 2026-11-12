@@ -98,3 +98,22 @@ func TestScenarioFightRefusesNonCrew(t *testing.T) {
 		t.Error("a refused fight summoned mobs")
 	}
 }
+
+func TestScenarioFightSetsNightBeforeSummoning(t *testing.T) {
+	sf, f, _ := scenarioFightRig(t, PassClear, true)
+	if _, err := sf.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	night, summon := -1, -1
+	for i, c := range f.Cmds {
+		if c == "time set midnight" && night < 0 {
+			night = i
+		}
+		if strings.Contains(c, "summon") && summon < 0 {
+			summon = i
+		}
+	}
+	if night < 0 || summon < 0 || night > summon {
+		t.Errorf("time set midnight at %d, first summon at %d; want night first", night, summon)
+	}
+}

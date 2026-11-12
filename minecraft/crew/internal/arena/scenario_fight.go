@@ -144,6 +144,12 @@ func (f *ScenarioFight) Run(ctx context.Context) (FightResult, error) {
 		return FightResult{}, err
 	}
 	defer func() { _ = d.repairFloor() }()
+	// Zombies and skeletons burn up in daylight, which ends a fight with no
+	// kills or with "counted none". Midnight leaves the longest fight (about
+	// three minutes) well inside the night.
+	if _, err := d.exec("time set midnight"); err != nil {
+		return FightResult{}, err
+	}
 	// Mobs left by an earlier aborted fight would be counted as this one's.
 	if _, err := d.exec(killWaveCommand()); err != nil {
 		return FightResult{}, err
