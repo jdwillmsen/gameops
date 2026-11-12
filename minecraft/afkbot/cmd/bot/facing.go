@@ -202,6 +202,9 @@ type poseLog struct {
 	// kinds remembers what each nearby actor is, so a ride link can say what
 	// the bot sits on. Bounded so a busy world cannot grow it without limit.
 	kinds map[int64]string
+	// seats holds the actors of seatKind with where they stand, for the
+	// seat mount. Bounded like kinds.
+	seats map[int64]seatActor
 }
 
 const maxPoseKinds = 4096
@@ -209,7 +212,7 @@ const maxPoseKinds = 4096
 const poseLogEvery = 2 * time.Second
 
 func newPoseLog(log *logging.Logger) *poseLog {
-	return &poseLog{log: log, last: map[string]time.Time{}, held: map[string]int{}, kinds: map[int64]string{}}
+	return &poseLog{log: log, last: map[string]time.Time{}, held: map[string]int{}, kinds: map[int64]string{}, seats: map[int64]seatActor{}}
 }
 
 func (l *poseLog) emit(kind string, f logging.Fields) {
@@ -242,8 +245,12 @@ func (l *poseLog) event(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 		if len(l.kinds) < maxPoseKinds {
 			l.kinds[m.EntityUniqueID] = m.EntityType
 		}
+		if m.EntityType == seatKind && len(l.seats) < maxPoseKinds {
+			l.seats[m.EntityUniqueID] = seatActor{runtimeID: m.EntityRuntimeID, pos: m.Position}
+		}
 	case *packet.RemoveActor:
 		delete(l.kinds, m.EntityUniqueID)
+		delete(l.seats, m.EntityUniqueID)
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
 			l.emit("ride_link", logging.Fields{

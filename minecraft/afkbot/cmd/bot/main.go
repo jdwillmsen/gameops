@@ -271,6 +271,15 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 		})
 	}
 
+	var stow *stower
+	if cfg.Stow {
+		stow = newStower(log)
+	}
+	var seat *seater
+	if cfg.HasSeat {
+		seat = newSeater(log, cfg.Seat)
+	}
+
 	respawner := liveness.New(gd.EntityRuntimeID)
 
 	for {
@@ -287,6 +296,16 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 
 		held.track(pk, gd.EntityRuntimeID, gd.EntityUniqueID)
 		poseEvents.event(pk, gd.EntityRuntimeID, gd.EntityUniqueID)
+		if stow != nil {
+			stow.handle(pk, conn, gd.EntityRuntimeID)
+		}
+		if seat != nil {
+			var slot byte
+			if stow != nil {
+				slot = stow.selected
+			}
+			seat.step(conn, held, poseEvents, slot)
+		}
 
 		// A dead bot holds no chunks, and nothing outside this loop can tell
 		// it is dead: the session stays open and the pod stays ready. Measured

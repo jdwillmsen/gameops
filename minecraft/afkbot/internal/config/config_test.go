@@ -385,3 +385,41 @@ func TestParseFacing(t *testing.T) {
 		}
 	}
 }
+
+func TestStowAndSeatDefaultOff(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Stow || cfg.HasSeat {
+		t.Fatalf("stow=%v hasSeat=%v, want both off", cfg.Stow, cfg.HasSeat)
+	}
+}
+
+func TestStowAndSeatParse(t *testing.T) {
+	setRequired(t)
+	t.Setenv("STOW", "true")
+	t.Setenv("SEAT", "10, 64.5,-3")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Stow || !cfg.HasSeat || cfg.Seat != [3]float32{10, 64.5, -3} {
+		t.Fatalf("cfg = stow %v seat %v %v", cfg.Stow, cfg.HasSeat, cfg.Seat)
+	}
+}
+
+func TestStowAndSeatRejectGarbage(t *testing.T) {
+	for _, tc := range []struct{ env, value string }{
+		{"STOW", "maybe"}, {"SEAT", "1,2"}, {"SEAT", "1,2,x"}, {"SEAT", "1,2,NaN"},
+	} {
+		t.Run(tc.env+"="+tc.value, func(t *testing.T) {
+			setRequired(t)
+			t.Setenv(tc.env, tc.value)
+			if _, err := Load(); err == nil || !strings.Contains(err.Error(), tc.env) {
+				t.Errorf("err = %v", err)
+			}
+		})
+	}
+}
