@@ -14,6 +14,7 @@ import (
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/inventory"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/tactics"
@@ -81,6 +82,9 @@ type Config struct {
 	// Recover makes a unit that died walk back to where it fell and pick up
 	// what it dropped.
 	Recover bool
+	// Inventory, when set, keeps the unit's pack in order: junk dropped,
+	// surplus stored in a chest before the pack fills.
+	Inventory *Inventory
 }
 
 type mode uint8
@@ -160,6 +164,7 @@ type Life struct {
 	working bool
 	kit     kitState
 	rec     recoverState
+	inv     invState
 	// warrior drives the squad's fighting when cfg.Role named a role, else
 	// it is nil and the reactive defence decides everything.
 	warrior *warriorState
@@ -182,6 +187,8 @@ type Life struct {
 	makeKit func(weapon bool, food int) skill.Skill
 	// makeRecover replaces the recovery walk, for tests.
 	makeRecover func(lastDeath) skill.Skill
+	// makeDeposit replaces one chest deposit of a trip, for tests.
+	makeDeposit func(inventory.Move) skill.Skill
 }
 
 // New builds a unit's life. The random source is the idle walk's only
@@ -231,6 +238,7 @@ func (l *Life) Reset() {
 	l.chase, l.flee = nil, nil
 	l.idle, l.swim = idleState{}, swimState{}
 	l.eat, l.kit, l.rec, l.rest = eatState{}, kitState{}, recoverState{}, restState{}
+	l.inv = invState{}
 	if w := l.warrior; w != nil {
 		w.reset()
 	}
