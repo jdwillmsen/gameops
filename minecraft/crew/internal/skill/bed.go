@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 )
 
 const (
@@ -37,6 +39,17 @@ const (
 	// maxRescans bounds how often a bed that vanishes under the unit sends the
 	// visit back to looking.
 	maxRescans = 3
+	// bedTapRange is how far, horizontally, from the bed's block centre the
+	// unit may stand to tap it. The live server answers a tap on a bed only
+	// from about 2.6 blocks (a tap from 2.65 gets no reply, not even a
+	// refusal), well inside the 4.5 a chest or a placement is good for, so
+	// this keeps a margin under it.
+	bedTapRange = 2.2
+	// bedStandRange bounds the standing spot chosen beside the bed: the eight
+	// cells around it, so that arriving within bedArrive of the spot's centre
+	// still leaves the unit inside bedTapRange.
+	bedStandRange = 1.45
+	bedArrive     = 0.4
 )
 
 var (
@@ -215,18 +228,17 @@ func (u *UseBed) skip() outcome {
 }
 
 func (u *UseBed) walk(a Actuator) outcome {
-	// Walking up to a bed is placing's problem too: eye within block reach.
 	if u.nav == nil {
 		pose := a.Pose()
-		if centre(u.bed).Sub(eyeOf(pose.Feet)).Len() <= placeReach-arriveSlack {
+		if u.inTapRange(pose) {
 			u.phase = bdTap
 			return next
 		}
-		stand, ok := standNear(u.world, u.bed, pose, 0)
+		stand, ok := u.standBeside(pose)
 		if !ok {
 			return u.failed(errors.New("no standing spot within reach of the bed"))
 		}
-		u.nav = newNavigator(u.world, stand, arriveSlack)
+		u.nav = newNavigator(u.world, stand, bedArrive)
 	}
 	switch st, err := u.nav.step(a); st {
 	case Running:
@@ -237,6 +249,49 @@ func (u *UseBed) walk(a Actuator) outcome {
 	default:
 		return u.failed(fmt.Errorf("getting to the bed: %w", err))
 	}
+}
+
+// inTapRange says the unit stands close enough for the server to answer a tap.
+func (u *UseBed) inTapRange(p act.Pose) bool {
+	c := centre(u.bed)
+	return math.Hypot(float64(c.X()-p.Feet.X()), float64(c.Z()-p.Feet.Z())) <= bedTapRange &&
+		c.Sub(eyeOf(p.Feet)).Len() <= placeReach-arriveSlack
+}
+
+// standBeside finds the standable cell next to the bed, nearest the unit. The
+// bed's other half is not one: it is the bed itself.
+func (u *UseBed) standBeside(pose act.Pose) (protocol.BlockPos, bool) {
+	best, bestD, found := protocol.BlockPos{}, float32(math.MaxFloat32), false
+	for dx := int32(-1); dx <= 1; dx++ {
+		for dz := int32(-1); dz <= 1; dz++ {
+			for dy := int32(-1); dy <= 1; dy++ {
+				if dx == 0 && dz == 0 {
+					continue
+				}
+				c := protocol.BlockPos{u.bed.X() + dx, u.bed.Y() + dy, u.bed.Z() + dz}
+				if math.Hypot(float64(dx), float64(dz)) > bedStandRange || !path.Standable(u.world, c) || u.onBed(c) {
+					continue
+				}
+				if centre(u.bed).Sub(standEye(c)).Len() > placeReach-arriveSlack {
+					continue
+				}
+				if d := centre(c).Sub(pose.Feet).LenSqr(); d < bestD {
+					best, bestD, found = c, d, true
+				}
+			}
+		}
+	}
+	return best, found
+}
+
+// onBed says the cell is a bed or rests on one.
+func (u *UseBed) onBed(c protocol.BlockPos) bool {
+	for _, p := range []protocol.BlockPos{c, {c.X(), c.Y() - 1, c.Z()}} {
+		if name, known := u.world.Block(p); known && isBed(name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (u *UseBed) sendTap(a Actuator, snap belief.Snapshot) error {
