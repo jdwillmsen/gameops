@@ -29,6 +29,7 @@ const bodyCentre = 0.9
 // every tick, whatever the unit is doing.
 func (l *Life) Engaged(p act.Pose, s belief.Snapshot) bool {
 	l.tick++
+	l.noteLife(s)
 	hurt, d := l.sense(p, l.cfg.Defend)
 	if !l.cfg.Defend {
 		return false
@@ -247,6 +248,7 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	}
 	l.stopEating(a, s)
 	l.stopKit(a)
+	l.stopRecover()
 	e, ok := l.ents.Get(l.target.ID)
 	p := a.Pose()
 	if l.target.ID == 0 || !ok {

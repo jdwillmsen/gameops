@@ -73,6 +73,9 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	if l.kit.visit != nil {
 		return true
 	}
+	if l.wantsRecovery(s) {
+		return true
+	}
 	if _, ok := l.wantsMeal(s); ok {
 		return true
 	}
@@ -96,6 +99,9 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	}
 	if l.eat.active {
 		return l.eating(a, s)
+	}
+	if l.kit.visit == nil && l.rec.visit != nil {
+		return l.tendRecover(ctx, a)
 	}
 	return l.tendKit(ctx, a, s)
 }
