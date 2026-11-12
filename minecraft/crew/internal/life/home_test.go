@@ -157,3 +157,14 @@ func TestRecoveryOfDropsComesBeforeTheWalkHome(t *testing.T) {
 		t.Errorf("recovery %d, home visit %v; log = %+v", r.count("recover_started"), r.l.home.visit != nil, r.log.lines)
 	}
 }
+
+func TestATripIsNotOwedFromAnotherDimension(t *testing.T) {
+	r := homeRig(t, &homeCell)
+	r.tracker.Apply(&packet.ChangeDimension{Dimension: 1, Position: mgl32.Vec3{30, 70, 30}})
+	r.run(10)
+	r.tracker.Apply(&packet.ChangeDimension{Dimension: 0, Position: mgl32.Vec3{30, 2.62, 30}})
+	r.run(30)
+	if r.count("home_started") != 0 {
+		t.Errorf("walked home on returning from another dimension: %+v", r.log.lines)
+	}
+}

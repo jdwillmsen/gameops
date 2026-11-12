@@ -57,7 +57,12 @@ func (l *Life) wantsHome(s belief.Snapshot) bool {
 		}
 		return true
 	}
-	if !h.pending || !s.Spawned || s.Dead || !s.PositionKnown || s.Dimension != 0 || s.Creative || l.tick < h.blockedUntil {
+	if h.pending && s.Spawned && !s.Dead && (s.Dimension != 0 || s.Creative) {
+		// Home is in the overworld, and a creative unit is not sent anywhere:
+		// the trip is not owed later, when the unit might be mid-task.
+		h.pending = false
+	}
+	if !h.pending || !s.Spawned || s.Dead || !s.PositionKnown || l.tick < h.blockedUntil {
 		return false
 	}
 	if skill.AtHome(feetOf(s), *l.cfg.Home, homeArrive) {
