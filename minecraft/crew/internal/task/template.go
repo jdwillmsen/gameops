@@ -32,6 +32,7 @@ const (
 	observeTemplate  = "observe_blocks"
 	placeTemplate    = "place_block"
 	plantTemplate    = "plant_trees"
+	bedTemplate      = "use_bed"
 	craftTemplate    = "craft"
 	// The harness templates act on other entities, which a lab unit must never
 	// be asked to do, so they exist only after EnableHarness.
@@ -86,7 +87,7 @@ type Chest struct {
 // Template is a task request: gather_and_deposit fills Item, Qty and Chest, and
 // optionally Area and Search; plant_trees fills Item, Qty, Area and Spacing;
 // haul fills Items, From and To; withdraw and deposit fill Items and Chest;
-// place_block fills Block and Item.
+// place_block fills Block and Item; use_bed fills Block.
 type Template struct {
 	Template string `json:"template"`
 	Item     string `json:"item"`
@@ -263,6 +264,8 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseCraft(body)
 	case plantTemplate:
 		return parsePlant(body)
+	case bedTemplate:
+		return parseBed(body)
 	case buildTemplate:
 		return parseBuild(body)
 	case repairTemplate:
@@ -586,6 +589,26 @@ func parsePlace(body []byte) (Template, error) {
 	return Template{Template: raw.Template, Block: raw.Block, Item: raw.Item}, nil
 }
 
+// parseBed reads {"template":"use_bed","block":{x,y,z}}.
+func parseBed(body []byte) (Template, error) {
+	var raw struct {
+		Template string `json:"template"`
+		Block    *Chest `json:"block"`
+	}
+	if err := decodeStrict(body, &raw); err != nil {
+		return Template{}, err
+	}
+	if raw.Block == nil {
+		return Template{}, errors.New("block is required")
+	}
+	// The message names no coordinate: they are lab locations and must stay
+	// out of logs.
+	if !raw.Block.inLab() {
+		return Template{}, errors.New("block is outside the allowed area")
+	}
+	return Template{Template: raw.Template, Block: raw.Block}, nil
+}
+
 // parseCraft reads {"template":"craft","item":"<name>","count":N}. The count
 // lands in Qty, which is the field the task record reports as progress.
 func parseCraft(body []byte) (Template, error) {
@@ -770,6 +793,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	if t.Template == placeTemplate && t.Block != nil {
 		goal := protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}
 		return []skill.Skill{skill.NewPlaceBlock(world, self, goal, t.Item, opts...)}, nil
+	}
+	if t.Template == bedTemplate && t.Block != nil {
+		return []skill.Skill{skill.NewUseBed(world, self, protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}, opts...)}, nil
 	}
 	src, ok := recipes[t.Item]
 	if t.Template != gatherAndDeposit || !ok {

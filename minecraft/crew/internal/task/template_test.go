@@ -498,6 +498,43 @@ func TestPlaceBlockExpandsToOneSkill(t *testing.T) {
 	}
 }
 
+func TestParseUseBed(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(`{"template":"use_bed","block":{"x":7,"y":64,"z":-7}}`))
+	if err != nil {
+		t.Fatalf("valid use_bed: %v", err)
+	}
+	if tpl.Template != "use_bed" || tpl.Block == nil || *tpl.Block != (Chest{X: 7, Y: 64, Z: -7}) {
+		t.Fatalf("parsed = %+v", tpl)
+	}
+	cases := map[string]string{
+		"missing block": `{"template":"use_bed"}`,
+		"x low":         `{"template":"use_bed","block":{"x":-501,"y":0,"z":0}}`,
+		"x high":        `{"template":"use_bed","block":{"x":500,"y":0,"z":0}}`,
+		"y low":         `{"template":"use_bed","block":{"x":0,"y":-65,"z":0}}`,
+		"y high":        `{"template":"use_bed","block":{"x":0,"y":321,"z":0}}`,
+		"z low":         `{"template":"use_bed","block":{"x":0,"y":0,"z":-501}}`,
+		"z high":        `{"template":"use_bed","block":{"x":0,"y":0,"z":500}}`,
+		"extra field":   `{"template":"use_bed","block":{"x":0,"y":0,"z":0},"item":"red_bed"}`,
+		"extra key":     `{"template":"use_bed","block":{"x":0,"y":0,"z":0,"w":1}}`,
+		"chest instead": `{"template":"use_bed","chest":{"x":0,"y":0,"z":0}}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseTemplate([]byte(body)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestUseBedExpandsToOneSkill(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(`{"template":"use_bed","block":{"x":7,"y":64,"z":-7}}`))
+	skills, err := Expand(tpl, nil, func() belief.Snapshot { return belief.Snapshot{} })
+	if err != nil || len(skills) != 1 || skills[0].Name() != "use_bed" {
+		t.Fatalf("skills %v, err %v", skills, err)
+	}
+}
+
 func TestParseObserve(t *testing.T) {
 	tpl, err := ParseTemplate([]byte(`{"template":"observe_blocks","box":{"min":{"x":-500,"y":-64,"z":-500},"max":{"x":-485,"y":-49,"z":-485}}}`))
 	if err != nil {
