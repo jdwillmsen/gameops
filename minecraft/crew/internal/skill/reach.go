@@ -59,6 +59,11 @@ func (ap *approach) standCell(pose act.Pose) (protocol.BlockPos, bool) {
 // target's column, horizontally, are left out, for a caller that must not end
 // up with its body touching the target.
 func standNear(world path.Blocks, t protocol.BlockPos, pose act.Pose, apart float32) (protocol.BlockPos, bool) {
+	return standWithin(world, t, pose, apart, placeReach)
+}
+
+// standWithin is standNear for a reach other than placement's.
+func standWithin(world path.Blocks, t protocol.BlockPos, pose act.Pose, apart float32, reach float32) (protocol.BlockPos, bool) {
 	best, bestD, found := protocol.BlockPos{}, float32(1e30), false
 	for dx := int32(-placeSpan); dx <= placeSpan; dx++ {
 		for dy := int32(-placeSpan); dy <= placeSpan; dy++ {
@@ -67,7 +72,7 @@ func standNear(world path.Blocks, t protocol.BlockPos, pose act.Pose, apart floa
 				if c.X() == t.X() && c.Z() == t.Z() && (c.Y() == t.Y() || c.Y()+1 == t.Y()) {
 					continue
 				}
-				if centre(t).Sub(standEye(c)).Len() > placeReach-arriveSlack || !path.Standable(world, c) {
+				if centre(t).Sub(standEye(c)).Len() > reach-arriveSlack || !path.Standable(world, c) {
 					continue
 				}
 				if apart > 0 && math.Hypot(float64(dx), float64(dz)) < float64(apart) {
