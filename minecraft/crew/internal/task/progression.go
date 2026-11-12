@@ -32,9 +32,15 @@ func expandProgression(t Template, world skill.ChestWorld, self func() belief.Sn
 	case t.Template == smeltTemplate && t.Block != nil:
 		sk, err = expandSmelt(t, world, self, opts)
 	case t.Template == ironAgeTemplate && t.Block != nil && t.Furnace != nil && t.To != nil && t.Area != nil && t.Entrance != nil:
-		sk, err = expandIronAge(t, world, self, opts)
+		// Priced from what the unit holds when the task starts, not when it
+		// was submitted behind other work.
+		sk = []skill.Skill{skill.NewLazy(ironAgeTemplate, self, func(s belief.Snapshot) ([]skill.Skill, error) {
+			return expandIronAge(t, world, s, self, opts)
+		})}
 	case t.Template == enchantingTemplate && t.Block != nil:
-		sk = expandEnchanting(t, world, self, opts)
+		sk = []skill.Skill{skill.NewLazy(enchantingTemplate, self, func(s belief.Snapshot) ([]skill.Skill, error) {
+			return expandEnchanting(t, world, s, self, opts), nil
+		})}
 	default:
 		return nil, false, nil
 	}
@@ -69,10 +75,10 @@ func parseEnchanting(body []byte) (Template, error) {
 // expandEnchanting crafts an enchanting table beside the crafting table, from
 // the obsidian, diamonds and book the unit holds, and places it at "at" if one
 // is given. It stops before walking anywhere when an ingredient is missing.
-func expandEnchanting(t Template, world skill.ChestWorld, self func() belief.Snapshot, opts []skill.Option) []skill.Skill {
+func expandEnchanting(t Template, world skill.ChestWorld, s belief.Snapshot, self func() belief.Snapshot, opts []skill.Option) []skill.Skill {
 	table := protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}
 	out := []skill.Skill{}
-	if InventoryOf(self())[itemEnchanting] == 0 {
+	if InventoryOf(s)[itemEnchanting] == 0 {
 		out = append(out,
 			skill.NewRequire(self, EnchantingTableCost),
 			skill.NewNear(world, self, table, tableReach),

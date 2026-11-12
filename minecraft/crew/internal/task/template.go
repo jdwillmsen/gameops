@@ -885,9 +885,6 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 			mineOpts = append(mineOpts, skill.Seeking(*box, accept))
 		}
 	}
-	if src.MinTier > 0 {
-		mineOpts = append(mineOpts, skill.NeedTier(src.MinTier))
-	}
 	gather := skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...)
 	if src.Fell {
 		gather = skill.NewFell(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts, opts...)

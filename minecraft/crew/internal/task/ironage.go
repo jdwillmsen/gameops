@@ -2,6 +2,7 @@ package task
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
 
@@ -141,12 +142,25 @@ func planIronAge(inv Inventory, depth, branches, length int) ironPlan {
 // The quantities are worked out when the task starts, from what the unit holds
 // then, so a unit that has coal or ingots or a tool already skips that step.
 // Both dives take the same stair, so the second walks the part the first dug.
-func expandIronAge(t Template, world skill.ChestWorld, self func() belief.Snapshot, opts []skill.Option) ([]skill.Skill, error) {
-	inv := InventoryOf(self())
+func expandIronAge(t Template, world skill.ChestWorld, s belief.Snapshot, self func() belief.Snapshot, opts []skill.Option) ([]skill.Skill, error) {
+	inv := InventoryOf(s)
 	table := protocol.BlockPos{t.Block.X, t.Block.Y, t.Block.Z}
 	furnace := protocol.BlockPos{t.Furnace.X, t.Furnace.Y, t.Furnace.Z}
 	chest := protocol.BlockPos{t.To.X, t.To.Y, t.To.Z}
 	plan := planIronAge(inv, t.Depth, t.Branches, t.BranchLength)
+
+	// Coal breaks to any pickaxe, iron ore needs a stone one. Check before
+	// the first dive: a wooden pickaxe would otherwise dig the coal dive and
+	// the iron dive for nothing and fail at the chest.
+	if plan.rawIron > 0 || plan.coal > 0 {
+		need := 0
+		if plan.rawIron > 0 {
+			need = 1
+		}
+		if heldTier(inv, "pickaxe") < need {
+			return nil, fmt.Errorf("no %s or better in inventory", toolItem(ToolTiers[need], "pickaxe"))
+		}
+	}
 
 	var out []skill.Skill
 	add := func(s ...skill.Skill) { out = append(out, s...) }
