@@ -833,7 +833,12 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		return []skill.Skill{skill.NewEquip(self, t.Item)}, nil
 	}
 	if t.Template == bootstrapTemplate && t.Block != nil {
-		return expandBootstrap(t, world, self, opts), nil
+		// Planned from what the unit holds and the blocks standing when the
+		// task starts, so a repeat or a bootstrap queued behind other work
+		// gathers and crafts only what is still missing.
+		return []skill.Skill{skill.NewLazy(bootstrapTemplate, self, func(s belief.Snapshot) ([]skill.Skill, error) {
+			return expandBootstrap(t, world, s, self, opts), nil
+		})}, nil
 	}
 	if sk, ok, err := expandProgression(t, world, self, opts); ok || err != nil {
 		return sk, err

@@ -1,6 +1,8 @@
 package task
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -53,6 +55,27 @@ func TestParseBootstrap(t *testing.T) {
 	}
 }
 
+// fieldString reads an unexported string field of a skill, following pointer
+// fields by name.
+func fieldString(sk skill.Skill, path ...string) string {
+	v := reflect.ValueOf(sk)
+	for _, name := range path {
+		v = reflect.Indirect(v).FieldByName(name)
+	}
+	return v.String()
+}
+
+// planned expands a template and, as the runner does when the task starts,
+// works out a bootstrap's chain from the unit as it is then.
+func planned(t *testing.T, tpl Template, world skill.ChestWorld, self func() belief.Snapshot) []skill.Skill {
+	t.Helper()
+	skills, err := Expand(tpl, world, self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return flatten(t, skills, self())
+}
+
 func expandNames(t *testing.T, body string, world skill.ChestWorld, held map[string]int) string {
 	t.Helper()
 	tpl, err := ParseTemplate([]byte(body))
@@ -60,11 +83,7 @@ func expandNames(t *testing.T, body string, world skill.ChestWorld, held map[str
 		t.Fatal(err)
 	}
 	s := snap(held)
-	skills, err := Expand(tpl, world, func() belief.Snapshot { return s })
-	if err != nil {
-		t.Fatal(err)
-	}
-	skills = flatten(t, skills, s)
+	skills := planned(t, tpl, world, func() belief.Snapshot { return s })
 	names := make([]string, len(skills))
 	for i, sk := range skills {
 		names[i] = sk.Name()
@@ -85,7 +104,7 @@ func TestBootstrapFromNothing(t *testing.T) {
 		"craft",                   // chest
 		"craft", "craft", "craft", // wooden pickaxe, axe, sword
 		"place_block", // chest
-		"mine_block", "near",
+		"hotbar_gate", "mine_block", "near",
 		"craft", "craft", "craft", // stone pickaxe, axe, sword
 		"craft", // furnace
 	}
@@ -135,5 +154,101 @@ func TestBootstrapWithoutChest(t *testing.T) {
 	got := expandNames(t, `{"template":"bootstrap","table":{"x":10,"y":64,"z":10}}`, nil, nil)
 	if strings.Count(got, "place_block") != 1 {
 		t.Errorf("skills = %s, want one placement", got)
+	}
+}
+
+// The plan reads the unit as the task starts, not as it was when queued: two
+// bootstraps queued back to back with an empty pack, the second planned once
+// the first has run, does nothing.
+func TestBootstrapPlansWhenTheTaskStartsNotWhenQueued(t *testing.T) {
+	tpl, err := ParseTemplate([]byte(bootstrapBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := snap(nil)
+	world := cellWorld{}
+	self := func() belief.Snapshot { return s }
+	queued, err := Expand(tpl, world, self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 || queued[0].Name() != "bootstrap" {
+		t.Fatalf("queued skills = %v, want the one placeholder", queued)
+	}
+	// The first run finishes before this one starts: the unit holds
+	// everything and both blocks stand.
+	s = snap(map[string]int{
+		"wooden_pickaxe": 1, "wooden_axe": 1, "wooden_sword": 1,
+		"stone_pickaxe": 1, "stone_axe": 1, "stone_sword": 1,
+		"furnace": 1,
+	})
+	world[protocol.BlockPos{10, 64, 10}] = "crafting_table"
+	world[protocol.BlockPos{12, 64, 10}] = "chest"
+	got, err := queued[0].(*skill.Lazy).Expand(s)
+	if err != nil || len(got) != 1 || got[0].Name() != "bootstrap" {
+		t.Fatalf("a repeat plans %v (err %v), want the one settled step", got, err)
+	}
+	if st, err := got[0].Step(context.Background(), nil); st != skill.Done || err != nil {
+		t.Errorf("settled step = %v, %v, want Done", st, err)
+	}
+}
+
+// Planks follow the logs the unit will have: the felled ones are oak, so a
+// stray birch log does not turn every plank into birch.
+func TestBootstrapPlanksFollowTheLogsGathered(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(bootstrapBody))
+	s := snap(map[string]int{"birch_log": 1})
+	skills := planned(t, tpl, nil, func() belief.Snapshot { return s })
+	var crafts []string
+	for _, sk := range skills {
+		if sk.Name() == "craft" {
+			crafts = append(crafts, fieldString(sk, "item"))
+		}
+	}
+	if len(crafts) < 3 || crafts[0] != "oak_planks" || crafts[1] != "birch_planks" {
+		t.Errorf("first crafts = %v, want oak planks, then the stray birch log's", crafts)
+	}
+}
+
+// An axe in the pack cannot be held; only one on the hotbar is used.
+func TestBootstrapUsesOnlyAHotbarAxe(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(bootstrapBody))
+	for name, slot := range map[string]int{"hotbar": 3, "pack": 20} {
+		t.Run(name, func(t *testing.T) {
+			s := snap(nil)
+			s.Inventory = []belief.Item{{Slot: slot, Name: "stone_axe", Count: 1}}
+			skills := planned(t, tpl, nil, func() belief.Snapshot { return s })
+			if skills[0].Name() != "fell_tree" {
+				t.Fatalf("first skill %s", skills[0].Name())
+			}
+			if got, want := fieldString(skills[0], "mine", "tool") == "axe", slot < 9; got != want {
+				t.Errorf("axe used = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// The tool a step swings has to be on the hotbar; a unit without one stops
+// before it walks off to the stone.
+func TestBootstrapStopsEarlyWithoutAHotbarPickaxe(t *testing.T) {
+	for name, tc := range map[string]struct {
+		slot int
+		ok   bool
+	}{
+		"on the hotbar": {4, true},
+		"in the pack":   {15, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := snap(nil)
+			s.Inventory = []belief.Item{{Slot: tc.slot, Name: "wooden_pickaxe", Count: 1}}
+			g := &hotbarGate{self: func() belief.Snapshot { return s }, tool: "pickaxe"}
+			st, err := g.Step(context.Background(), nil)
+			if (st == skill.Done) != tc.ok || (err == nil) != tc.ok {
+				t.Errorf("status %v, err %v, want ok=%v", st, err, tc.ok)
+			}
+			if err != nil && !strings.Contains(err.Error(), "hotbar") {
+				t.Errorf("err = %v, want it to name the hotbar", err)
+			}
+		})
 	}
 }
