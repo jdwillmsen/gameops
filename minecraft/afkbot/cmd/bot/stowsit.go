@@ -38,7 +38,16 @@ type stower struct {
 	known    bool
 	selected byte
 	pending  bool
-	last     time.Time
+	// blocked is set when a stow found no empty slot, so a slot that frees up
+	// later can try again.
+	blocked bool
+	last    time.Time
+}
+
+// selectedEmpty reports whether the bot is known to hold nothing, which is
+// what a client's interact transaction has to describe.
+func (s *stower) selectedEmpty() bool {
+	return s.known && int(s.selected) < hotbarSize && !s.occupied[s.selected]
 }
 
 func newStower(log *logging.Logger) *stower {
@@ -58,6 +67,9 @@ func (s *stower) handle(pk packet.Packet, w packetWriter, runtimeID uint64) {
 	case *packet.InventorySlot:
 		if m.WindowID == protocol.WindowIDInventory && m.Slot < hotbarSize {
 			s.occupied[m.Slot] = m.NewItem.Stack.ItemType.NetworkID != 0
+			if s.blocked && !s.occupied[m.Slot] {
+				s.blocked, s.pending = false, true
+			}
 		}
 	case *packet.MobEquipment:
 		if m.EntityRuntimeID != runtimeID || m.WindowID != protocol.WindowIDInventory {
@@ -88,6 +100,7 @@ func (s *stower) maybeStow(w packetWriter, runtimeID uint64) {
 		}
 	}
 	if slot < 0 {
+		s.blocked = true
 		s.log.Warn("stow_no_empty_slot", logging.Fields{"reason": "every hotbar slot holds an item; nothing was changed"})
 		return
 	}
@@ -119,9 +132,16 @@ func newSeater(log *logging.Logger, seat [3]float32) *seater {
 
 // step tries a mount when the bot is unseated and a retry is due. It is
 // called per packet and does nothing between retry times.
-func (s *seater) step(w packetWriter, p *pose, l *poseLog, hotbarSlot byte) {
-	pos, _, _, vehicle := p.get()
-	if vehicle != 0 || s.tries >= seatMaxTries {
+func (s *seater) step(w packetWriter, p *pose, l *poseLog, hotbarSlot byte, heldEmpty bool) {
+	pos, _, paused, vehicle := p.get()
+	if vehicle != 0 {
+		// Seated: a later dismount or respawn gets a fresh set of tries.
+		s.tries = 0
+		return
+	}
+	// A dead bot cannot interact, and the transaction must describe the
+	// selected slot, which is only known to be empty after a stow.
+	if paused || !heldEmpty || s.tries >= seatMaxTries {
 		return
 	}
 	now := s.now()
