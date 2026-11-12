@@ -4,9 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sandertv/gophertunnel/minecraft/protocol"
-
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
 )
 
 const (
@@ -254,9 +253,9 @@ func TestIronAgeStopsFirstWhenThereIsNoFurnaceOrTable(t *testing.T) {
 		held  map[string]int
 		want  string
 	}{
-		{"no furnace anywhere", cellWorld{{10, 64, 12}: "crafting_table"}, map[string]int{}, "no furnace in inventory"},
-		{"no table anywhere", cellWorld{{14, 64, 10}: "furnace"}, map[string]int{}, "no crafting_table in inventory"},
-		{"furnace carried is enough", cellWorld{{10, 64, 12}: "crafting_table"}, map[string]int{"furnace": 1}, ""},
+		{"no furnace anywhere", cellWorld{{10, 64, 12}: "crafting_table"}, map[string]int{"stone_pickaxe": 1}, "no furnace in inventory"},
+		{"no table anywhere", cellWorld{{14, 64, 10}: "furnace"}, map[string]int{"stone_pickaxe": 1}, "no crafting_table in inventory"},
+		{"furnace carried is enough", cellWorld{{10, 64, 12}: "crafting_table"}, map[string]int{"stone_pickaxe": 1, "furnace": 1}, ""},
 	}
 	for _, c := range cases {
 		tpl, _ := ParseTemplate([]byte(ironAgeBody))
@@ -265,6 +264,7 @@ func TestIronAgeStopsFirstWhenThereIsNoFurnaceOrTable(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		skills = flatten(t, skills, s)
 		err = skills[0].Ready(s)
 		if c.want == "" {
 			if err != nil {
@@ -281,13 +281,17 @@ func TestIronAgeStopsFirstWhenThereIsNoFurnaceOrTable(t *testing.T) {
 func TestIronAgeWithAllTheToolsHasNothingToDo(t *testing.T) {
 	tpl, _ := ParseTemplate([]byte(ironAgeBody))
 	s := snap(map[string]int{"iron_pickaxe": 1, "iron_axe": 1, "iron_sword": 1})
-	if _, err := Expand(tpl, ironAgeWorld(), func() belief.Snapshot { return s }); err == nil {
+	skills, err := Expand(tpl, ironAgeWorld(), func() belief.Snapshot { return s })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := skills[0].Ready(s); err == nil {
 		t.Error("a unit with the full set was given a chain")
 	}
 }
 
 func TestPlacesTheTableItCarries(t *testing.T) {
-	got := expandNames(t, ironAgeBody, cellWorld{{14, 64, 10}: "furnace"}, map[string]int{"crafting_table": 1, "iron_ingot": 8})
+	got := expandNames(t, ironAgeBody, cellWorld{{14, 64, 10}: "furnace"}, map[string]int{"stone_pickaxe": 1, "crafting_table": 1, "iron_ingot": 8})
 	if !strings.HasPrefix(got, "place_block,") {
 		t.Errorf("skills = %s", got)
 	}
@@ -336,6 +340,7 @@ func TestEnchantingChecksTheIngredientsBeforeWalking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	skills = flatten(t, skills, s)
 	if err := skills[0].Ready(s); err == nil || err.Error() != "no diamond in inventory" {
 		t.Errorf("Ready = %v, want it to name the diamond", err)
 	}
@@ -395,27 +400,103 @@ func TestEveryStageNamesAParsableTemplateOrNone(t *testing.T) {
 	}
 }
 
-func TestOreItemsCanBeGathered(t *testing.T) {
+// The plain mining skill has no lava, water or fall checks, so ore is reachable
+// only through the shaft dive.
+func TestOreItemsAreNotGatherableOrHaulable(t *testing.T) {
 	for _, item := range []string{"coal", "raw_iron", "diamond"} {
-		body := `{"template":"gather_and_deposit","item":"` + item + `","qty":4,"chest":{"x":8,"y":64,"z":10}}`
-		if _, err := ParseTemplate([]byte(body)); err != nil {
-			t.Errorf("%s: %v", item, err)
+		gather := `{"template":"gather_and_deposit","item":"` + item + `","qty":4,"chest":{"x":8,"y":64,"z":10}}`
+		if _, err := ParseTemplate([]byte(gather)); err == nil {
+			t.Errorf("gather_and_deposit accepted %s", item)
+		}
+		haul := `{"template":"haul","from":[{"x":1,"y":64,"z":1}],"to":{"x":8,"y":64,"z":10},"items":{"` + item + `":4}}`
+		if _, err := ParseTemplate([]byte(haul)); err == nil {
+			t.Errorf("haul accepted %s", item)
 		}
 	}
-	// A wooden pickaxe cannot gather iron, and the task says what it wants.
-	tpl, _ := ParseTemplate([]byte(`{"template":"gather_and_deposit","item":"raw_iron","qty":4,"chest":{"x":8,"y":64,"z":10}}`))
-	s := snap(map[string]int{"wooden_pickaxe": 1})
-	world := cellWorld{}
-	skills, err := Expand(tpl, world, func() belief.Snapshot { return s })
+}
+
+// flatten expands a lazy chain from a snapshot so a test can read its steps.
+func flatten(t *testing.T, skills []skill.Skill, s belief.Snapshot) []skill.Skill {
+	t.Helper()
+	if len(skills) != 1 {
+		return skills
+	}
+	lz, ok := skills[0].(*skill.Lazy)
+	if !ok {
+		return skills
+	}
+	steps, err := lz.Expand(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := skills[0].Ready(s); err == nil || err.Error() != "no stone_pickaxe or better in inventory" {
-		t.Errorf("wooden pickaxe: Ready = %v", err)
+	return steps
+}
+
+// A task waits behind others: the chain is priced from what the unit holds when
+// it starts, not from the inventory of the moment it was submitted.
+func TestIronAgeIsPricedWhenItStarts(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(ironAgeBody))
+	cur := snap(map[string]int{"stone_pickaxe": 1, "iron_ingot": 8, "stick": 9, "oak_planks": 8})
+	skills, err := Expand(tpl, ironAgeWorld(), func() belief.Snapshot { return cur })
+	if err != nil {
+		t.Fatal(err)
 	}
-	s = snap(map[string]int{"stone_pickaxe": 1})
-	if err := skills[0].Ready(s); err != nil {
-		t.Errorf("stone pickaxe: Ready = %v", err)
+	// The ingots are deposited and the unit dies before the task starts.
+	cur = snap(map[string]int{"stone_pickaxe": 1, "stick": 9, "oak_planks": 8})
+	lz := skills[0].(*skill.Lazy)
+	if err := lz.Ready(cur); err != nil {
+		t.Fatal(err)
 	}
-	_ = protocol.BlockPos{}
+	if got := lz.Name(); got != "mine_shaft" {
+		t.Errorf("first step = %s, want the coal dive the ingots no longer excuse", got)
+	}
+}
+
+func TestIronAgeChecksThePickaxeBeforeDigging(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(ironAgeBody))
+	for _, c := range []struct {
+		name string
+		held map[string]int
+		want string
+	}{
+		{"no pickaxe", map[string]int{}, "no stone_pickaxe or better in inventory"},
+		{"wooden pickaxe cannot take iron", map[string]int{"wooden_pickaxe": 1}, "no stone_pickaxe or better in inventory"},
+		{"stone pickaxe", map[string]int{"stone_pickaxe": 1}, ""},
+		{"iron pickaxe", map[string]int{"iron_pickaxe": 1}, ""},
+		// With the raw iron in hand only the coal dive is left, which any
+		// pickaxe does.
+		{"wooden pickaxe, raw iron in hand", map[string]int{"wooden_pickaxe": 1, "raw_iron": 8}, ""},
+		{"wooden pickaxe, nothing to dig", map[string]int{"wooden_pickaxe": 1, "iron_ingot": 8}, ""},
+	} {
+		s := snap(c.held)
+		skills, err := Expand(tpl, ironAgeWorld(), func() belief.Snapshot { return s })
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = skills[0].Ready(s)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s: Ready = %v", c.name, err)
+		case c.want != "" && (err == nil || err.Error() != c.want):
+			t.Errorf("%s: Ready = %v, want %q", c.name, err, c.want)
+		}
+	}
+	if ReasonCode("no stone_pickaxe or better in inventory") != ReasonMissingTool {
+		t.Error("a pickaxe that is too weak is not a missing_tool failure")
+	}
+}
+
+func TestEnchantingIsDecidedWhenItStarts(t *testing.T) {
+	tpl, _ := ParseTemplate([]byte(enchantBody))
+	cur := snap(map[string]int{"enchanting_table": 1})
+	skills, _ := Expand(tpl, nil, func() belief.Snapshot { return cur })
+	// The table was placed and lost, or never held, by the time the task runs.
+	cur = snap(map[string]int{"obsidian": 4, "diamond": 2, "book": 1})
+	lz := skills[0].(*skill.Lazy)
+	if err := lz.Ready(cur); err != nil {
+		t.Fatal(err)
+	}
+	if got := lz.Name(); got != "require" {
+		t.Errorf("first step = %s, want the ingredient check", got)
+	}
 }

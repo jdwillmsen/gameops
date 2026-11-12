@@ -64,6 +64,7 @@ func expandNames(t *testing.T, body string, world skill.ChestWorld, held map[str
 	if err != nil {
 		t.Fatal(err)
 	}
+	skills = flatten(t, skills, s)
 	names := make([]string, len(skills))
 	for i, sk := range skills {
 		names[i] = sk.Name()
