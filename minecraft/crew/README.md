@@ -30,10 +30,10 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `COMBAT_SHIELD` | `true` | Raise a shield from the hotbar against arrows |
 | `EAT` | `true` | Eat food from the hotbar when hungry and not fighting (see Eating and rearming) |
 | `RETREAT_HEALTH` | `6` | Health (out of 20) at or below which the reactive defence walks away from a threat instead of fighting (1 to 20; see Health and food) |
-| `EMERGENCY_HEALTH` | `4` | Health at or below which a golden apple is eaten whatever the hunger; the only time one is (0 to 20, `0` never) |
-| `REST_BELOW` | `10` | Health under which a unit with no hostile mob near stands still to heal, pausing a running task (0 to 20, `0` never pauses a task) |
+| `EMERGENCY_HEALTH` | `4` | Health at or below which a golden apple is eaten whatever the hunger, in a fight too; the only time one is (0 to 20, `0` never; `0` for a warrior role) |
+| `REST_BELOW` | `10` | Health under which a unit with no hostile mob near stands still to heal, pausing a running task (0 to 20, `0` never pauses a task; `0` for a warrior role) |
 | `TASK_MIN_HEALTH` | `12` | Health a unit needs before it starts a task; under it, it rests first (0 to 20, `0` starts at any health) |
-| `TASK_MIN_FOOD` | `16` | Food a unit tops up to, from the hotbar, before it starts a task (0 to 20, `0` adds no such meal) |
+| `TASK_MIN_FOOD` | `16` | Food a unit tops up to, from the hotbar, before it starts a task (0 to 19, `0` adds no such meal; `0` for a warrior role) |
 | `CREW_ROLE` | unset | The unit's role: a warrior (`vanguard`, `striker`, `ranger`; see Squads and warriors) or a builder (`mender`, `builder`; see Mender and builder roles); anything else is refused, unset leaves the reactive defence in charge |
 | `CREW_LAB` | `false` | Must be `true` for a `mender` or `builder`, which refuse to start without it; the lab chart or compose sets it, the live server's never does |
 | `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
@@ -276,7 +276,10 @@ minute. See Health and food for which food is chosen and the other thresholds.
 ### Health and food
 
 The reflex keeps a unit alive between fights. Everything below applies only
-outside a fight and is deterministic; the thresholds are the variables
+outside a fight, except the emergency golden apple, and is deterministic. A
+warrior role starts with `EMERGENCY_HEALTH`, `REST_BELOW`, `TASK_MIN_HEALTH` and
+`TASK_MIN_FOOD` at `0` (off), since it fights and recovers by its profile; set
+one to turn it on. The thresholds are the variables
 `RETREAT_HEALTH`, `EMERGENCY_HEALTH`, `REST_BELOW`, `TASK_MIN_HEALTH` and
 `TASK_MIN_FOOD` in the configuration table.
 
@@ -290,12 +293,17 @@ outside a fight and is deterministic; the thresholds are the variables
   nothing running, tops up to `TASK_MIN_FOOD` first.
 - **Golden apples** are eaten only at `EMERGENCY_HEALTH` or lower, whatever the
   hunger, and not twice within seven seconds, so the regeneration of the first
-  has time to show.
+  has time to show. The apple is eaten in a fight too, standing still for the
+  two seconds it takes, and a meal that was cut short earlier does not hold it
+  back (a failed apple does, for a minute). A unit at full food starts no other
+  meal, since the server would refuse it.
 - **Resting.** A unit hurt under `REST_BELOW` (under `TASK_MIN_HEALTH` before a
   task starts) with no hostile mob within 16 blocks and food of 18 or more stands
   still until health is 18, pausing a running task and not charging the wait to
   `TASK_TIMEOUT_S`. It stops early when a hostile mob comes into view
-  (resuming five seconds after it is gone) or food falls under 18, and gives up
+  (resuming five seconds after it is gone), food falls under 18 or its health
+  drops (fire, a cactus, a bush: it moves on and does not rest again for a
+  minute), and gives up
   after 90 seconds, after which it does not rest again for a minute, so a unit
   that cannot heal never stalls its work. Meals come before rest. A unit that is
   in creative mode or whose position is unknown does not rest.
@@ -305,7 +313,7 @@ outside a fight and is deterministic; the thresholds are the variables
   it, so it does not begin a long job hurt or hungry.
 
 Logs carry `rest` (with `health`, `hunger` and whether a task was `working`)
-and `rest_done` (with a `reason` of `healed`, `hungry`, `threat` or `timeout`,
+and `rest_done` (with a `reason` of `healed`, `hungry`, `threat`, `hurt` or `timeout`,
 the `ticks` and the `health`), never positions. A zero value for
 `EMERGENCY_HEALTH`, `REST_BELOW`, `TASK_MIN_HEALTH` or `TASK_MIN_FOOD` turns that
 rule off.
@@ -695,23 +703,30 @@ wooden and stone tools and a furnace, in one task:
 free. The chain it runs, with what each step costs (an item the unit already
 holds is skipped, and logs and cobblestone it holds are not gathered again):
 
-1. Fell logs (bare-handed unless it holds an axe), searching first when
-   `search` is set. Seven logs cover everything below; the count is worked out
-   when the task starts from `DemandFor`.
-2. Craft planks (of the wood it holds most of, else oak) and 10 sticks: five
-   for the wooden tools, five for the stone ones.
+1. Fell oak logs (bare-handed unless it holds an axe on the hotbar), searching
+   first when `search` is set. Seven logs cover everything below; the count is
+   worked out when the task starts from `DemandFor`.
+2. Craft planks and 10 sticks: five for the wooden tools, five for the stone
+   ones. Planks are crafted per wood, from the logs it will hold (the felled
+   oak ones, and any other wood it already carries), so a stray birch log is
+   used and does not turn the plan into one the recipe book refuses.
 3. Craft a crafting table (4 planks) and place it at `table`.
 4. Stand beside the table, craft the chest (8 planks) and the wooden pickaxe,
    axe and sword (3, 3 and 2 planks), then place the chest at `chest`.
 5. Mine 16 cobblestone with the new pickaxe (searching for stone first when
    `search` is set), walk back beside the table, craft the stone pickaxe, axe
    and sword (3, 3 and 2 cobblestone) and a furnace (8 cobblestone). The
-   furnace is carried, not placed.
+   furnace is carried, not placed. The pickaxe must be on the hotbar, and the
+   task stops before the walk if it is not: a crafted tool lands in the first
+   empty slot, hotbar first, so this only happens to a unit whose hotbar is
+   full.
 
-A table or chest already standing at its cell is used, not crafted again, so
-the task can be queued twice. The task fails where a step does (no stone within reach, a cell that is
-not free); every craft is skipped when the unit already
-holds enough of its item, so queueing it again resumes the chain.
+A table or chest already standing at its cell is used, not crafted again. The
+chain is planned when the task starts, from what the unit holds and the blocks
+standing then, not when it is queued, so queueing it twice (or behind other
+work) gathers and crafts only what is still missing, and a repeat on a unit
+that has everything does nothing. The task fails where a step does (no stone
+within reach, a cell that is not free, no pickaxe on the hotbar).
 `bootstrap` is not yet in crew-control's template list, so its tasks show as
 `other` in that service's metrics and logs.
 
