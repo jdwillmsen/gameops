@@ -216,3 +216,24 @@ func TestUseBedStopWakesASleepingUnit(t *testing.T) {
 		t.Errorf("stop-sleeping sent %d times, want 1", br.stopped)
 	}
 }
+
+// After a fight the visit starts over; a server that does not repeat the spawn
+// announcement for a bed that is already the respawn point has not failed.
+func TestUseBedResumedAfterTheSpawnWasSetIsNotAFailure(t *testing.T) {
+	br := newBedRig(t, nightTicks)
+	br.monsters = true
+	sk := br.skill(nil)
+	for i := 0; i < 400 && sk.(Progresser).Progress() == 0; i++ {
+		if st, err := sk.Step(t.Context(), br); st != Running {
+			t.Fatalf("status %v, err %v before the spawn was set", st, err)
+		}
+	}
+	if sk.(Progresser).Progress() != 1 {
+		t.Fatal("the spawn was never set")
+	}
+	sk.(Resumer).Resume()
+	br.silent = true
+	if st, err := br.run(sk, 1000); st != Done || err != nil {
+		t.Fatalf("status %v, err %v", st, err)
+	}
+}
