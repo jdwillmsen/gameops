@@ -258,6 +258,12 @@ func (l *Life) Fight(ctx context.Context, a skill.Actuator, s belief.Snapshot) e
 	l.stopKit(a)
 	l.stopInventory(a)
 	l.stopRecover()
+	l.stopHome()
+	if l.stopNight(a) {
+		// Leaving the bed or the room took this tick's input; the fight
+		// begins on the next.
+		return nil
+	}
 	e, ok := l.ents.Get(l.target.ID)
 	p := a.Pose()
 	if l.target.ID == 0 || !ok {

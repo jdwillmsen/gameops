@@ -13,25 +13,35 @@ import (
 // unit pushed off its middle.
 const atHomeRange = 1.5
 
-// ShouldShelter says a unit ought to start the shelter task: it is dusk or
-// night in the overworld, the unit is alive and free to act, it has no bed to
-// sleep in, and it is not already standing in the shelter spot home names.
-//
-// Whether the unit is in a fight is the caller's to check, as the Life
-// reflex already knows it; this takes only what a snapshot and the clock say,
-// so it can be tested without a world. An unannounced time says nothing, and
-// the unit is not sent to hide on a guess.
-func ShouldShelter(s belief.Snapshot, env belief.Env, haveBed bool, home *protocol.BlockPos) bool {
+// nightFree says the unit is alive, free to act and in the overworld at dusk
+// or night. An unannounced time says nothing, and the unit is not sent to
+// hide on a guess.
+func nightFree(s belief.Snapshot, env belief.Env) bool {
 	if !s.Spawned || s.Dead || s.Dimension != 0 || s.Creative {
 		return false
 	}
-	if env.DayPhase != belief.PhaseDusk && env.DayPhase != belief.PhaseNight {
-		return false
-	}
-	if haveBed {
+	return env.DayPhase == belief.PhaseDusk || env.DayPhase == belief.PhaseNight
+}
+
+// ShouldShelter says a unit ought to start the shelter task: it is dusk or
+// night in the overworld, the unit is alive and free to act, it has no bed to
+// sleep in, and it is not already standing in the shelter spot home names
+// (nil names none).
+//
+// Whether the unit is in a fight is the caller's to check, as the Life
+// reflex already knows it; this takes only what a snapshot and the clock say,
+// so it can be tested without a world.
+func ShouldShelter(s belief.Snapshot, env belief.Env, haveBed bool, home *protocol.BlockPos) bool {
+	if !nightFree(s, env) || haveBed {
 		return false
 	}
 	return !inShelter(s, home)
+}
+
+// ShouldSleep says a unit with a bed ought to go to it: the same dusk or night
+// as ShouldShelter, and the unit is not already asleep.
+func ShouldSleep(s belief.Snapshot, env belief.Env, haveBed bool) bool {
+	return haveBed && nightFree(s, env) && !s.Sleeping
 }
 
 // inShelter says the unit stands in the cell it walled itself into. Position

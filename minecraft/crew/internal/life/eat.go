@@ -82,6 +82,9 @@ func (l *Life) Tending(s belief.Snapshot, working bool) bool {
 	if l.wantsRecovery(s) {
 		return true
 	}
+	if l.wantsNight(s) || l.wantsHome(s) {
+		return true
+	}
 	if _, ok := l.wantsMeal(s); ok {
 		return true
 	}
@@ -114,6 +117,12 @@ func (l *Life) Tend(ctx context.Context, a skill.Actuator, s belief.Snapshot) er
 	}
 	if l.kit.visit == nil && l.rec.visit != nil {
 		return l.tendRecover(ctx, a)
+	}
+	if l.kit.visit == nil && !l.inv.busy() && l.night.visit != nil {
+		return l.tendNight(ctx, a)
+	}
+	if l.kit.visit == nil && !l.inv.busy() && l.home.visit != nil {
+		return l.tendHome(ctx, a)
 	}
 	if l.kit.visit == nil && (l.inv.busy() || l.inv.next != invNone) {
 		return l.tendInventory(ctx, a, s)
@@ -157,7 +166,8 @@ func (l *Life) fightMeal(a skill.Actuator, s belief.Snapshot) bool {
 // wantsMeal picks the food to eat now: a golden apple in an emergency, else
 // the best-fitting food once the unit is hungry enough.
 func (l *Life) wantsMeal(s belief.Snapshot) (belief.Item, bool) {
-	if !l.cfg.Eat {
+	// A sleeping unit cannot lift its hand to eat; the meal waits for the morning.
+	if !l.cfg.Eat || s.Sleeping {
 		return belief.Item{}, false
 	}
 	if apple, ok := l.emergencyMeal(s); ok && s.HungerKnown {

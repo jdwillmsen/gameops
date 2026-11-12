@@ -52,6 +52,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `INV_KEEP_FILLER` | `64` | Of each filler block (dirt, cobblestone, gravel, andesite, diorite, granite, tuff, netherrack) kept; the rest is dropped (0 to 1024) |
 | `INV_SPARE_TOOLS` | `1` | Tools of a kind kept beyond the best one (0 to 4) |
 | `INV_REACH` | `96` | How far from the chest, in blocks, a unit still sets out for it (8 to 160) |
+| `NIGHT_SHELTER` | `false` | From dusk the unit spends the night safely and carries on at dawn: in its bed when it has one, else walled in where it stands (see Nights and home) |
+| `HOME_POS` | unset | `x,y,z` of the unit's base. After a join or a death puts it at the world spawn it walks there on its own before it resumes its work (see Nights and home); unset leaves it where it is |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
@@ -616,8 +618,12 @@ base rather than to the world spawn:
 ```
 
 `block` is the bed (either half), inside the lab square. The operator builds
-the bed; the unit does not craft one. The unit walks within reach, taps the
-bed and is done once the server sets the respawn point, at any hour. At night
+the bed; the unit does not craft one. The unit walks up beside the bed (the
+server answers a tap on a bed only from within about 2.6 blocks of it,
+measured on the ground plane, and says nothing at all from farther, so the
+unit taps from 2.2 or closer and not from the 4.5 blocks a chest or a
+placement allows), taps it and is done once the server sets the respawn
+point, at any hour. At night
 the server also puts the unit to sleep and it stays in bed until dawn wakes it,
 or until a fight takes it out. With monsters nearby the server refuses sleep
 but still sets the point, so the visit ends done. It fails with `the bed's
@@ -665,9 +671,49 @@ blocks to shelter (need N)` when no cell within reach can be closed with what
 it carries, `no standing spot to shelter within 16 blocks` when none is safe,
 and is refused up front, by day, with `it is already day`. `progress` counts
 blocks placed. The leaving column must have open air behind it, else the task
-fails with `no safe exit from the shelter`. `life.ShouldShelter` is the pure
-decision helper for when a unit with no bed should dig in; the Life reflex does
-not call it yet, so a shelter task has to be queued by hand.
+fails with `no safe exit from the shelter`. The unit stands on the middle of
+its cell before it builds (within 0.12 blocks): its body is 0.6 wide, and the
+server refuses a block placed where the body is, so from 0.2 off the middle
+the wall on that side never goes up.
+
+### Nights and home
+
+`NIGHT_SHELTER=true` turns the shelter and the bed into something the unit
+does by itself. From dusk (tick 12000) to dawn, in the overworld and not in
+creative, the unit takes the tick ahead of its queued task or work plan:
+
+- With a bed it goes to the bed and sleeps (`use_bed`). The bed is found from
+  the respawn point the server reports, which is where the unit stood when it
+  last tapped a bed, by looking within 4 blocks of it; a bed more than 64
+  blocks away or no longer there counts as none. The server refuses sleep
+  until about tick 12542, so a visit that ends with the unit still awake is
+  repeated every 5 seconds, up to 16 times a night, and only then does the
+  unit dig in instead.
+- With no bed it walls itself in where it stands (`shelter`) and digs out at
+  dawn. It needs blocks in its inventory; with too few, `night_failed` is
+  logged and the next try is a minute later.
+
+The task that was running resumes when the unit is free again; the time spent
+does not count against its timeout. A fight takes the unit out of the bed or
+the room and the visit resumes after it, the same as any task it interrupts. A
+meal waits while the unit is in bed. Logs carry `night_started` (`kind` `bed`
+or `shelter`, and the `phase`), `night_done`, `night_failed` and
+`night_skipped`, never a position. Time comes from the clock the server
+announces; a unit that has not been told the time does nothing.
+
+`HOME_POS=x,y,z` names the unit's base. A unit that has just joined or just
+died comes back at the world spawn, often hundreds of blocks from its work,
+and a walk cannot be planned through chunks that are not loaded. So it walks
+home in hops of up to 32 blocks over the ground it has loaded, waits up to 20
+seconds for ground ahead when there is none yet, tries a shorter hop when a
+long one fails, and stops within 2 blocks of the cell. The trip comes after
+the corpse run (`RECOVER_DROPS`) and before the kit chest, the queue and the
+work plan; a meal under way is not cut short by it, and a fight pauses it. A trip that fails is retried 10
+seconds later, up to four times in a row, and none lasts longer than five
+minutes. A unit already within 4 blocks of home does not move, and a task that
+takes the unit away from home on purpose is never called back: only a join or
+a death starts a trip. Logs carry `home_started`, `home_done`, `home_failed`
+(with the `error`) and `home_skipped`.
 
 A self-sustaining wood loop is one `WORK_PLAN`: gather saplings, plant them,
 then fell what has grown, searching when no tree is loaded, and craft:

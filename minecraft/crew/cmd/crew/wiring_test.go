@@ -308,6 +308,17 @@ func TestLifeConfigTurnsTheInventoryManagerOnOnlyWhenAsked(t *testing.T) {
 	}
 }
 
+func TestLifeConfigCarriesTheNightShelterAndHome(t *testing.T) {
+	world := blocks.New(noNames{}, 1)
+	lc := lifeConfig(config.Config{NightShelter: true, Home: &[3]int32{4, 70, -9}}, world)
+	if !lc.NightShelter || lc.World == nil || lc.Home == nil || *lc.Home != (protocol.BlockPos{4, 70, -9}) {
+		t.Errorf("config = %+v", lc)
+	}
+	if lc := lifeConfig(config.Config{}, world); lc.NightShelter || lc.Home != nil {
+		t.Errorf("night shelter or home on by default: %+v", lc)
+	}
+}
+
 // Only a warrior with crew-control to reach joins a squad; anything else
 // keeps the reactive defence and no client.
 func TestSquadClientWiresOnlyForAWarriorWithCrewControl(t *testing.T) {

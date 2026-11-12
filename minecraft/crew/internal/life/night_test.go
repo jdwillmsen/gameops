@@ -51,3 +51,36 @@ func TestShouldShelter(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldSleep(t *testing.T) {
+	phase := func(p string) belief.Env { return belief.Env{DayPhase: p} }
+	cases := []struct {
+		name string
+		mod  func(*belief.Snapshot)
+		env  belief.Env
+		bed  bool
+		want bool
+	}{
+		{"night with a bed", nil, phase(belief.PhaseNight), true, true},
+		{"dusk with a bed", nil, phase(belief.PhaseDusk), true, true},
+		{"night with no bed", nil, phase(belief.PhaseNight), false, false},
+		{"day", nil, phase(belief.PhaseDay), true, false},
+		{"dawn", nil, phase(belief.PhaseDawn), true, false},
+		{"time unknown", nil, phase(""), true, false},
+		{"already asleep", func(s *belief.Snapshot) { s.Sleeping = true }, phase(belief.PhaseNight), true, false},
+		{"dead", func(s *belief.Snapshot) { s.Dead = true }, phase(belief.PhaseNight), true, false},
+		{"nether", func(s *belief.Snapshot) { s.Dimension = 1 }, phase(belief.PhaseNight), true, false},
+		{"creative", func(s *belief.Snapshot) { s.Creative = true }, phase(belief.PhaseNight), true, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := nightSnap()
+			if c.mod != nil {
+				c.mod(&s)
+			}
+			if got := ShouldSleep(s, c.env, c.bed); got != c.want {
+				t.Errorf("ShouldSleep = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
