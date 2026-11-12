@@ -789,7 +789,132 @@ are required, and a plan with any cell outside `area` is rejected when
 submitted. A cell is left closed when lava, water, magma, an unloaded block or
 no floor is next to it: the heading is dropped, logged as `mine_hazard`, and the
 unit carries on with the next. A shaft blocked at its first step fails the
-task. Tunnels are not lit.
+task. `mine_shaft` does not light its tunnels; `mine_ore` does.
+
+### Safe mining and progression
+
+These templates take a unit from stone tools to iron tools, with a long-range
+goal of an enchanting table. Each is deterministic and covered by simulator
+tests; the furnace window is not yet confirmed against a live server (see
+below).
+
+**The dive.** `mine_ore` is `mine_shaft` plus ore targeting, torches and an
+early stop. It never digs straight down: the stair goes one block down per block
+forward, every cell is checked before it is opened, and the skill refuses to
+break the block under its own feet. A cell stays closed when a face of it
+touches lava, water, magma or an unloaded block, or when a column
+of gravel or sand over it ends at a liquid (the existing `mine_hazard` events).
+A missing floor is bridged with cobblestone if the unit has some.
+
+```json
+{"template": "mine_ore", "entrance": {"x": 0, "y": 64, "z": 0}, "facing": "east",
+ "depth": 24, "branches": 2, "branch_length": 16,
+ "area": {"min": {"x": 0, "y": 30, "z": -10}, "max": {"x": 99, "y": 70, "z": 40}},
+ "to": {"x": 0, "y": 64, "z": 0},
+ "ores": ["coal", "iron"], "torches": true, "goal": {"raw_iron": 8}}
+```
+
+It takes the `mine_shaft` fields, with depth up to 64, `branch_length` up to 48
+and an area up to 160 blocks on an axis, so a dive can reach diamond depth.
+`ores` lists 1 to 3 of `coal`, `iron` and `diamond`. `torches` lights the way.
+`goal` maps a dropped item (`coal`, `raw_iron`, `diamond`) to an amount; once
+every item has been gained since the task began, the unit stops digging, climbs
+out and deposits as usual. What the unit came with does not count.
+
+- **Torches.** The skill models block light: torches, lava, lanterns and the
+  like light the open cells around them, losing one level per cell and stopping
+  at stone (`blockLight`). Where the modelled light at a stand is under 8 and the
+  stand is at least three below the entrance, it places a torch on the stand it
+  just left, so a stair gets about one torch per three steps. The model reads
+  block names, not the server's light values, and treats unloaded cells as dark,
+  so it errs toward too many torches. A unit with no torch logs `mine_dark` once
+  and digs on; a failed placement logs `mine_torch_failed` and does the same.
+  Torches come from `craft` (one coal and one stick make four).
+- **Ore.** At each stand the unit looks for wanted ore within 4 cells that is
+  exposed to open air, within reach, and takes it. It leaves ore the best
+  pickaxe on its hotbar cannot harvest (coal needs any pickaxe, iron stone or
+  better, diamond iron or better; logged `mine_ore_skipped`), ore sealed in
+  stone, ore that is a floor of its own stair, ore whose break would admit lava
+  or water, and ore whose drop it could not walk to. Veins
+  that run into the wall are therefore only partly taken. It always holds its
+  best pickaxe, and `mine_block` does too.
+- **Gathering.** `gather_and_deposit` also takes `coal`, `raw_iron` and
+  `diamond` from ore at the surface or in `search`; `raw_iron` and `diamond`
+  refuse to start without a stone or iron pickaxe, saying
+  `no stone_pickaxe or better in inventory`.
+
+**Smelting.** `smelt` cooks an item in the furnace at a cell:
+
+```json
+{"template": "smelt", "item": "raw_iron", "qty": 8, "block": {"x": 14, "y": 64, "z": 10}}
+```
+
+`item` is one of `raw_iron`, `raw_copper`, `raw_gold`, `cobblestone`, `sand`,
+`clay_ball`, `oak_log` (charcoal), the raw meats, `potato`, `cod`, `salmon` and
+`kelp`; `qty` is 1 to 64. A furnace standing at `block` is used; an empty cell
+gets the furnace the unit carries, set down with `place_block`. The unit then
+opens the furnace, loads the ingredient and the cheapest fuel that covers the
+run on its own (charcoal, then coal, then planks, logs or sticks; a stack too
+small is passed over, never mixed), closes the window so it cooks, idles for
+200 ticks per item plus slack, and opens it again to take the result. A result
+slot still empty gets two more waits before the task fails with
+`the furnace made no <item>`. A run resumed after a fight adds only what is
+missing from the furnace. Fuel and furnace are the unit's own: a missing one
+fails before anything moves with `no fuel in inventory` or `no furnace in
+inventory`.
+
+**The iron age.** `iron_age` chains the whole way from a stone pickaxe and a
+carried furnace to an iron pickaxe, axe and sword:
+
+```json
+{"template": "iron_age", "table": {"x": 10, "y": 64, "z": 12},
+ "furnace": {"x": 14, "y": 64, "z": 10}, "chest": {"x": 8, "y": 64, "z": 10},
+ "entrance": {"x": 10, "y": 64, "z": 10}, "facing": "east", "depth": 24,
+ "branches": 2, "branch_length": 16,
+ "area": {"min": {"x": 0, "y": 30, "z": -10}, "max": {"x": 99, "y": 70, "z": 40}}}
+```
+
+with an optional `search` box, as for `bootstrap`. The steps, with every
+quantity worked out when the task starts from what the unit holds (an item it
+has skips its step, and a unit with all three tools gets no task):
+
+1. Stop at once if neither a standing nor a carried crafting table and furnace
+   exist; place a carried table.
+2. Fell the logs the sticks need (8 iron ingots' worth of tools take 5 sticks,
+   torches one each per craft), searching first, and craft planks and sticks.
+3. Dive for the coal that the smelt (one per 8 ingots) and the torches (one per
+   craft) need, unlit, into the chest; withdraw it.
+4. Craft the torches the dive needs: about depth/3 + branches x length/6 + 2.
+5. Dive again down the same stair for raw iron, with torches, to a goal of the
+   ingots still missing; withdraw it.
+6. Smelt the ingots.
+7. Stand beside the table and craft the iron tools that are missing.
+
+`enchanting_table` is the ladder's long-range goal:
+
+```json
+{"template": "enchanting_table", "table": {"x": 10, "y": 64, "z": 12}, "at": {"x": 16, "y": 64, "z": 12}}
+```
+
+It fails before walking, naming the first missing item, unless the unit holds 4
+`obsidian`, 2 `diamond` and a `book`; then it stands beside the crafting table,
+crafts an `enchanting_table` and, if `at` is given, places it there. Fetching
+obsidian (a diamond pickaxe and water or lava) and a book (paper and leather)
+is not done yet.
+
+`task.Ladder` lists the stages in order (`stone_tools`, `coal`, `iron_tools`,
+`diamonds`, `obsidian`, `book`, `enchanting_table`) with the template that
+advances each, and `task.NextStage(snapshot)` names the first one the unit has
+not finished, for the goal ledger. Like `bootstrap`, the new templates are not
+yet in crew-control's template list, so their tasks show as `other` there.
+
+**Not live-checked.** The furnace window: `act.FurnaceLoad` and `FurnaceTake`
+send item stack requests naming `ContainerFurnaceIngredient`, `Fuel` and
+`Result` with slots 0, 1 and 2 (the window's content order), and the skill
+expects the three slots in an `InventoryContent` for the window. If the server
+numbers them differently, only the table in `internal/act/furnace.go` changes.
+Also unchecked: torch placement against real light levels, the cook time on a
+loaded server, and diamond-depth dives (lava lakes are common there).
 
 `goto` walks the unit to within a block and a half of a cell.
 `to` is bounded to the lab's flat square: x and z -500 to 499, y -64 to 320:
