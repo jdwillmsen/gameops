@@ -27,6 +27,16 @@ const (
 	// wakeWindow is how long the server has to take the unit out of bed after
 	// it was asked to.
 	wakeWindow = 40
+	// rescanTicks is how long a visit keeps looking for a bed that is not at
+	// the target. After a death the world is sent again, and the bed can read
+	// as missing, or sit a block off, until it has loaded.
+	rescanTicks = 40
+	// bedSearch is how far from the target, horizontally and vertically, a
+	// re-scan looks for a bed.
+	bedSearchXZ, bedSearchY = 3, 2
+	// maxRescans bounds how often a bed that vanishes under the unit sends the
+	// visit back to looking.
+	maxRescans = 3
 )
 
 var (
@@ -64,6 +74,11 @@ type UseBed struct {
 	slept      bool
 	waking     bool
 	set        bool
+	// origin is the target as given; a re-scan searches around it.
+	origin  protocol.BlockPos
+	rescan  int
+	rescans int
+	skipped bool
 }
 
 // NewUseBed makes the bed at the position the unit's respawn point.
@@ -72,7 +87,7 @@ func NewUseBed(world ChestWorld, self func() belief.Snapshot, bed protocol.Block
 	for _, f := range opts {
 		f(&o)
 	}
-	return &UseBed{world: world, self: self, bed: bed, log: o.log}
+	return &UseBed{world: world, self: self, bed: bed, origin: bed, log: o.log}
 }
 
 func (u *UseBed) Name() string { return "use_bed" }
@@ -85,6 +100,15 @@ func (u *UseBed) Progress() int {
 		return 1
 	}
 	return 0
+}
+
+// Report says why a visit that found no bed ended without setting a respawn
+// point.
+func (u *UseBed) Report() (string, bool) {
+	if u.skipped {
+		return "no bed at the target; skipped", true
+	}
+	return "", false
 }
 
 // Resume starts the visit again after a fight, keeping what was set.
@@ -147,10 +171,47 @@ func (u *UseBed) start(a Actuator) outcome {
 	}
 	u.waited = 0
 	if !isBed(name) {
-		return u.failed(errNoBed)
+		if found, ok := u.findBed(); ok {
+			u.bed, u.rescan = found, 0
+		} else {
+			if u.rescan++; u.rescan >= rescanTicks {
+				return u.skip()
+			}
+			return u.idle(a)
+		}
 	}
 	u.phase = bdWalk
 	return next
+}
+
+// findBed looks around the original target for a bed, nearest first, in the
+// cells the unit knows.
+func (u *UseBed) findBed() (protocol.BlockPos, bool) {
+	best, bestD, found := protocol.BlockPos{}, 1<<30, false
+	for dx := int32(-bedSearchXZ); dx <= bedSearchXZ; dx++ {
+		for dy := int32(-bedSearchY); dy <= bedSearchY; dy++ {
+			for dz := int32(-bedSearchXZ); dz <= bedSearchXZ; dz++ {
+				c := protocol.BlockPos{u.origin.X() + dx, u.origin.Y() + dy, u.origin.Z() + dz}
+				if name, known := u.world.Block(c); !known || !isBed(name) {
+					continue
+				}
+				if d := int(dx*dx + dy*dy + dz*dz); d < bestD {
+					best, bestD, found = c, d, true
+				}
+			}
+		}
+	}
+	return best, found
+}
+
+// skip ends a visit that found no bed as done, so a plan that repeats after a
+// death goes on to its next step instead of failing on a bed that is gone.
+func (u *UseBed) skip() outcome {
+	u.skipped = true
+	if u.log != nil {
+		u.log.Info("bed_skipped", map[string]any{})
+	}
+	return outcome{st: Done}
 }
 
 func (u *UseBed) walk(a Actuator) outcome {
@@ -196,7 +257,12 @@ func (u *UseBed) sendTap(a Actuator, snap belief.Snapshot) error {
 func (u *UseBed) tap(a Actuator, snap belief.Snapshot) outcome {
 	if u.taps == 0 {
 		if name, known := u.world.Block(u.bed); !known || !isBed(name) {
-			return u.failed(errNoBed)
+			// The bed went between the walk and the tap: look again.
+			if u.rescans++; u.rescans > maxRescans {
+				return u.skip()
+			}
+			u.phase, u.nav = bdStart, nil
+			return next
 		}
 		u.setsBefore = snap.SpawnSets
 		if err := u.sendTap(a, snap); err != nil {
