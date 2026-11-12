@@ -18,7 +18,7 @@ const goodBody = `{"template":"gather_and_deposit","item":"cobblestone","qty":16
 func TestTemplateRejectsUnknownFieldsAndItems(t *testing.T) {
 	cases := map[string]string{
 		"unknown template": `{"template":"build_house","item":"cobblestone","qty":1,"chest":{"x":0,"y":0,"z":0}}`,
-		"unknown item":     `{"template":"gather_and_deposit","item":"diamond","qty":1,"chest":{"x":0,"y":0,"z":0}}`,
+		"unknown item":     `{"template":"gather_and_deposit","item":"emerald","qty":1,"chest":{"x":0,"y":0,"z":0}}`,
 		"extra field":      `{"template":"gather_and_deposit","item":"cobblestone","qty":1,"chest":{"x":0,"y":0,"z":0},"radius":9}`,
 		"extra chest key":  `{"template":"gather_and_deposit","item":"cobblestone","qty":1,"chest":{"x":0,"y":0,"z":0,"w":1}}`,
 		"missing chest":    `{"template":"gather_and_deposit","item":"cobblestone","qty":1}`,

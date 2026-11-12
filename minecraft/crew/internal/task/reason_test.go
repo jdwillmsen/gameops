@@ -11,6 +11,15 @@ import (
 func TestReasonCode(t *testing.T) {
 	cases := []struct{ reason, want string }{
 		{"no axe in inventory", ReasonMissingTool},
+		{"no stone_pickaxe or better in inventory", ReasonMissingTool},
+		{"no fuel in inventory", ReasonMissingTool},
+		{"no furnace in inventory", ReasonMissingTool},
+		{"no obsidian in inventory", ReasonMissingTool},
+		{"furnace did not open within 300 ticks", ReasonKitChestTimeout},
+		{"no furnace at the target", ReasonNoReachableTarget},
+		{"the furnace made no iron_ingot", ReasonNoProgress},
+		{"no standing spot within reach of the furnace", ReasonNoReachableTarget},
+		{"placing the furnace: no solid neighbour to place against", ReasonPlacementFailed},
 		{"no pickaxe in inventory", ReasonMissingTool},
 		{"the chest's chunk is not loaded", ReasonChunkNotLoaded},
 		{"chest did not open within 300 ticks", ReasonKitChestTimeout},

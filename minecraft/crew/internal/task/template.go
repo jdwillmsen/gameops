@@ -132,6 +132,12 @@ type Template struct {
 	From  []Chest        `json:"from,omitempty"`
 	To    *Chest         `json:"to,omitempty"`
 
+	// Furnace, Ores and Torches are iron_age's and mine_ore's: the cell the
+	// furnace stands in, the ore kinds to take and whether to light the way.
+	Furnace *Chest   `json:"furnace,omitempty"`
+	Ores    []string `json:"ores,omitempty"`
+	Torches bool     `json:"torches,omitempty"`
+
 	Entrance     *Chest `json:"entrance,omitempty"`
 	Facing       string `json:"facing,omitempty"`
 	Depth        int    `json:"depth,omitempty"`
@@ -279,6 +285,14 @@ func ParseTemplate(body []byte) (Template, error) {
 		return parseShelter(body)
 	case bootstrapTemplate:
 		return parseBootstrap(body)
+	case mineOreTemplate:
+		return parseMineOre(body)
+	case smeltTemplate:
+		return parseSmelt(body)
+	case ironAgeTemplate:
+		return parseIronAge(body)
+	case enchantingTemplate:
+		return parseEnchanting(body)
 	case buildTemplate:
 		return parseBuild(body)
 	case repairTemplate:
@@ -821,6 +835,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 	if t.Template == bootstrapTemplate && t.Block != nil {
 		return expandBootstrap(t, world, self, opts), nil
 	}
+	if sk, ok, err := expandProgression(t, world, self, opts); ok || err != nil {
+		return sk, err
+	}
 	if t.Template == craftTemplate {
 		return []skill.Skill{skill.NewCraft(world, self, t.Item, t.Qty)}, nil
 	}
@@ -867,6 +884,9 @@ func Expand(t Template, world skill.ChestWorld, self func() belief.Snapshot, opt
 		if box != nil {
 			mineOpts = append(mineOpts, skill.Seeking(*box, accept))
 		}
+	}
+	if src.MinTier > 0 {
+		mineOpts = append(mineOpts, skill.NeedTier(src.MinTier))
 	}
 	gather := skill.NewMineBlockWith(world, self, src.Block, t.Item, src.Tool, t.Qty, mineRadius, mineOpts...)
 	if src.Fell {
