@@ -19,6 +19,8 @@ const gameTypeCreative = 1
 const (
 	healthAttribute = "minecraft:health"
 	hungerAttribute = "minecraft:player.hunger"
+	// Food that has not yet drained into hunger: hunger holds steady while it lasts.
+	saturationAttribute = "minecraft:player.saturation"
 )
 
 // Snapshot is a copy, safe to hand to another goroutine.
@@ -39,9 +41,13 @@ type Snapshot struct {
 	Health      float32 `json:"health"`
 	HealthKnown bool    `json:"health_known"`
 	// Hunger is the food level out of 20.
-	Hunger      float32   `json:"hunger"`
-	HungerKnown bool      `json:"hunger_known"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Hunger      float32 `json:"hunger"`
+	HungerKnown bool    `json:"hunger_known"`
+	// Saturation is kept for the unit's own decisions and is not part of the
+	// status API.
+	Saturation      float32   `json:"-"`
+	SaturationKnown bool      `json:"-"`
+	UpdatedAt       time.Time `json:"updated_at"`
 	// The selected hotbar slot. Unknown until the server moves it or the unit
 	// selects one itself: a session starts with no packet that says.
 	HeldSlot  int  `json:"held_slot"`
@@ -151,6 +157,8 @@ func (t *Tracker) Apply(pk packet.Packet) {
 				t.s.Health, t.s.HealthKnown = a.Value, true
 			case hungerAttribute:
 				t.s.Hunger, t.s.HungerKnown = a.Value, true
+			case saturationAttribute:
+				t.s.Saturation, t.s.SaturationKnown = a.Value, true
 			}
 		}
 	case *packet.Respawn:
