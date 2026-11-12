@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/sandertv/gophertunnel/minecraft/protocol"
+
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 )
 
 var shaftEntrance = protocol.BlockPos{10, 1, 10}
@@ -597,5 +599,25 @@ func TestShaftTrappedUnderALowRoofSaysItHasNoHeadroom(t *testing.T) {
 	t.Logf("status %v err %v placed %d feet %v", st, err, r.placed, r.Pose().Feet)
 	if st != Failed || err == nil || !strings.Contains(err.Error(), "no headroom") {
 		t.Fatalf("status %v, err %v, want a failure naming the missing headroom", st, err)
+	}
+}
+
+func TestHotbarToolPicksTheBestMaterialNotTheFirstSlot(t *testing.T) {
+	inv := []belief.Item{
+		{Slot: 0, Name: "wooden_pickaxe", Count: 1},
+		{Slot: 2, Name: "iron_pickaxe", Count: 1},
+		{Slot: 4, Name: "diamond_pickaxe", Count: 1},
+		{Slot: 12, Name: "netherite_pickaxe", Count: 1},
+		{Slot: 3, Name: "iron_axe", Count: 1},
+	}
+	got, ok := hotbarTool(belief.Snapshot{Inventory: inv}, "pickaxe")
+	if !ok || got.Name != "diamond_pickaxe" {
+		t.Errorf("pickaxe = %q, %v; want the diamond one on the hotbar", got.Name, ok)
+	}
+	if got, ok := hotbarTool(belief.Snapshot{Inventory: inv}, "axe"); !ok || got.Name != "iron_axe" {
+		t.Errorf("axe = %q, %v", got.Name, ok)
+	}
+	if _, ok := hotbarTool(belief.Snapshot{Inventory: inv}, "shovel"); ok {
+		t.Error("found a shovel")
 	}
 }
