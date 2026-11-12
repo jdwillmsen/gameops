@@ -10,6 +10,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/craft"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/inventory"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/life"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/path"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/skill"
@@ -193,6 +194,17 @@ func lifeConfig(cfg config.Config, world skill.ChestWorld) life.Config {
 	lc.Vitals = life.Vitals{RetreatHealth: cfg.RetreatHealth, EmergencyHealth: cfg.EmergencyHealth, RestBelow: cfg.RestBelow, TaskMinHealth: cfg.TaskMinHealth, TaskMinFood: cfg.TaskMinFood}
 	if c := cfg.KitChest; c != nil {
 		lc.Kit = &life.Kit{Chest: protocol.BlockPos{c[0], c[1], c[2]}, Food: cfg.KitFood, World: world, Reach: float64(cfg.KitReach), Gear: cfg.KitGear}
+	}
+	if cfg.InvManage {
+		lc.Inventory = &life.Inventory{
+			Policy: inventory.Policy{FullSlots: cfg.InvFullSlots, KeepFood: cfg.InvKeepFood, KeepBlocks: cfg.InvKeepBlocks, KeepFiller: cfg.InvKeepFiller, SpareTools: cfg.InvSpareTools},
+			World:  world,
+			Reach:  float64(cfg.InvReach),
+		}
+		if c := cfg.InvChest; c != nil {
+			pos := protocol.BlockPos{c[0], c[1], c[2]}
+			lc.Inventory.Chest = &pos
+		}
 	}
 	return lc
 }

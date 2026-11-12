@@ -37,6 +37,14 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `KIT_REACH` | `96` | How far from the kit chest, in blocks, a unit still sets out for it (8 to 1000). Raise it only where the chest's chunks stay loaded the whole way |
 | `KIT_GEAR` | `false` | A kit visit also takes armour, put on at the chest, and a pickaxe and an axe the unit lacks |
 | `RECOVER_DROPS` | `false` | A unit that died walks back to the death point and picks up what it dropped (see Recovering drops) |
+| `INV_MANAGE` | `false` | Keep the pack in order: drop junk and surplus filler, and store surplus in a chest before the pack fills (see Inventory manager) |
+| `INV_CHEST` | `KIT_CHEST` | `x,y,z` of the chest surplus goes to; unset falls back to `KIT_CHEST`, and with neither the unit only drops |
+| `INV_FULL_SLOTS` | `4` | A trip to the chest starts when this many slots or fewer are free (1 to 16) |
+| `INV_KEEP_FOOD` | `24` | Food items kept, richest first (0 to 256) |
+| `INV_KEEP_BLOCKS` | `128` | Of each building block (planks, logs, stone, bricks, glass, sand) kept (0 to 1024) |
+| `INV_KEEP_FILLER` | `64` | Of each filler block (dirt, cobblestone, gravel, andesite, diorite, granite, tuff, netherrack) kept; the rest is dropped (0 to 1024) |
+| `INV_SPARE_TOOLS` | `1` | Tools of a kind kept beyond the best one (0 to 4) |
+| `INV_REACH` | `96` | How far from the chest, in blocks, a unit still sets out for it (8 to 160) |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
@@ -279,6 +287,48 @@ piece the chest holds (netherite down to leather) and puts it on before it
 closes the chest, and a pickaxe and an axe when the unit carries none. Armour
 and tools may land off the hotbar. A unit that lacks only gear sets out as
 well, even with a full hotbar. `KIT_REACH` replaces the 96 block limit above.
+
+### Inventory manager
+
+With `INV_MANAGE=true` a unit keeps its pack in order by fixed rules, so a
+long task is not stopped by a full inventory. Every stack falls in one class:
+
+| Class | Items | Rule |
+|---|---|---|
+| Junk | rotten flesh, spider eye, poisonous potato, pufferfish | all dropped |
+| Filler | dirt, cobblestone, cobbled deepslate, gravel, andesite, diorite, granite, tuff, netherrack | `INV_KEEP_FILLER` of each kept, the rest dropped |
+| Building blocks | planks, logs, stone, stone bricks, glass, sand, sandstone, bricks | `INV_KEEP_BLOCKS` of each kept, the rest stored |
+| Food | everything the unit eats | `INV_KEEP_FOOD` kept, richest first; the poorest is stored |
+| Tools | pickaxe, axe, shovel, hoe, sword | the best of each kind (material, then durability) plus `INV_SPARE_TOOLS`; the rest stored |
+| Armour carried | helmet, chestplate, leggings, boots | the best of each piece kept; worn pieces are never touched |
+| Protected | saplings, torches, beds, crafting table, chest, furnace, shield, bow, arrows, buckets, shears, flint and steel, fishing rod, ender pearls, totem, elytra | never stored or dropped |
+| Anything else | ores, ingots, gems, raw meat, ... | stored |
+
+Dropping is one stack request at a time and happens at once, even with a
+task running; the server's answer updates the pack. Dropped stacks can be
+picked up again by a unit that stands on them. An item dropped again within
+a minute of an earlier cycle is spaced out by a back-off that doubles,
+and after two such repeats it goes to the chest at the front of the next trip,
+or, with no chest, is left in the pack. A drop the server refuses, or an actuator that
+cannot drop, stops dropping that item for the back-off period (`inv_drop_failed`).
+
+A trip starts when `INV_FULL_SLOTS` or fewer slots are free, there is surplus
+to store and the chest is within `INV_REACH`. It interrupts a running task,
+which resumes afterwards, since a full pack would stop it anyway. The trip
+deposits up to six items, those freeing the most slots first, and stops once
+`INV_FULL_SLOTS` plus eight slots are free. A fight cuts a trip short and it
+starts again after ten seconds; a failed trip (`inv_trip_failed`) backs off for
+three minutes, doubling per failure in a row up to 15 minutes; a trip that leaves the pack
+still full logs `inv_still_full` and waits one minute (the chest is probably
+full). A meal waits while a trip has the chest open. Other logs are
+`inv_drop` and `inv_deposit`, carrying the item and count only.
+
+Picking the tool for a job: `inventory.ToolFor(block)` names the tool kind
+that breaks a block fastest and `inventory.BestTool` the best stack of a kind.
+The mining, felling and shelter skills now take the best hotbar tool, not the
+first. The manager does not move a better tool from the main inventory onto
+the hotbar; skills can only hold hotbar stacks, so a kit visit or the player
+puts tools there.
 
 ### Recovering drops
 
