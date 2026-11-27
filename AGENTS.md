@@ -20,11 +20,14 @@ project: `JDW`.
 
 ## Rollout path
 
-1. A merge to `main` releases each touched component on its own (tag `<component>-v<semver>`). Only
-   `feat`, `fix`, `perf`, `build` and `chore(deps)` commits release. The image goes to ghcr.io and
-   is mirrored to Docker Hub.
-2. Renovate in jdw-deployments opens the image bump. Agent, AFK bot, map and crew bumps auto-merge;
-   the server image and lab packs move by hand.
+1. A merge to `main` releases each touched component on its own (tag `<component>-v<semver>`).
+   semantic-release with the conventionalcommits preset decides: `feat`, `fix`, `perf`, `build`,
+   `chore(deps)`, `revert` and any breaking (`!`) commit release. The image goes to ghcr.io and is mirrored
+   to Docker Hub.
+2. Renovate in jdw-deployments opens the image bump. Minor, patch and digest bumps of the agent,
+   AFK bot, map and crew auto-merge; major bumps do not. The server image, `lab-packs` and the map
+   pack pin in `charts/minecraft-fwb/values-map-pack.yaml` move by hand, and they restart a game
+   server.
 3. Argo CD syncs from jdw-deployments. Confirm the new version is live in namespace `jdwillmsen-prd`.
 
 Risk: crew and crew-control work, including its prd rollout, is R2 by owner ruling. Anything that
