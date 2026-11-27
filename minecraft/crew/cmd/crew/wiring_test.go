@@ -479,3 +479,31 @@ func TestLifeConfigCarriesTheCombatBaselineAndItsDefaultsMatchLife(t *testing.T)
 		t.Error(err)
 	}
 }
+
+func TestRespawnMoveIsNotAcknowledgedAsATeleport(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{0, 32768, 0}, 0, 0, 0)
+	conn := &recordingConn{}
+	runner := task.NewRunner(func(task.Template) ([]skill.Skill, error) { return nil, nil }, nil, tracker.Snapshot, time.Minute, nopLog{})
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, nil, conn)
+	if err := u.apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{1, 65.62, 2}, OnGround: true}); err != nil || u.actuator() == nil {
+		t.Fatalf("actuator not started: %v", err)
+	}
+	_ = u.apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, EntityRuntimeID: 7, Position: mgl32.Vec3{4, 101.62, 5}})
+	u.respawned()
+	if err := u.actuator().Tick(act.Input{}); err != nil {
+		t.Fatal(err)
+	}
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	in, ok := conn.out[len(conn.out)-1].(*packet.PlayerAuthInput)
+	if !ok {
+		t.Fatalf("last packet = %T", conn.out[len(conn.out)-1])
+	}
+	if in.InputData.Load(packet.InputFlagHandledTeleport) {
+		t.Error("the respawn's own move was acknowledged as a teleport")
+	}
+	if in.Position != (mgl32.Vec3{4, 101.62, 5}) {
+		t.Errorf("position = %v, want the respawn point", in.Position)
+	}
+}

@@ -3,6 +3,7 @@ package act
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"sync"
@@ -850,5 +851,47 @@ func TestVehicleCorrectionLeavesThePose(t *testing.T) {
 	}
 	if p := a.Pose(); p.Feet != (mgl32.Vec3{1, 0, 1}) || p.Yaw != 30 || !p.OnGround {
 		t.Errorf("pose = %+v, want it untouched", p)
+	}
+}
+
+func TestTeleportIsAcknowledgedOnceWithTheNewPosition(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	_ = a.Tick(Input{})
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{10, eyeHeight, 20}, Mode: packet.MoveModeTeleport, OnGround: true})
+	_ = a.Tick(Input{})
+	_ = a.Tick(Input{})
+	in := s.inputs(t)
+	if hasFlag(in[0], packet.InputFlagHandledTeleport) {
+		t.Error("acknowledged a teleport before any")
+	}
+	if !hasFlag(in[1], packet.InputFlagHandledTeleport) || in[1].Position != (mgl32.Vec3{10, eyeHeight, 20}) {
+		t.Errorf("first input after the teleport: ack %v at %v", hasFlag(in[1], packet.InputFlagHandledTeleport), in[1].Position)
+	}
+	if hasFlag(in[2], packet.InputFlagHandledTeleport) {
+		t.Error("acknowledged the teleport twice")
+	}
+}
+
+func TestNormalMoveIsNotAcknowledged(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{10, eyeHeight, 20}, OnGround: true})
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 8, Position: mgl32.Vec3{1, eyeHeight, 2}, Mode: packet.MoveModeTeleport})
+	_ = a.Tick(Input{})
+	if hasFlag(s.inputs(t)[0], packet.InputFlagHandledTeleport) {
+		t.Error("acknowledged a teleport the server never sent the unit")
+	}
+}
+
+func TestFailedInputKeepsTheTeleportAck(t *testing.T) {
+	a, s := newAct(flat(), Pose{})
+	a.Apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{10, eyeHeight, 20}, Mode: packet.MoveModeTeleport, OnGround: true})
+	s.err = errors.New("closed")
+	if err := a.Tick(Input{}); err == nil {
+		t.Fatal("want the write error")
+	}
+	s.err = nil
+	_ = a.Tick(Input{})
+	if !hasFlag(s.inputs(t)[0], packet.InputFlagHandledTeleport) {
+		t.Error("the ack was lost with the failed input")
 	}
 }

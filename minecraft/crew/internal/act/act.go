@@ -100,8 +100,13 @@ type Actuator struct {
 	// sneaking is what the last input told the server, so a change goes out
 	// as a start or a stop and not as a held key every tick.
 	sneaking bool
-	now      func() time.Time
-	sent     [sentHistory]sentTick
+	// ackTeleport is set when the server teleports the unit. The server
+	// ignores the unit's input, rotation included, until an input says the
+	// teleport was handled. Tick reads it with the pose under one lock, so an
+	// acknowledgement never goes out with a pose older than the teleport.
+	ackTeleport bool
+	now         func() time.Time
+	sent        [sentHistory]sentTick
 
 	itemIDs map[string]int32
 	// inv is the unit's own window-0 inventory, kept from the server's slot
@@ -279,6 +284,9 @@ func (a *Actuator) Tick(in Input) error {
 	if next.OnGround {
 		flags.Set(packet.InputFlagVerticalCollision)
 	}
+	if a.ackTeleport {
+		flags.Set(packet.InputFlagHandledTeleport)
+	}
 
 	pk := &packet.PlayerAuthInput{
 		Pitch:              in.Pitch,
@@ -318,6 +326,7 @@ func (a *Actuator) Tick(in Input) error {
 		return err
 	}
 	a.pose = next
+	a.ackTeleport = false
 	if next.sprinting && a.moves != nil {
 		a.moves.sprint.Add(1)
 	}
@@ -417,6 +426,9 @@ func (a *Actuator) Apply(pk packet.Packet) {
 			Pitch:    p.Pitch,
 			Yaw:      p.Yaw,
 			OnGround: p.OnGround,
+		}
+		if p.Mode == packet.MoveModeTeleport {
+			a.ackTeleport = true
 		}
 	case *packet.Respawn, *packet.ChangeDimension:
 		a.pose.sprinting, a.pose.sprintHalt = false, false
