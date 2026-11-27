@@ -159,9 +159,34 @@ type Config struct {
 	// JoinDelayS holds back the first connect, so a rollout of many units does
 	// not log them all in on the same second.
 	JoinDelayS int
+
+	// Mode is work unless CREW_MODE=idle. The settings below are read only
+	// in idle mode.
+	Mode Mode
+	// Facing is the yaw held every tick, in Bedrock degrees (0 south, 90
+	// west, 180 north, 270 east). Without HasFacing the unit keeps the
+	// rotation the server gave it.
+	Facing    float32
+	HasFacing bool
+	// Stow keeps an empty hotbar slot selected without moving any item.
+	Stow bool
+	// Seat is where the unit looks for a cushion to sit on; valid with
+	// HasSeat.
+	Seat    [3]float32
+	HasSeat bool
+	// Presence is the zero value, and the unit never asks the agent, unless
+	// PRESENCE_URL is set.
+	Presence Presence
 }
 
 func Load() (Config, error) {
+	mode, err := modeSetting()
+	if err != nil {
+		return Config{}, err
+	}
+	if err := checkModeSettings(mode); err != nil {
+		return Config{}, err
+	}
 	host, err := required("MC_HOST")
 	if err != nil {
 		return Config{}, err
@@ -194,7 +219,11 @@ func Load() (Config, error) {
 			"it turns an unsigned player away at the transport with error 37, so the unit needs a Microsoft sign-in; " +
 			"unset MC_OFFLINE and sign the unit in, or point MC_HOST at a RakNet server")
 	}
-	viewDistance, err := uint8InRange("MC_VIEW_DISTANCE", 8, 1, maxViewDistance)
+	defaultView := uint8(8)
+	if mode == ModeIdle {
+		defaultView = idleViewDistance
+	}
+	viewDistance, err := uint8InRange("MC_VIEW_DISTANCE", defaultView, 1, maxViewDistance)
 	if err != nil {
 		return Config{}, err
 	}
@@ -371,7 +400,8 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{
+	cfg := Config{
+		Mode:           mode,
 		Host:           host,
 		Port:           port,
 		Username:       username,
@@ -431,7 +461,14 @@ func Load() (Config, error) {
 		JoinDelayS:   joinDelay,
 		NightShelter: nightShelter,
 		Home:         home,
-	}, nil
+	}
+	if mode == ModeIdle {
+		forceIdle(&cfg)
+		if err := idleSettings(&cfg); err != nil {
+			return Config{}, err
+		}
+	}
+	return cfg, nil
 }
 
 // Address is what the Bedrock client dials. A Host that starts with http:// or
