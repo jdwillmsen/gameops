@@ -77,19 +77,26 @@ type actor struct {
 	version int64
 	last    *presenceapi.Status
 	lastAt  time.Time
+	// polledAt is zero until the unit first asks, which is how a park sent
+	// to a mistyped id shows as reaching nobody.
+	polledAt time.Time
 }
 
 type stub struct {
 	def presenceapi.State
 	log *slog.Logger
 	now func() time.Time
+	// boot is in every ETag. Versions restart at 1 with the process, and a
+	// unit holding "1" from before a restart would otherwise get 304 for a
+	// state it never saw.
+	boot string
 
 	mu     sync.Mutex
 	actors map[string]*actor
 }
 
 func newStub(def presenceapi.State, log *slog.Logger) *stub {
-	return &stub{def: def, log: log, now: time.Now, actors: map[string]*actor{}}
+	return &stub{def: def, log: log, now: time.Now, boot: strconv.FormatInt(time.Now().UnixNano(), 36), actors: map[string]*actor{}}
 }
 
 // get must be called with mu held.
@@ -111,14 +118,18 @@ func (s *stub) routes() *http.ServeMux {
 	return mux
 }
 
-func etag(version int64) string { return `"` + strconv.FormatInt(version, 10) + `"` }
+// etag must be called with mu held.
+func (s *stub) etag(a *actor) string {
+	return fmt.Sprintf(`"%s-%s-%d"`, s.boot, a.state, a.version)
+}
 
 func (s *stub) presence(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	s.mu.Lock()
 	a := s.get(id)
+	a.polledAt = s.now().UTC()
 	p := presenceapi.Presence{ActorID: id, Effective: a.state, Default: s.def}
-	tag := etag(a.version)
+	tag := s.etag(a)
 	s.mu.Unlock()
 
 	w.Header().Set("ETag", tag)
@@ -163,28 +174,43 @@ func (s *stub) set(w http.ResponseWriter, r *http.Request) {
 		a.state = state
 		a.version++
 	}
+	v := a.view(id)
 	s.mu.Unlock()
-	s.log.Info("state_set", "actor", id, "from", string(from), "to", string(state))
-	s.show(w, r)
+	if v.PolledAt == nil {
+		s.log.Warn("state_set_unpolled", "actor", id, "to", string(state), "note", "no unit has polled this id; check it matches PRESENCE_ACTOR_ID")
+	} else {
+		s.log.Info("state_set", "actor", id, "from", string(from), "to", string(state))
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 type view struct {
-	ID      string              `json:"id"`
-	State   presenceapi.State   `json:"state"`
-	Version int64               `json:"version"`
-	Last    *presenceapi.Status `json:"last_status,omitempty"`
-	LastAt  *time.Time          `json:"last_status_at,omitempty"`
+	ID       string              `json:"id"`
+	State    presenceapi.State   `json:"state"`
+	Version  int64               `json:"version"`
+	Last     *presenceapi.Status `json:"last_status,omitempty"`
+	LastAt   *time.Time          `json:"last_status_at,omitempty"`
+	PolledAt *time.Time          `json:"polled_at,omitempty"`
 }
 
-func (s *stub) show(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	s.mu.Lock()
-	a := s.get(id)
+// view must be called with mu held.
+func (a *actor) view(id string) view {
 	v := view{ID: id, State: a.state, Version: a.version, Last: a.last}
 	if a.last != nil {
 		at := a.lastAt
 		v.LastAt = &at
 	}
+	if !a.polledAt.IsZero() {
+		at := a.polledAt
+		v.PolledAt = &at
+	}
+	return v
+}
+
+func (s *stub) show(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	s.mu.Lock()
+	v := s.get(id).view(id)
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, v)
 }

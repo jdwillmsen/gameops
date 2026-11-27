@@ -2,6 +2,7 @@ name: crew
 kind: service
 language: go
 depends:
+  - internal/presenceapi/
   - minecraft/agent/pkg/
   - minecraft/pkg/
   - minecraft/internal/
