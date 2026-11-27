@@ -191,8 +191,8 @@ func TestServerCorrectionIsAdoptedAndReportedStanding(t *testing.T) {
 	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
 	p := newPose()
 	p.set(mgl32.Vec3{128.5, 71.62, 229.5}, 3)
+	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypePlayer, Position: mgl32.Vec3{127.5, 71.62, 230.4}, OnGround: true}, 5, 1)
 	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypeVehicle, Position: mgl32.Vec3{1, 1, 1}}, 5, 1)
-	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypePlayer, Position: mgl32.Vec3{127.5, 71.62, 230.4}}, 5, 1)
 	go holdFacing(ctx, r, p, 89, time.Hour, newTickCounter())
 	pk := <-r.got
 	if pk.Position != (mgl32.Vec3{127.5, 71.62, 230.4}) || pk.Pitch != 3 {
@@ -200,5 +200,17 @@ func TestServerCorrectionIsAdoptedAndReportedStanding(t *testing.T) {
 	}
 	if !pk.InputData.Load(packet.InputFlagVerticalCollision) || !pk.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
 		t.Fatal("standing report lacks the ground and break-delay flags")
+	}
+}
+
+func TestAirborneBotIsNotReportedOnTheGround(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
+	p := newPose()
+	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypePlayer, Position: mgl32.Vec3{0, 80, 0}, OnGround: false}, 5, 1)
+	go holdFacing(ctx, r, p, 89, time.Hour, newTickCounter())
+	if pk := <-r.got; pk.InputData.Load(packet.InputFlagVerticalCollision) {
+		t.Fatal("claimed the ground the server says the bot is off")
 	}
 }

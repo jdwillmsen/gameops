@@ -47,9 +47,24 @@ type pose struct {
 	// aim, when set, replaces the held look for a moment: the server only
 	// lets the bot use an entity it is looking at.
 	aim *mgl32.Vec2
+	// airborne is the server's word that the bot is off the ground; the
+	// report must agree with it or it is corrected again.
+	airborne bool
 }
 
 func newPose() *pose { return &pose{nudge: make(chan struct{}, 1)} }
+
+func (p *pose) setOnGround(v bool) {
+	p.mu.Lock()
+	p.airborne = !v
+	p.mu.Unlock()
+}
+
+func (p *pose) onGround() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return !p.airborne
+}
 
 // takeTeleportAck returns whether a teleport is waiting to be acknowledged,
 // and clears it.
@@ -139,6 +154,7 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 	case *packet.MovePlayer:
 		if m.EntityRuntimeID == runtimeID {
 			p.set(m.Position, m.Pitch)
+			p.setOnGround(m.OnGround)
 			if m.Mode == packet.MoveModeTeleport {
 				p.markTeleport()
 			}
@@ -150,6 +166,7 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 		if m.PredictionType == packet.PredictionTypePlayer {
 			_, pitch, _, _ := p.get()
 			p.set(m.Position, pitch)
+			p.setOnGround(m.OnGround)
 		}
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
@@ -192,7 +209,7 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, every
 		flags.Set(packet.InputFlagBlockBreakingDelayEnabled)
 		if vehicle != 0 {
 			flags.Set(packet.InputFlagClientPredictedVehicle)
-		} else {
+		} else if p.onGround() {
 			flags.Set(packet.InputFlagVerticalCollision)
 		}
 		if ack {
