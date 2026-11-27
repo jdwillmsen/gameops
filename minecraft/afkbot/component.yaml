@@ -3,6 +3,7 @@ kind: service
 language: go
 depends:
   - internal/presenceapi/
+  - minecraft/agent/pkg/mcauth/
   - minecraft/agent/pkg/presence/
 tasks:
   build: CGO_ENABLED=0 go build -o /dev/null ./minecraft/afkbot/...
