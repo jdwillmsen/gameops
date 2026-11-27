@@ -17,6 +17,7 @@
 //   - liveness respawn on death, and knowing whether the client is alive
 //   - logging  structured JSON logging
 //   - mcproto  staying connectable across protocol-number-only bumps
+//   - presence asking the server agent whether to be in the world, fail-static
 //   - skin     a generated appearance, since a headless client has none
 //
 // Anything specific to being an agent -- plugins, chat dispatch, the LLM

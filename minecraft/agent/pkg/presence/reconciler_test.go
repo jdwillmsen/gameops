@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/internal/presenceapi"
-	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
 )
 
 // fakeAgent serves the two bot routes for afk-bot-1 the way the contract
@@ -83,7 +82,7 @@ func (f *fakeAgent) with(fn func(f *fakeAgent)) {
 
 type logLine struct {
 	level, event string
-	fields       logging.Fields
+	fields       map[string]any
 }
 
 type recorder struct {
@@ -91,14 +90,14 @@ type recorder struct {
 	lines []logLine
 }
 
-func (r *recorder) add(level, event string, f logging.Fields) {
+func (r *recorder) add(level, event string, f map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.lines = append(r.lines, logLine{level, event, f})
 }
-func (r *recorder) Info(e string, f logging.Fields)  { r.add("info", e, f) }
-func (r *recorder) Warn(e string, f logging.Fields)  { r.add("warn", e, f) }
-func (r *recorder) Error(e string, f logging.Fields) { r.add("error", e, f) }
+func (r *recorder) Info(e string, f map[string]any)  { r.add("info", e, f) }
+func (r *recorder) Warn(e string, f map[string]any)  { r.add("warn", e, f) }
+func (r *recorder) Error(e string, f map[string]any) { r.add("error", e, f) }
 
 func (r *recorder) all(event string) []logLine {
 	r.mu.Lock()
