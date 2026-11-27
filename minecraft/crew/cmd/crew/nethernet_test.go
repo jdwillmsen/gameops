@@ -13,6 +13,7 @@ import (
 
 	"github.com/df-mc/go-nethernet"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
 	"github.com/sandertv/gophertunnel/minecraft"
@@ -166,7 +167,7 @@ func TestUnitRedialsOverNetherNetAfterGivingUpOnASlowSpawn(t *testing.T) {
 	defer cancel()
 
 	var attempts []error
-	connect := func(ctx context.Context) error {
+	connect := func(ctx context.Context, _ func()) error {
 		// Dialling returns once the world has spawned the unit, so the first
 		// attempt, against a world that spawns far later, is abandoned with the
 		// server already holding its login.
@@ -186,7 +187,7 @@ func TestUnitRedialsOverNetherNetAfterGivingUpOnASlowSpawn(t *testing.T) {
 		}
 		return err
 	}
-	runConnectLoop(ctx, loopOptions{minDelay: time.Millisecond, maxDelay: time.Millisecond, after: instant}, connect, func() {}, discardLog{})
+	runConnectLoop(ctx, loopOptions{minDelay: time.Millisecond, maxDelay: time.Millisecond, after: instant}, presence.AlwaysPresent{}, connect, func() {}, discardLog{})
 
 	if len(attempts) != 2 {
 		t.Fatalf("%d attempts, want 2", len(attempts))
@@ -214,6 +215,16 @@ func TestUnitDialFailsCleanlyWhenNetherNetSignalingIsDown(t *testing.T) {
 	auth := authn{identity: login.IdentityData{DisplayName: "crew-01"}}
 	if _, _, err := dialServer(ctx, cfg, auth, skin.Skin{}, cfg.Address(), logging.New("")); err == nil {
 		t.Fatal("dialServer succeeded against nothing")
+	}
+}
+
+// FWB's AFK bots joined over NetherNet inside afkbot's 60s, sign-in included;
+// an idle unit taking their place keeps that budget.
+func TestConnectBudgetOfAnIdleNetherNetUnitIsAfkbots(t *testing.T) {
+	t.Setenv("CREW_MODE", "idle")
+	cfg := netherNetConfig(t, "http://127.0.0.1:1")
+	if got := connectBudget(cfg); got != 60*time.Second {
+		t.Errorf("connect budget = %v, want 60s", got)
 	}
 }
 

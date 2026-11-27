@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/sessionid"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/task"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/unitevent"
@@ -26,11 +27,15 @@ type loopOptions struct {
 	after func(time.Duration) <-chan time.Time
 }
 
-// runConnectLoop keeps crew connected for the life of the process. It
-// reconnects rather than exiting, because exiting moves the retry loop into
-// Kubernetes: a coarser backoff, a fresh pod, and a token reload on every
-// attempt.
-func runConnectLoop(ctx context.Context, opt loopOptions, connect func(context.Context) error, onEnd func(), log loopLogger) {
+// connectFunc runs one session until it ends, calling spawned once the unit
+// is in the world.
+type connectFunc func(ctx context.Context, spawned func()) error
+
+// runConnectLoop keeps crew connected for the life of the process, except
+// while the gate holds it out. It reconnects rather than exiting, because
+// exiting moves the retry loop into Kubernetes: a coarser backoff, a fresh
+// pod, and a token reload on every attempt.
+func runConnectLoop(ctx context.Context, opt loopOptions, gate presence.Gate, connect connectFunc, onEnd func(), log loopLogger) {
 	delay := opt.minDelay
 	first := true
 	for ctx.Err() == nil {
@@ -45,13 +50,28 @@ func runConnectLoop(ctx context.Context, opt loopOptions, connect func(context.C
 		}
 		first = false
 
+		sess, release, err := gate.Admit(ctx)
+		if err != nil {
+			return
+		}
 		started := time.Now()
 		sid := sessionid.Begin()
-		err := connect(ctx)
+		err = connect(sess, func() { gate.Connected(true) })
 		lasted := time.Since(started)
+		gate.Connected(false)
+		parked := sess.Err() != nil
+		release()
 		onEnd()
 		if ctx.Err() != nil {
 			return
+		}
+		if parked {
+			// A deliberate disconnect is not a failure, so it neither grows
+			// the backoff nor delays the return once the gate admits again.
+			log.Info("session_parked", map[string]any{"session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
+			delay = opt.minDelay
+			first = true
+			continue
 		}
 		if err != nil {
 			log.Error("session_error", map[string]any{"error": err.Error(), "session_lasted_ms": lasted.Milliseconds(), "session_id": sid})
