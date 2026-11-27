@@ -23,7 +23,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,6 +35,28 @@ import (
 
 // A status report is a few hundred bytes; the cap only stops a runaway body.
 const maxBody = 64 << 10
+
+// The contract's actor id shape, the same one crew checks PRESENCE_ACTOR_ID
+// against, so a mistyped id in a PUT is refused rather than made an actor.
+var actorIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+
+// logSafe drops line breaks from a value a request supplied. The JSON
+// handler escapes them anyway; this keeps a log line one line whatever
+// handler a later change picks.
+func logSafe(v string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(v, "\n", ""), "\r", "")
+}
+
+// actorID is the request's actor, or false after answering 404 for an id
+// that cannot be one.
+func actorID(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if !actorIDPattern.MatchString(id) {
+		writeJSON(w, http.StatusNotFound, presenceapi.Error{Code: "not_found", Message: "actor id must match " + actorIDPattern.String()})
+		return "", false
+	}
+	return id, true
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr))
@@ -124,7 +148,10 @@ func (s *stub) etag(a *actor) string {
 }
 
 func (s *stub) presence(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id, ok := actorID(w, r)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	a := s.get(id)
 	a.polledAt = s.now().UTC()
@@ -146,7 +173,10 @@ func (s *stub) status(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, presenceapi.Error{Code: "bad_request", Message: err.Error()})
 		return
 	}
-	id := r.PathValue("id")
+	id, ok := actorID(w, r)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	a := s.get(id)
 	changed := a.last == nil || a.last.Connected != st.Connected || a.last.ObservedState != st.ObservedState
@@ -155,7 +185,7 @@ func (s *stub) status(w http.ResponseWriter, r *http.Request) {
 	// Only a change is logged: the unit reports on every poll, and the lab
 	// proof reads this log for the moment it obeyed a park.
 	if changed {
-		s.log.Info("status_changed", "actor", id, "connected", st.Connected, "observed_state", string(st.ObservedState), "version", st.ProcessVersion)
+		s.log.Info("status_changed", "actor", logSafe(id), "connected", st.Connected, "observed_state", logSafe(string(st.ObservedState)), "version", logSafe(st.ProcessVersion))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -166,7 +196,10 @@ func (s *stub) set(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, presenceapi.Error{Code: "bad_request", Message: fmt.Sprintf("state must be %q or %q", presenceapi.StatePresent, presenceapi.StateParked)})
 		return
 	}
-	id := r.PathValue("id")
+	id, ok := actorID(w, r)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	a := s.get(id)
 	from := a.state
@@ -177,9 +210,9 @@ func (s *stub) set(w http.ResponseWriter, r *http.Request) {
 	v := a.view(id)
 	s.mu.Unlock()
 	if v.PolledAt == nil {
-		s.log.Warn("state_set_unpolled", "actor", id, "to", string(state), "note", "no unit has polled this id; check it matches PRESENCE_ACTOR_ID")
+		s.log.Warn("state_set_unpolled", "actor", logSafe(id), "to", logSafe(string(state)), "note", "no unit has polled this id; check it matches PRESENCE_ACTOR_ID")
 	} else {
-		s.log.Info("state_set", "actor", id, "from", string(from), "to", string(state))
+		s.log.Info("state_set", "actor", logSafe(id), "from", logSafe(string(from)), "to", logSafe(string(state)))
 	}
 	writeJSON(w, http.StatusOK, v)
 }
@@ -208,7 +241,10 @@ func (a *actor) view(id string) view {
 }
 
 func (s *stub) show(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
+	id, ok := actorID(w, r)
+	if !ok {
+		return
+	}
 	s.mu.Lock()
 	v := s.get(id).view(id)
 	s.mu.Unlock()
