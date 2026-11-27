@@ -83,6 +83,10 @@ type Snapshot struct {
 	// Sleeping is the unit's own sleeping flag, which the server clears at
 	// dawn.
 	Sleeping bool `json:"sleeping"`
+	// Vehicle is the unique ID of what the unit rides as its driver, or 0. It
+	// lives here rather than in the actuator because the link can arrive
+	// before the position, and so before the actuator exists.
+	Vehicle int64 `json:"-"`
 }
 
 // Tracker is written by the session's read loop and read by the status API.
@@ -98,6 +102,10 @@ type Tracker struct {
 	itemNames map[int32]string
 	effects   map[int32]Effect
 	uniqueID  string
+	// selfUnique is the unique ID links name the unit by; valid with
+	// uniqueKnown, since 0 is not reserved.
+	selfUnique  int64
+	uniqueKnown bool
 
 	// opened maps stack IDs seen in the open container's window to their
 	// stack, data included; nil until a container opens.
@@ -117,6 +125,7 @@ func (t *Tracker) Spawn(runtimeID uint64, pos mgl32.Vec3, yaw, pitch float32, di
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
+	t.selfUnique, t.uniqueKnown = 0, false
 	t.s = Snapshot{Spawned: true, Dimension: dimension, Position: pos, Yaw: yaw, Pitch: pitch, UpdatedAt: t.now()}
 }
 
@@ -127,6 +136,7 @@ func (t *Tracker) SetUniqueID(id int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.uniqueID = strconv.FormatInt(id, 10)
+	t.selfUnique, t.uniqueKnown = id, true
 }
 
 func (t *Tracker) Apply(pk packet.Packet) {
@@ -172,6 +182,19 @@ func (t *Tracker) Apply(pk packet.Packet) {
 			return
 		}
 		t.s.Position, t.s.PositionKnown = p.Position, true
+		t.s.Vehicle = 0
+	case *packet.SetActorLink:
+		if !t.applyLinkLocked(p.EntityLink) {
+			return
+		}
+	case *packet.AddActor:
+		if !t.applyLinksLocked(p.EntityLinks) {
+			return
+		}
+	case *packet.AddPlayer:
+		if !t.applyLinksLocked(p.EntityLinks) {
+			return
+		}
 	case *packet.PlayerHotBar:
 		if p.WindowID != 0 || !p.SelectHotBarSlot || p.SelectedHotBarSlot >= hotbarSlots {
 			return
@@ -265,7 +288,43 @@ func (t *Tracker) Reset() {
 	t.opened = nil
 	t.effects = nil
 	t.uniqueID = ""
+	t.selfUnique, t.uniqueKnown = 0, false
 	t.s = Snapshot{UpdatedAt: t.now()}
+}
+
+// applyLinkLocked follows a ride link whose rider is the unit, and says
+// whether it was one.
+func (t *Tracker) applyLinkLocked(l protocol.EntityLink) bool {
+	if !t.uniqueKnown || l.RiderEntityUniqueID != t.selfUnique {
+		return false
+	}
+	switch l.Type {
+	case protocol.EntityLinkRider:
+		t.s.Vehicle = l.RiddenEntityUniqueID
+	case protocol.EntityLinkRemove:
+		// Only the ride the unit is on: a late removal of an earlier vehicle
+		// must not unseat it from the new one.
+		if l.RiddenEntityUniqueID == t.s.Vehicle {
+			t.s.Vehicle = 0
+		}
+	default:
+		// A passenger does not steer its vehicle, so it has no rotation to
+		// claim and is not riding in the sense the actuator needs.
+		t.s.Vehicle = 0
+	}
+	return true
+}
+
+// applyLinksLocked follows the links an actor arrives with, which is how a
+// unit already seated when the actor came into view learns of it.
+func (t *Tracker) applyLinksLocked(links []protocol.EntityLink) bool {
+	found := false
+	for _, l := range links {
+		if t.applyLinkLocked(l) {
+			found = true
+		}
+	}
+	return found
 }
 
 // Creative says the unit is in creative mode, without the cost of a snapshot;
@@ -274,6 +333,14 @@ func (t *Tracker) Creative() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.s.Creative
+}
+
+// Vehicle is the unique ID of what the unit rides, or 0, without the cost of a
+// snapshot; the actuator asks on every tick.
+func (t *Tracker) Vehicle() int64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.s.Vehicle
 }
 
 func (t *Tracker) Snapshot() Snapshot {

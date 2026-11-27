@@ -425,3 +425,106 @@ func TestVehicleCorrectionLeavesTheUnitWhereItWas(t *testing.T) {
 		t.Errorf("a vehicle correction moved the unit: %+v", s)
 	}
 }
+
+const selfUnique int64 = -77
+
+func riding(t *testing.T) *Tracker {
+	t.Helper()
+	tr := spawned(t)
+	tr.SetUniqueID(selfUnique)
+	return tr
+}
+
+func link(ridden, rider int64, typ uint8) *packet.SetActorLink {
+	return &packet.SetActorLink{EntityLink: protocol.EntityLink{RiddenEntityUniqueID: ridden, RiderEntityUniqueID: rider, Type: typ}}
+}
+
+func TestRiderLinkSeatsTheUnit(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	if s := tr.Snapshot(); s.Vehicle != 42 || tr.Vehicle() != 42 {
+		t.Fatalf("vehicle = %d / %d, want 42", s.Vehicle, tr.Vehicle())
+	}
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRemove))
+	if v := tr.Vehicle(); v != 0 {
+		t.Errorf("vehicle after removal = %d, want 0", v)
+	}
+}
+
+func TestOthersLinksLeaveTheUnitAlone(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	tr.Apply(link(43, selfUnique+1, protocol.EntityLinkRider))
+	tr.Apply(link(42, selfUnique+1, protocol.EntityLinkRemove))
+	if v := tr.Vehicle(); v != 42 {
+		t.Errorf("vehicle = %d, want 42", v)
+	}
+}
+
+func TestStaleRemovalKeepsTheNewSeat(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	tr.Apply(link(43, selfUnique, protocol.EntityLinkRider))
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRemove))
+	if v := tr.Vehicle(); v != 43 {
+		t.Errorf("vehicle = %d, want 43", v)
+	}
+}
+
+func TestPassengerLinkIsNotRiding(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	tr.Apply(link(43, selfUnique, protocol.EntityLinkPassenger))
+	if v := tr.Vehicle(); v != 0 {
+		t.Errorf("vehicle = %d, want 0", v)
+	}
+}
+
+func TestLinksNeedTheUnitsID(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(link(42, 0, protocol.EntityLinkRider))
+	if v := tr.Vehicle(); v != 0 {
+		t.Errorf("vehicle = %d before the unit's ID was known", v)
+	}
+}
+
+func TestActorArrivingWithTheUnitAboardSeatsIt(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(&packet.AddActor{EntityUniqueID: 42, EntityRuntimeID: 9, EntityLinks: []protocol.EntityLink{
+		{RiddenEntityUniqueID: 42, RiderEntityUniqueID: 5, Type: protocol.EntityLinkPassenger},
+		{RiddenEntityUniqueID: 42, RiderEntityUniqueID: selfUnique, Type: protocol.EntityLinkRider},
+	}})
+	if v := tr.Vehicle(); v != 42 {
+		t.Fatalf("vehicle = %d, want 42", v)
+	}
+	tr.Apply(&packet.AddPlayer{EntityRuntimeID: 10, EntityLinks: []protocol.EntityLink{
+		{RiddenEntityUniqueID: 44, RiderEntityUniqueID: 5, Type: protocol.EntityLinkRider},
+	}})
+	if v := tr.Vehicle(); v != 42 {
+		t.Errorf("another rider's link changed the vehicle to %d", v)
+	}
+	tr.Apply(&packet.AddPlayer{EntityRuntimeID: 10, EntityLinks: []protocol.EntityLink{
+		{RiddenEntityUniqueID: 44, RiderEntityUniqueID: selfUnique, Type: protocol.EntityLinkRider},
+	}})
+	if v := tr.Vehicle(); v != 44 {
+		t.Errorf("vehicle = %d, want 44", v)
+	}
+}
+
+func TestRespawnAndNewSessionClearTheRide(t *testing.T) {
+	tr := riding(t)
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateSearchingForSpawn})
+	if v := tr.Vehicle(); v != 42 {
+		t.Errorf("vehicle cleared before the respawn was settled: %d", v)
+	}
+	tr.Apply(&packet.Respawn{State: packet.RespawnStateReadyToSpawn, Position: mgl32.Vec3{1, 2, 3}})
+	if v := tr.Vehicle(); v != 0 {
+		t.Errorf("vehicle after respawn = %d, want 0", v)
+	}
+	tr.Apply(link(42, selfUnique, protocol.EntityLinkRider))
+	tr.Spawn(self, mgl32.Vec3{}, 0, 0, 0)
+	if v := tr.Vehicle(); v != 0 {
+		t.Errorf("vehicle survived a new session: %d", v)
+	}
+}
