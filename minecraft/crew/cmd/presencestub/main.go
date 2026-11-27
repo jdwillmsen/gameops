@@ -47,6 +47,18 @@ func logSafe(v string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(v, "\n", ""), "\r", "")
 }
 
+// observed names a reported state from the contract's own constants, so the
+// log never carries the body's text. The version is on GET /stub/actors.
+func observed(st presenceapi.State) string {
+	switch st {
+	case presenceapi.StatePresent:
+		return string(presenceapi.StatePresent)
+	case presenceapi.StateParked:
+		return string(presenceapi.StateParked)
+	}
+	return "invalid"
+}
+
 // actorID is the request's actor, or false after answering 404 for an id
 // that cannot be one.
 func actorID(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -185,7 +197,7 @@ func (s *stub) status(w http.ResponseWriter, r *http.Request) {
 	// Only a change is logged: the unit reports on every poll, and the lab
 	// proof reads this log for the moment it obeyed a park.
 	if changed {
-		s.log.Info("status_changed", "actor", logSafe(id), "connected", st.Connected, "observed_state", logSafe(string(st.ObservedState)), "version", logSafe(st.ProcessVersion))
+		s.log.Info("status_changed", "actor", logSafe(id), "connected", st.Connected, "observed_state", observed(st.ObservedState))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
