@@ -110,6 +110,11 @@ type Reflex struct {
 	aimedAt time.Time
 	aimFrom mgl32.Vec3
 	look    mgl32.Vec2
+	// heldLook is the {pitch, yaw} the unit had before the aim began, and
+	// restore asks the next tick to give it back. Ticks keep the rotation
+	// they send, so without this the unit would go on staring at the seat.
+	heldLook mgl32.Vec2
+	restore  bool
 
 	// The read loop alone touches the rest.
 	runtimeID uint64
@@ -149,7 +154,9 @@ func (r *Reflex) End() {
 // Reset gives the seat and the stow fresh tries, as after a death. The
 // hotbar's contents are the server's and stay known.
 func (r *Reflex) Reset() {
-	r.tries, r.seatLast, r.aiming = 0, time.Time{}, nil
+	// A death or a new session puts the unit where the server says, facing
+	// how it says, so there is no look to give back.
+	r.tries, r.seatLast, r.aiming, r.restore = 0, time.Time{}, nil, false
 	r.mu.Lock()
 	r.pending, r.blocked, r.stowLast = true, false, time.Time{}
 	r.mu.Unlock()
@@ -188,8 +195,15 @@ func (r *Reflex) Idle(_ context.Context, a skill.Actuator) error {
 	if r.cfg.HasFacing {
 		in.Yaw = r.cfg.Facing
 	}
-	if r.aiming != nil {
+	switch {
+	case r.aiming != nil:
 		in.Pitch, in.Yaw = r.look[0], r.look[1]
+	case r.restore:
+		r.restore = false
+		in.Pitch = r.heldLook[0]
+		if !r.cfg.HasFacing {
+			in.Yaw = r.heldLook[1]
+		}
 	}
 	return a.Tick(in)
 }
@@ -207,6 +221,16 @@ func (r *Reflex) Apply(pk packet.Packet) {
 			r.occupied[i] = i < len(m.Content) && m.Content[i].Stack.ItemType.NetworkID != 0
 		}
 		r.known = true
+		// A whole-inventory refresh can free a slot as a single-slot update
+		// does, and a blocked stow must hear about either.
+		if r.blocked {
+			for _, used := range r.occupied {
+				if !used {
+					r.blocked, r.pending = false, true
+					break
+				}
+			}
+		}
 		r.mu.Unlock()
 	case *packet.InventorySlot:
 		if m.WindowID != protocol.WindowIDInventory || m.Slot >= hotbarSize {
@@ -341,7 +365,7 @@ func (r *Reflex) seat(a skill.Actuator) {
 	empty, slot := r.selectedEmpty(), int(r.selected)
 	r.mu.Unlock()
 	if vehicle != 0 || dead || !empty {
-		r.aiming = nil
+		r.stopAim()
 	}
 	if vehicle != 0 {
 		// Seated: a later dismount or respawn gets a fresh set of tries.
@@ -354,11 +378,12 @@ func (r *Reflex) seat(a skill.Actuator) {
 		return
 	}
 	now := r.now()
-	feet := a.Pose().Feet
+	pose := a.Pose()
+	feet := pose.Feet
 	if r.aiming != nil {
 		if feet != r.aimFrom {
 			// Moved mid-aim: the look no longer points at the seat.
-			r.aim(*r.aiming, feet, now)
+			r.aim(*r.aiming, feet, now, pose)
 			return
 		}
 		if now.Sub(r.aimedAt) >= seatAimFor {
@@ -395,12 +420,15 @@ func (r *Reflex) seat(a skill.Actuator) {
 		return
 	}
 	r.log.Info("seat_found", map[string]any{"unique_id": best.uniqueID, "distance": bestD, "try": r.tries})
-	r.aim(best, feet, now)
+	r.aim(best, feet, now, pose)
 }
 
 // aim looks from the eye above feet at the seat and starts the wait before
 // the click.
-func (r *Reflex) aim(seat seatTarget, feet mgl32.Vec3, now time.Time) {
+func (r *Reflex) aim(seat seatTarget, feet mgl32.Vec3, now time.Time, from act.Pose) {
+	if r.aiming == nil {
+		r.heldLook = mgl32.Vec2{from.Pitch, from.Yaw}
+	}
 	r.look = lookAt(feet.Add(mgl32.Vec3{0, eyeHeight, 0}), seat.pos.Add(mgl32.Vec3{0, seatAimHeight, 0}))
 	r.aiming, r.aimedAt, r.aimFrom = &seat, now, feet
 }
@@ -408,11 +436,18 @@ func (r *Reflex) aim(seat seatTarget, feet mgl32.Vec3, now time.Time) {
 // click uses the seat the unit is looking at like a client's right click,
 // then gives the held look back.
 func (r *Reflex) click(a skill.Actuator, seat seatTarget, slot int) {
-	r.aiming = nil
+	r.stopAim()
 	if err := a.InteractEntity(seat.runtimeID, slot, belief.Item{}); err != nil {
 		return
 	}
 	r.log.Info("seat_mount_sent", map[string]any{"unique_id": seat.uniqueID, "try": r.tries})
+}
+
+// stopAim ends an aim and has the next tick give back the look held before it.
+func (r *Reflex) stopAim() {
+	if r.aiming != nil {
+		r.aiming, r.restore = nil, true
+	}
 }
 
 // lookAt is the {pitch, yaw} that points an eye at target; pitch is positive

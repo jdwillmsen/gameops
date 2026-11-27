@@ -29,6 +29,9 @@ type fakeActuator struct {
 	ticks    []act.Input
 	selects  []int
 	interact []interaction
+	// keep makes Tick store the rotation it is sent, as the real actuator
+	// does; without it a look the reflex forgets to give back goes unseen.
+	keep bool
 }
 
 type interaction struct {
@@ -41,6 +44,9 @@ func (f *fakeActuator) Pose() act.Pose { return f.pose }
 func (f *fakeActuator) Riding() int64  { return f.riding }
 func (f *fakeActuator) Tick(in act.Input) error {
 	f.ticks = append(f.ticks, in)
+	if f.keep {
+		f.pose.Yaw, f.pose.Pitch = in.Yaw, in.Pitch
+	}
 	return nil
 }
 func (f *fakeActuator) SelectHotbar(slot int, item belief.Item) error {
@@ -553,5 +559,44 @@ func TestChunkRadiusGrantedIsLogged(t *testing.T) {
 	f.r.Apply(&packet.ChunkRadiusUpdated{ChunkRadius: 12})
 	if len(f.log.lines) != 1 || f.log.lines[0] != "chunk_radius_granted map[radius:12]" {
 		t.Errorf("log = %v", f.log.lines)
+	}
+}
+
+// The actuator keeps the rotation of each input, so a look the reflex only
+// stops sending would stay: the click must hand the old look back.
+func TestSeatClickGivesTheHeldLookBack(t *testing.T) {
+	f := seatFixture(t)
+	f.a.keep = true
+	f.cushion(1, 101, mgl32.Vec3{10, 64, 10})
+	f.idle(t)
+	f.advance(seatAimFor)
+	f.idle(t)
+	if len(f.a.interact) != 1 {
+		t.Fatalf("interactions = %v", f.a.interact)
+	}
+	f.idle(t)
+	if got := f.a.ticks[len(f.a.ticks)-1]; got != (act.Input{Yaw: 33, Pitch: 5}) {
+		t.Errorf("input after the click = %+v, want the look held before the aim", got)
+	}
+	f.idle(t)
+	if got := f.a.ticks[len(f.a.ticks)-1]; got != (act.Input{Yaw: 33, Pitch: 5}) {
+		t.Errorf("input later = %+v, want the held look kept", got)
+	}
+}
+
+func TestStowBlockedResumesWhenARefreshFreesASlot(t *testing.T) {
+	f := newFixture(Config{Stow: true})
+	f.r.Apply(fullHotbar())
+	f.idle(t)
+	if len(f.a.selects) != 0 {
+		t.Fatalf("selected %v with a full hotbar", f.a.selects)
+	}
+	refresh := fullHotbar()
+	refresh.Content[4] = protocol.ItemInstance{}
+	f.r.Apply(refresh)
+	f.advance(stowEvery)
+	f.idle(t)
+	if len(f.a.selects) != 1 || f.a.selects[0] != 4 {
+		t.Fatalf("selects = %v, want the freed slot 4", f.a.selects)
 	}
 }
