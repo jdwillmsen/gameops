@@ -1,8 +1,9 @@
 # gameops: agent guide
 
 The code behind the owner's Minecraft Bedrock servers: the server agent (`minecraft/agent`), the
-console bridge (`bridge`), the AFK bots (`afkbot`), the web map (`mcmap`), the crew worker bots and
-their console (`crew`, `crew-control`), and the add-on packs (`packs/`, shipped by
+console bridge (`minecraft/bridge`), the AFK bots (`minecraft/afkbot`), the web map
+(`minecraft/mcmap`), the crew worker bots and their console (`minecraft/crew`,
+`minecraft/crew-control`), and the add-on packs (`packs/`, shipped by
 `minecraft/lab-packs`). The servers themselves are deployed from `jdwillmsen/jdw-deployments`. Jira
 project: `JDW`.
 
@@ -16,7 +17,8 @@ project: `JDW`.
 - crew-control's event and alert stores also run against Postgres in CI (`CREW_PG_TEST_DSN`). For
   crew, install numpy, or the Colosseum generator test skips.
 - Packs: `tools/check-packs.sh`. Preview a pack locally with `tools/lab-preview`.
-- The one required check is `ci-ok`. Commits are Conventional Commits, PRs rebase-merge, and commits are signed.
+- Required checks: `ci-ok`, `analyze`, `scan / binaries`, `scan / gitleaks`, `scan / scan` and
+  `signatures / signatures`. Commits are Conventional Commits, PRs rebase-merge, and commits are signed.
 
 ## Rollout path
 
@@ -30,8 +32,10 @@ project: `JDW`.
    server.
 3. Argo CD syncs from jdw-deployments. Confirm the new version is live in namespace `jdwillmsen-prd`.
 
-Risk: crew and crew-control work, including its prd rollout, is R2 by owner ruling. Anything that
-restarts the FWB game server, or touches world data, needs the owner.
+Risk: the tier comes from `change-class`, and game servers are R3 under the shared rules. The
+owner's chat remarks that crew is "more of a dev environment" are recorded only in agent memory,
+not in `change-risk.toml`, so they do not lower a tier. Anything that restarts the FWB game server
+or touches world data needs the owner.
 
 ## Never
 
