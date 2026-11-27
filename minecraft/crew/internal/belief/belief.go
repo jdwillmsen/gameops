@@ -144,7 +144,11 @@ func (t *Tracker) Apply(pk packet.Packet) {
 		t.s.Yaw, t.s.Pitch = p.Yaw, p.Pitch
 	case *packet.CorrectPlayerMovePrediction:
 		// The server never echoes a client's own walking as MovePlayer; a
-		// correction is how it overrules the pose the unit sent.
+		// correction is how it overrules the pose the unit sent. A vehicle
+		// correction is about what the unit rides, not where it is.
+		if p.PredictionType != packet.PredictionTypePlayer {
+			return
+		}
 		t.s.Position, t.s.PositionKnown = p.Position, true
 		t.s.Pitch, t.s.Yaw = p.Rotation.X(), p.Rotation.Y()
 	case *packet.UpdateAttributes:

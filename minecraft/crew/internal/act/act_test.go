@@ -836,3 +836,19 @@ func TestInteractEntityRightClicksWithTheHeldStack(t *testing.T) {
 		t.Error("a slot off the hotbar was accepted")
 	}
 }
+
+func TestVehicleCorrectionLeavesThePose(t *testing.T) {
+	before := testutil.ToFloat64(metricCorrections)
+	a, _ := newAct(flat(), Pose{Feet: mgl32.Vec3{1, 0, 1}, Yaw: 30})
+	a.Apply(&packet.CorrectPlayerMovePrediction{
+		PredictionType: packet.PredictionTypeVehicle,
+		Position:       mgl32.Vec3{4, 9, 9},
+		Rotation:       mgl32.Vec2{3, 40},
+	})
+	if got := testutil.ToFloat64(metricCorrections) - before; got != 0 {
+		t.Errorf("corrections counted = %v, want 0", got)
+	}
+	if p := a.Pose(); p.Feet != (mgl32.Vec3{1, 0, 1}) || p.Yaw != 30 || !p.OnGround {
+		t.Errorf("pose = %+v, want it untouched", p)
+	}
+}
