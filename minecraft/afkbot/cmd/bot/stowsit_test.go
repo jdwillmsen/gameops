@@ -303,3 +303,14 @@ func TestSeatAimsAgainAfterAMoveMidAim(t *testing.T) {
 		t.Fatalf("sent %d after re-aiming", len(w.got))
 	}
 }
+
+func TestSeatLinksOfOtherRidersAreSeenWithoutTouchingTheBotsRide(t *testing.T) {
+	_, _, p, l := seatFixture()
+	l.event(&packet.AddActor{EntityUniqueID: 1, EntityRuntimeID: 101, EntityType: seatKind,
+		EntityLinks: []protocol.EntityLink{{RiddenEntityUniqueID: 1, RiderEntityUniqueID: 42, Type: protocol.EntityLinkRider}}}, 1, 7)
+	l.event(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiddenEntityUniqueID: 1, RiderEntityUniqueID: 42, Type: protocol.EntityLinkRemove}}, 1, 7)
+	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiddenEntityUniqueID: 1, RiderEntityUniqueID: 42, Type: protocol.EntityLinkRider}}, 1, 7)
+	if _, _, _, v := p.get(); v != 0 || len(l.seats) != 1 {
+		t.Fatalf("vehicle=%d seats=%d", v, len(l.seats))
+	}
+}
