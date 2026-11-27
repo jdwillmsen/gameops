@@ -164,3 +164,12 @@ func TestLogSafeDropsLineBreaks(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestObservedNamesOnlyContractStates(t *testing.T) {
+	if got := observed("parked\nfake"); got != "invalid" {
+		t.Fatalf("got %q", got)
+	}
+	if got := observed(presenceapi.StateParked); got != "parked" {
+		t.Fatalf("got %q", got)
+	}
+}
