@@ -103,6 +103,8 @@ func TestIdleModeNeverFightsOrTends(t *testing.T) {
 	if hits := idle.conn.entityUses(protocol.UseItemOnEntityActionAttack); len(hits) != 0 {
 		t.Fatalf("the idle unit attacked: %+v", hits)
 	}
+	idle.conn.mu.Lock()
+	defer idle.conn.mu.Unlock()
 	for _, pk := range idle.conn.out {
 		if _, ok := pk.(*packet.MobEquipment); ok {
 			t.Fatalf("the idle unit, with stow off, changed its hand: %+v", pk)
