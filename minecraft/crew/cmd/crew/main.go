@@ -14,6 +14,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/logging"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
@@ -50,6 +52,9 @@ const (
 	// SCTP handshakes have all finished, which takes several round trips where
 	// RakNet takes one.
 	netherNetConnectTimeout = 45 * time.Second
+	// An idle unit takes afkbot's budget, which FWB's NetherNet was measured
+	// against with the Xbox and PlayFab sign-in counted in.
+	idleNetherNetConnectTimeout = 60 * time.Second
 	// Far longer than connectTimeout: a freshly started server loads its
 	// world for the first player in, and abandoning a login the server would
 	// have completed is worse than waiting.
@@ -63,10 +68,17 @@ const (
 
 	// The overworld's -64..319 in 16-block sections.
 	sectionsPerColumn = 24
+
+	// Bounds one poll of the server agent, so a hung agent delays the next
+	// answer rather than stopping the poller.
+	presenceTimeout = 5 * time.Second
 )
 
 func connectBudget(cfg config.Config) time.Duration {
 	if cfg.NetherNet() {
+		if cfg.Idle() {
+			return idleNetherNetConnectTimeout
+		}
 		return netherNetConnectTimeout
 	}
 	return connectTimeout
@@ -194,14 +206,19 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		}
 	}
 
+	gate, runPresence := presenceGate(cfg, logAdapter{log})
+	if runPresence != nil {
+		go runPresence(ctx)
+	}
 	runConnectLoop(ctx,
 		loopOptions{
 			minDelay: time.Duration(cfg.ReconnectMinMs) * time.Millisecond,
 			maxDelay: time.Duration(cfg.ReconnectMaxMs) * time.Millisecond,
 			after:    time.After,
 		},
-		func(ctx context.Context) error {
-			return session(ctx, cfg, auth, tracker, world, hub, runner, lf, beginSession, log)
+		gate,
+		func(ctx context.Context, spawned func()) error {
+			return session(ctx, cfg, auth, tracker, world, hub, runner, lf, beginSession, spawned, log)
 		},
 		tracker.Reset,
 		logAdapter{log},
@@ -209,11 +226,39 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	return exit(0)
 }
 
+// presenceGate returns what the connect loop waits on, and the poller to run
+// beside it when PRESENCE_URL is set. Config allows that only in idle mode,
+// so a worker always gets the gate that admits at once.
+func presenceGate(cfg config.Config, log presence.Logger) (presence.Gate, func(context.Context)) {
+	p := cfg.Presence
+	if !p.Enabled() {
+		return presence.AlwaysPresent{}, nil
+	}
+	client := presence.NewClient(p.URL, p.ActorID, p.Token, &http.Client{Timeout: presenceTimeout})
+	r := presence.NewReconciler(client, p.Default, time.Duration(p.PollMs)*time.Millisecond, version, log)
+	log.Info("presence_enabled", map[string]any{
+		"actor_id": p.ActorID,
+		"url":      redactedURL(p.URL),
+		"default":  string(p.Default),
+		"poll_ms":  p.PollMs,
+	})
+	return r, r.Run
+}
+
+// redactedURL hides a URL's userinfo password before it reaches the log.
+func redactedURL(raw string) string {
+	if u, err := url.Parse(raw); err == nil {
+		return u.Redacted()
+	}
+	return raw
+}
+
 // logAdapter exists because Go method sets do not unify the named
 // logging.Fields with the plain map the loop's interface is written against.
 type logAdapter struct{ l *logging.Logger }
 
 func (a logAdapter) Info(e string, f map[string]any)  { a.l.Info(e, logging.Fields(f)) }
+func (a logAdapter) Warn(e string, f map[string]any)  { a.l.Warn(e, logging.Fields(f)) }
 func (a logAdapter) Error(e string, f map[string]any) { a.l.Error(e, logging.Fields(f)) }
 
 // declinePack refuses every pack the server offers. Unit login then skips the
@@ -262,7 +307,7 @@ func dialServer(ctx context.Context, cfg config.Config, auth authn, unitSkin ski
 	return conn, leave, nil
 }
 
-func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), spawned func(), log *logging.Logger) error {
 	unitSkin := unitSkinFor(cfg, log)
 	addr := cfg.Address()
 
@@ -304,6 +349,7 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 		defer hub.Reset()
 	}
 	log.Info("spawned", spawnedFields(conn.IdentityData().XUID, cfg.ViewDistance))
+	spawned()
 
 	if err := conn.WritePacket(&packet.RequestChunkRadius{ChunkRadius: int32(cfg.ViewDistance), MaxChunkRadius: cfg.ViewDistance}); err != nil {
 		return fmt.Errorf("request chunk radius: %w", err)
