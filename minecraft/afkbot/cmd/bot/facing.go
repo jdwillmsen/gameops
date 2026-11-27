@@ -11,10 +11,20 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// facingInterval is how often the rotation is restated. The server restores
-// its own saved rotation on rejoin and may reset it after a teleport, so a
-// single packet at spawn would not stay.
-const facingInterval = 5 * time.Second
+// inputTick is how often the bot reports its input: every game tick, like a
+// client. A report every 5s with the tick jumping ~100 at a time was ignored
+// by BDS on FWB, rotations and entity clicks alike.
+const inputTick = 50 * time.Millisecond
+
+// newTickCounter numbers input reports 1, 2, 3... The server orders a client's
+// inputs by this number, so it must advance by one per report.
+func newTickCounter() func() uint64 {
+	var n uint64
+	return func() uint64 {
+		n++
+		return n
+	}
+}
 
 type packetWriter interface {
 	WritePacket(packet.Packet) error
@@ -159,7 +169,7 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 
 // holdFacing keeps the bot looking along yaw by reporting the position the
 // server gave it with that rotation, so the report never asks to move it.
-func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick func() uint64) {
+func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, every time.Duration, tick func() uint64) {
 	send := func() {
 		pos, pitch, paused, vehicle, ack, aim := p.report()
 		if paused {
@@ -197,7 +207,7 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick 
 		_ = w.WritePacket(pk)
 	}
 	send()
-	t := time.NewTicker(facingInterval)
+	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
 		select {

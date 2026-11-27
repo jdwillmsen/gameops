@@ -24,7 +24,7 @@ func TestHoldFacingReportsSpawnPositionWithYaw(t *testing.T) {
 	pos := mgl32.Vec3{127.5, 71.6, 229.5}
 	p := &pose{}
 	p.set(pos, 12)
-	go holdFacing(ctx, r, p, 90, func() uint64 { return 7 })
+	go holdFacing(ctx, r, p, 90, time.Hour, func() uint64 { return 7 })
 
 	select {
 	case pk := <-r.got:
@@ -55,7 +55,7 @@ func TestHoldFacingSendsNothingWhileDead(t *testing.T) {
 	r := recorder{got: make(chan *packet.PlayerAuthInput, 4)}
 	p := &pose{}
 	p.setPaused(true)
-	go holdFacing(ctx, r, p, 90, func() uint64 { return 0 })
+	go holdFacing(ctx, r, p, 90, time.Hour, func() uint64 { return 0 })
 	select {
 	case <-r.got:
 		t.Fatal("sent a position for a dead bot")
@@ -79,7 +79,7 @@ func TestSeatedBotNamesItsVehicleAndTurnsIt(t *testing.T) {
 	r := recorder{got: make(chan *packet.PlayerAuthInput, 4)}
 	p := &pose{}
 	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 5, RiddenEntityUniqueID: 9, Type: protocol.EntityLinkRider}}, 1, 5)
-	go holdFacing(ctx, r, p, 96, func() uint64 { return 0 })
+	go holdFacing(ctx, r, p, 96, time.Hour, func() uint64 { return 0 })
 	pk := <-r.got
 	veh, ok := pk.ClientPredictedVehicle.Value()
 	rot, rok := pk.VehicleRotation.Value()
@@ -115,7 +115,7 @@ func TestTeleportIsAcknowledgedOnceAndReportedAtOnce(t *testing.T) {
 	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
 	p := newPose()
 	p.set(mgl32.Vec3{1, 2, 3}, 0)
-	go holdFacing(ctx, r, p, 90, func() uint64 { return 1 })
+	go holdFacing(ctx, r, p, 90, time.Hour, func() uint64 { return 1 })
 	first := <-r.got
 	if first.InputData.Load(packet.InputFlagHandledTeleport) {
 		t.Fatal("acknowledged a teleport that never happened")
@@ -141,7 +141,7 @@ func TestAimIsReportedAtOnceThenTheFacingReturns(t *testing.T) {
 	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
 	p := newPose()
 	p.set(mgl32.Vec3{1, 2, 3}, 0)
-	go holdFacing(ctx, r, p, 89, func() uint64 { return 1 })
+	go holdFacing(ctx, r, p, 89, time.Hour, func() uint64 { return 1 })
 	<-r.got
 
 	look := func(want mgl32.Vec2) {
@@ -159,4 +159,23 @@ func TestAimIsReportedAtOnceThenTheFacingReturns(t *testing.T) {
 	look(mgl32.Vec2{86, 120})
 	p.setAim(nil)
 	look(mgl32.Vec2{0, 89})
+}
+
+func TestInputIsReportedEveryTickWithTheTickAdvancingByOne(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
+	p := newPose()
+	p.set(mgl32.Vec3{1, 2, 3}, 0)
+	go holdFacing(ctx, r, p, 89, time.Millisecond, newTickCounter())
+	for want := uint64(1); want <= 5; want++ {
+		select {
+		case pk := <-r.got:
+			if pk.Tick != want || pk.Yaw != 89 {
+				t.Fatalf("report %d: tick=%d yaw=%v", want, pk.Tick, pk.Yaw)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("no report on the tick")
+		}
+	}
 }
