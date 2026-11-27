@@ -8,7 +8,7 @@
     "@semantic-release/npm": "file:./stubs/semantic-release-npm",
     "@semantic-release/release-notes-generator": "14.1.1",
     "conventional-changelog-conventionalcommits": "9.3.1",
-    "semantic-release": "25.0.9"
+    "semantic-release": "26.0.1"
   },
   "overrides": {
     "@semantic-release/npm": "$@semantic-release/npm"
