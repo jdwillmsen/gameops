@@ -132,7 +132,7 @@ func newSeater(log *logging.Logger, seat [3]float32) *seater {
 
 // step tries a mount when the bot is unseated and a retry is due. It is
 // called per packet and does nothing between retry times.
-func (s *seater) step(w packetWriter, p *pose, l *poseLog, hotbarSlot byte, heldEmpty bool) {
+func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hotbarSlot byte, heldEmpty bool) {
 	pos, _, paused, vehicle := p.get()
 	if vehicle != 0 {
 		// Seated: a later dismount or respawn gets a fresh set of tries.
@@ -168,15 +168,21 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, hotbarSlot byte, held
 		return
 	}
 	s.log.Info("seat_found", logging.Fields{"unique_id": bestID, "distance": bestD, "try": s.tries})
+	// BDS ignored the bare transaction on a cushion; the crew units' right
+	// click, with a click point and the arm swing, is what it accepts.
 	err := w.WritePacket(&packet.InventoryTransaction{
 		TransactionData: &protocol.UseItemOnEntityTransactionData{
 			TargetEntityRuntimeID: best.runtimeID,
 			ActionType:            protocol.UseItemOnEntityActionInteract,
 			HotBarSlot:            int32(hotbarSlot),
 			Position:              pos,
+			ClickedPosition:       mgl32.Vec3{0, 1, 0},
 		},
 	})
 	if err != nil {
+		return
+	}
+	if err := w.WritePacket(&packet.Animate{ActionType: packet.AnimateActionSwingArm, EntityRuntimeID: runtimeID}); err != nil {
 		return
 	}
 	s.log.Info("seat_mount_sent", logging.Fields{"unique_id": bestID, "try": s.tries})
