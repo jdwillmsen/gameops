@@ -301,7 +301,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 			stow.handle(pk, conn, gd.EntityRuntimeID)
 		}
 		if seat != nil {
-			seat.step(conn, held, poseEvents, stow.selected, stow.selectedEmpty())
+			seat.step(conn, held, poseEvents, gd.EntityRuntimeID, stow.selected, stow.selectedEmpty())
 		}
 
 		// A dead bot holds no chunks, and nothing outside this loop can tell
