@@ -282,3 +282,24 @@ func TestSeatWaitsForAKnownEmptyHandAndForTheLiving(t *testing.T) {
 		t.Fatalf("tries not reset once seated: %d", s.tries)
 	}
 }
+
+func TestSeatAimsAgainAfterAMoveMidAim(t *testing.T) {
+	s, now, p, l := seatFixture()
+	addActor(l, 1, 101, seatKind, mgl32.Vec3{10, 64, 10})
+	w := &sink{}
+	s.step(w, p, l, 7, 0, true)
+	*now = now.Add(seatAimFor)
+	p.set(mgl32.Vec3{11, 64, 10}, 0)
+	s.step(w, p, l, 7, 0, true)
+	if len(w.got) != 0 {
+		t.Fatal("clicked with a look worked out from the old position")
+	}
+	if want := lookAt(mgl32.Vec3{11, 64, 10}, mgl32.Vec3{10, 64 + seatAimHeight, 10}); p.aim == nil || *p.aim != want {
+		t.Fatalf("aim = %v, want %v", p.aim, want)
+	}
+	*now = now.Add(seatAimFor)
+	s.step(w, p, l, 7, 0, true)
+	if len(w.got) != 2 {
+		t.Fatalf("sent %d after re-aiming", len(w.got))
+	}
+}

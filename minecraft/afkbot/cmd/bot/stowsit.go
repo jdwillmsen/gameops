@@ -131,9 +131,11 @@ type seater struct {
 	seat  mgl32.Vec3
 	tries int
 	last  time.Time
-	// aiming is the seat being looked at before the click, from aimedAt.
+	// aiming is the seat being looked at before the click, from aimedAt and
+	// aimFrom, the position the look was worked out from.
 	aiming  *seatActor
 	aimedAt time.Time
+	aimFrom mgl32.Vec3
 }
 
 func newSeater(log *logging.Logger, seat [3]float32) *seater {
@@ -159,6 +161,11 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hot
 	}
 	now := s.now()
 	if s.aiming != nil {
+		if pos != s.aimFrom {
+			// Moved mid-aim: the look no longer points at the seat.
+			s.aim(p, *s.aiming, pos, now)
+			return
+		}
 		if now.Sub(s.aimedAt) >= seatAimFor {
 			s.click(w, p, *s.aiming, pos, runtimeID, hotbarSlot)
 		}
@@ -189,10 +196,15 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hot
 		s.log.Warn("seat_missing", logging.Fields{"try": s.tries, "kind": seatKind})
 		return
 	}
-	look := lookAt(pos, best.pos.Add(mgl32.Vec3{0, seatAimHeight, 0}))
-	s.log.Info("seat_found", logging.Fields{"unique_id": bestID, "distance": bestD, "try": s.tries, "pitch": look[0], "yaw": look[1]})
+	s.log.Info("seat_found", logging.Fields{"unique_id": bestID, "distance": bestD, "try": s.tries})
 	best.uniqueID = bestID
-	s.aiming, s.aimedAt = &best, now
+	s.aim(p, best, pos, now)
+}
+
+// aim looks from pos at seat and starts the wait before the click.
+func (s *seater) aim(p *pose, seat seatActor, pos mgl32.Vec3, now time.Time) {
+	look := lookAt(pos, seat.pos.Add(mgl32.Vec3{0, seatAimHeight, 0}))
+	s.aiming, s.aimedAt, s.aimFrom = &seat, now, pos
 	p.setAim(&look)
 }
 
