@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"time"
 
 	"github.com/go-gl/mathgl/mgl32"
@@ -19,6 +20,11 @@ const (
 
 	seatMaxTries = 6
 	seatRadius   = 1.5
+	// seatAimFor is how long the bot looks at the seat before using it, so
+	// the server has the new look before the click.
+	seatAimFor = 500 * time.Millisecond
+	// seatAimHeight is the middle of a cushion above its feet.
+	seatAimHeight = 0.125
 
 	seatKind = "minecraft:cushion"
 )
@@ -27,6 +33,7 @@ const (
 type seatActor struct {
 	runtimeID uint64
 	pos       mgl32.Vec3
+	uniqueID  int64
 }
 
 // stower keeps the bot's hands empty without touching any item: it only moves
@@ -124,6 +131,9 @@ type seater struct {
 	seat  mgl32.Vec3
 	tries int
 	last  time.Time
+	// aiming is the seat being looked at before the click, from aimedAt.
+	aiming  *seatActor
+	aimedAt time.Time
 }
 
 func newSeater(log *logging.Logger, seat [3]float32) *seater {
@@ -134,6 +144,9 @@ func newSeater(log *logging.Logger, seat [3]float32) *seater {
 // called per packet and does nothing between retry times.
 func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hotbarSlot byte, heldEmpty bool) {
 	pos, _, paused, vehicle := p.get()
+	if vehicle != 0 || paused || !heldEmpty {
+		s.stopAim(p)
+	}
 	if vehicle != 0 {
 		// Seated: a later dismount or respawn gets a fresh set of tries.
 		s.tries = 0
@@ -141,10 +154,19 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hot
 	}
 	// A dead bot cannot interact, and the transaction must describe the
 	// selected slot, which is only known to be empty after a stow.
-	if paused || !heldEmpty || s.tries >= seatMaxTries {
+	if paused || !heldEmpty {
 		return
 	}
 	now := s.now()
+	if s.aiming != nil {
+		if now.Sub(s.aimedAt) >= seatAimFor {
+			s.click(w, p, *s.aiming, pos, runtimeID, hotbarSlot)
+		}
+		return
+	}
+	if s.tries >= seatMaxTries {
+		return
+	}
 	if !s.last.IsZero() && now.Sub(s.last) < seatEvery {
 		return
 	}
@@ -167,12 +189,27 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hot
 		s.log.Warn("seat_missing", logging.Fields{"try": s.tries, "kind": seatKind})
 		return
 	}
-	s.log.Info("seat_found", logging.Fields{"unique_id": bestID, "distance": bestD, "try": s.tries})
-	// BDS ignored the bare transaction on a cushion; the crew units' right
-	// click, with a click point and the arm swing, is what it accepts.
+	look := lookAt(pos, best.pos.Add(mgl32.Vec3{0, seatAimHeight, 0}))
+	s.log.Info("seat_found", logging.Fields{"unique_id": bestID, "distance": bestD, "try": s.tries, "pitch": look[0], "yaw": look[1]})
+	best.uniqueID = bestID
+	s.aiming, s.aimedAt = &best, now
+	p.setAim(&look)
+}
+
+func (s *seater) stopAim(p *pose) {
+	if s.aiming != nil {
+		s.aiming = nil
+		p.setAim(nil)
+	}
+}
+
+// click uses the seat the bot is looking at like a client's right click,
+// then gives the held look back.
+func (s *seater) click(w packetWriter, p *pose, seat seatActor, pos mgl32.Vec3, runtimeID uint64, hotbarSlot byte) {
+	defer s.stopAim(p)
 	err := w.WritePacket(&packet.InventoryTransaction{
 		TransactionData: &protocol.UseItemOnEntityTransactionData{
-			TargetEntityRuntimeID: best.runtimeID,
+			TargetEntityRuntimeID: seat.runtimeID,
 			ActionType:            protocol.UseItemOnEntityActionInteract,
 			HotBarSlot:            int32(hotbarSlot),
 			Position:              pos,
@@ -185,5 +222,17 @@ func (s *seater) step(w packetWriter, p *pose, l *poseLog, runtimeID uint64, hot
 	if err := w.WritePacket(&packet.Animate{ActionType: packet.AnimateActionSwingArm, EntityRuntimeID: runtimeID}); err != nil {
 		return
 	}
-	s.log.Info("seat_mount_sent", logging.Fields{"unique_id": bestID, "try": s.tries})
+	s.log.Info("seat_mount_sent", logging.Fields{"unique_id": seat.uniqueID, "try": s.tries})
 }
+
+// lookAt is the {pitch, yaw} that points an eye at target; pitch is positive
+// looking down.
+func lookAt(eye, target mgl32.Vec3) mgl32.Vec2 {
+	d := target.Sub(eye)
+	h := math.Hypot(float64(d[0]), float64(d[2]))
+	yaw := math.Mod(degrees(math.Atan2(-float64(d[0]), float64(d[2])))+360, 360)
+	pitch := -degrees(math.Atan2(float64(d[1]), h))
+	return mgl32.Vec2{float32(pitch), float32(yaw)}
+}
+
+func degrees(r float64) float64 { return r * 180 / math.Pi }

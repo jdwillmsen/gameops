@@ -134,3 +134,29 @@ func TestTeleportIsAcknowledgedOnceAndReportedAtOnce(t *testing.T) {
 		t.Fatal("acknowledgement not cleared after it was sent")
 	}
 }
+
+func TestAimIsReportedAtOnceThenTheFacingReturns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
+	p := newPose()
+	p.set(mgl32.Vec3{1, 2, 3}, 0)
+	go holdFacing(ctx, r, p, 89, func() uint64 { return 1 })
+	<-r.got
+
+	look := func(want mgl32.Vec2) {
+		t.Helper()
+		select {
+		case pk := <-r.got:
+			if pk.Pitch != want[0] || pk.Yaw != want[1] || pk.InteractPitch != want[0] || pk.InteractYaw != want[1] {
+				t.Fatalf("reported pitch=%v yaw=%v interact=%v/%v, want %v", pk.Pitch, pk.Yaw, pk.InteractPitch, pk.InteractYaw, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("look waited for the next interval")
+		}
+	}
+	p.setAim(&mgl32.Vec2{86, 120})
+	look(mgl32.Vec2{86, 120})
+	p.setAim(nil)
+	look(mgl32.Vec2{0, 89})
+}

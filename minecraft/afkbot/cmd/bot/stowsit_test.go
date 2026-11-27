@@ -134,13 +134,26 @@ func addActor(l *poseLog, uid int64, rid uint64, kind string, pos mgl32.Vec3) {
 	l.event(&packet.AddActor{EntityUniqueID: uid, EntityRuntimeID: rid, EntityType: kind, Position: pos}, 1, 1)
 }
 
-func TestSeatMountsNearestCushion(t *testing.T) {
-	s, _, p, l := seatFixture()
+func TestSeatLooksAtTheNearestCushionThenUsesIt(t *testing.T) {
+	s, now, p, l := seatFixture()
 	addActor(l, 1, 101, seatKind, mgl32.Vec3{11, 64, 10})
 	addActor(l, 2, 102, seatKind, mgl32.Vec3{10.2, 64, 10})
 	addActor(l, 3, 103, "minecraft:cow", mgl32.Vec3{10, 64, 10})
 	addActor(l, 4, 104, seatKind, mgl32.Vec3{20, 64, 10})
 	w := &sink{}
+	s.step(w, p, l, 7, 3, true)
+	if len(w.got) != 0 || p.aim == nil {
+		t.Fatalf("clicked before looking: sent=%d aim=%v", len(w.got), p.aim)
+	}
+	if want := lookAt(mgl32.Vec3{9, 64, 9}, mgl32.Vec3{10.2, 64 + seatAimHeight, 10}); *p.aim != want {
+		t.Fatalf("aim = %v, want %v", *p.aim, want)
+	}
+	*now = now.Add(seatAimFor / 2)
+	s.step(w, p, l, 7, 3, true)
+	if len(w.got) != 0 {
+		t.Fatal("clicked before the look reached the server")
+	}
+	*now = now.Add(seatAimFor)
 	s.step(w, p, l, 7, 3, true)
 	if len(w.got) != 2 {
 		t.Fatalf("sent %d", len(w.got))
@@ -153,6 +166,46 @@ func TestSeatMountsNearestCushion(t *testing.T) {
 	}
 	if a, ok := w.got[1].(*packet.Animate); !ok || a.ActionType != packet.AnimateActionSwingArm || a.EntityRuntimeID != 7 {
 		t.Fatalf("no arm swing after the interact: %#v", w.got[1])
+	}
+	if p.aim != nil {
+		t.Fatal("look not given back after the click")
+	}
+}
+
+func TestLookAtStraightDownAndAlongTheAxes(t *testing.T) {
+	for _, c := range []struct {
+		target     mgl32.Vec3
+		pitch, yaw float32
+	}{
+		{mgl32.Vec3{0, -1, 0}, 90, 0},
+		{mgl32.Vec3{0, 0, 1}, 0, 0},
+		{mgl32.Vec3{-1, 0, 0}, 0, 90},
+		{mgl32.Vec3{0, 0, -1}, 0, 180},
+		{mgl32.Vec3{1, 0, 0}, 0, 270},
+	} {
+		got := lookAt(mgl32.Vec3{}, c.target)
+		if abs32(got[0]-c.pitch) > 0.01 || abs32(got[1]-c.yaw) > 0.01 {
+			t.Errorf("lookAt(%v) = %v, want {%v %v}", c.target, got, c.pitch, c.yaw)
+		}
+	}
+}
+
+func abs32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func TestSeatGivesTheLookBackWhenSeatedMidAim(t *testing.T) {
+	s, _, p, l := seatFixture()
+	addActor(l, 1, 101, seatKind, mgl32.Vec3{10, 64, 10})
+	w := &sink{}
+	s.step(w, p, l, 7, 0, true)
+	p.setVehicle(1)
+	s.step(w, p, l, 7, 0, true)
+	if p.aim != nil || s.aiming != nil || len(w.got) != 0 {
+		t.Fatalf("aim=%v aiming=%v sent=%d", p.aim, s.aiming, len(w.got))
 	}
 }
 
@@ -173,19 +226,24 @@ func TestSeatRetriesEveryIntervalUntilRiding(t *testing.T) {
 	s, now, p, l := seatFixture()
 	addActor(l, 1, 101, seatKind, mgl32.Vec3{10, 64, 10})
 	w := &sink{}
-	s.step(w, p, l, 7, 0, true)
-	s.step(w, p, l, 7, 0, true)
+	try := func() {
+		s.step(w, p, l, 7, 0, true)
+		*now = now.Add(seatAimFor)
+		s.step(w, p, l, 7, 0, true)
+		s.step(w, p, l, 7, 0, true)
+	}
+	try()
 	if len(w.got) != 2 {
 		t.Fatalf("not rate limited: %d", len(w.got))
 	}
 	*now = now.Add(seatEvery)
-	s.step(w, p, l, 7, 0, true)
+	try()
 	if len(w.got) != 4 {
 		t.Fatalf("no retry: %d", len(w.got))
 	}
 	p.track(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiderEntityUniqueID: 7, RiddenEntityUniqueID: 1, Type: protocol.EntityLinkRider}}, 1, 7)
 	*now = now.Add(seatEvery)
-	s.step(w, p, l, 7, 0, true)
+	try()
 	if len(w.got) != 4 {
 		t.Fatal("kept mounting while riding")
 	}
