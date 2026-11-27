@@ -35,6 +35,9 @@ type pose struct {
 	// teleport was handled.
 	ackTeleport bool
 	nudge       chan struct{}
+	// aim, when set, replaces the held look for a moment: the server only
+	// lets the bot use an entity it is looking at.
+	aim *mgl32.Vec2
 }
 
 func newPose() *pose { return &pose{nudge: make(chan struct{}, 1)} }
@@ -52,13 +55,27 @@ func (p *pose) takeTeleportAck() bool {
 // report reads the pose and takes any pending teleport acknowledgement in one
 // step, so an acknowledgement is never sent with a position older than the
 // teleport it answers. Nothing is taken while paused.
-func (p *pose) report() (pos mgl32.Vec3, pitch float32, paused bool, vehicle int64, ack bool) {
+func (p *pose) report() (pos mgl32.Vec3, pitch float32, paused bool, vehicle int64, ack bool, aim *mgl32.Vec2) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.paused {
 		ack, p.ackTeleport = p.ackTeleport, false
 	}
-	return p.pos, p.pitch, p.paused, p.vehicle, ack
+	return p.pos, p.pitch, p.paused, p.vehicle, ack, p.aim
+}
+
+// setAim looks along {pitch, yaw} until cleared with nil, and reports it at
+// once.
+func (p *pose) setAim(aim *mgl32.Vec2) {
+	p.mu.Lock()
+	p.aim = aim
+	p.mu.Unlock()
+	if p.nudge != nil {
+		select {
+		case p.nudge <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (p *pose) markTeleport() {
@@ -144,9 +161,13 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 // server gave it with that rotation, so the report never asks to move it.
 func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, tick func() uint64) {
 	send := func() {
-		pos, pitch, paused, vehicle, ack := p.report()
+		pos, pitch, paused, vehicle, ack, aim := p.report()
 		if paused {
 			return
+		}
+		yaw := yaw
+		if aim != nil {
+			pitch, yaw = aim[0], aim[1]
 		}
 		flags := protocol.NewInputFlags(packet.InputFlagCount)
 		if vehicle != 0 {
