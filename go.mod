@@ -19,6 +19,7 @@ require (
 	github.com/sandertv/go-raknet v1.15.2
 	github.com/sandertv/gophertunnel v1.63.0
 	go.yaml.in/yaml/v3 v3.0.5
+	go.yaml.in/yaml/v4 v4.0.0
 	golang.org/x/oauth2 v0.37.0
 )
 
