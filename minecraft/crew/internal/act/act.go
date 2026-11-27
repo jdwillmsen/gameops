@@ -134,6 +134,11 @@ type Actuator struct {
 
 	// creative reads whether the unit is in creative mode; nil means never.
 	creative func() bool
+	// vehicle reads what the unit rides, from belief; nil means never.
+	vehicle func() int64
+	// riding is the vehicle the last input was sent for, so a mount or a
+	// dismount is seen on the tick it happens.
+	riding int64
 	// creativeIDs maps an item's runtime ID to the ID a creative-inventory
 	// request must quote, which is a different number.
 	creativeIDs map[int32]uint32
@@ -227,9 +232,21 @@ func (a *Actuator) Tick(in Input) error {
 
 	p := a.pose
 	p.Yaw, p.Pitch = in.Yaw, in.Pitch
+	vehicle := a.vehicleLocked()
+	if vehicle != a.riding {
+		// Whatever the unit was carrying belongs to the walk it left or the
+		// ride it left; neither goes on into the next one.
+		p.Carry, p.vy = mgl32.Vec2{}, 0
+	}
 	var next Pose
 	var step stepInfo
-	if in.Glide && (p.gliding || !p.OnGround) && WaterDepth(a.solid, p.Feet) == 0 {
+	if vehicle != 0 {
+		// The vehicle carries the unit, so the walking model would only claim
+		// a fall the server corrects every tick. The unit stays where the
+		// server last put it.
+		next = p
+		next.sprinting, next.gliding = false, false
+	} else if in.Glide && (p.gliding || !p.OnGround) && WaterDepth(a.solid, p.Feet) == 0 {
 		next, step = p.glide(a.solid)
 	} else {
 		if p.gliding {
@@ -281,7 +298,9 @@ func (a *Actuator) Tick(in Input) error {
 	if wasGliding && !next.gliding {
 		flags.Set(packet.InputFlagStopGliding)
 	}
-	if next.OnGround {
+	if vehicle != 0 {
+		flags.Set(packet.InputFlagClientPredictedVehicle)
+	} else if next.OnGround {
 		flags.Set(packet.InputFlagVerticalCollision)
 	}
 	if a.ackTeleport {
@@ -305,6 +324,12 @@ func (a *Actuator) Tick(in Input) error {
 		AnalogueMoveVector: mgl32.Vec2{0, in.Forward},
 		RawMoveVector:      mgl32.Vec2{0, in.Forward},
 	}
+	if vehicle != 0 {
+		// A rider's own yaw is overridden by its vehicle's, so the vehicle
+		// rotation is how a seated unit faces anything.
+		pk.ClientPredictedVehicle = protocol.Option(vehicle)
+		pk.VehicleRotation = protocol.Option(mgl32.Vec2{in.Pitch, in.Yaw})
+	}
 	if in.StartUsing {
 		pk.InputData.Set(packet.InputFlagStartUsingItem)
 	}
@@ -327,6 +352,7 @@ func (a *Actuator) Tick(in Input) error {
 	}
 	a.pose = next
 	a.ackTeleport = false
+	a.riding = vehicle
 	if next.sprinting && a.moves != nil {
 		a.moves.sprint.Add(1)
 	}

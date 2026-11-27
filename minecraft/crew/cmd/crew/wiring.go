@@ -133,6 +133,7 @@ func (u *unit) startActing() error {
 	a.ItemNames(u.items)
 	a.Crafting(u.book, func() []belief.Item { return u.tracker.Snapshot().Inventory })
 	a.SetCreative(u.tracker.Creative)
+	a.SetVehicle(u.tracker.Vehicle)
 	if u.creative != nil {
 		a.Apply(u.creative)
 	}
