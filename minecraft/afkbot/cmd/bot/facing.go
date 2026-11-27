@@ -143,6 +143,14 @@ func (p *pose) track(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 				p.markTeleport()
 			}
 		}
+	case *packet.CorrectPlayerMovePrediction:
+		// The server's word on where the bot stands. A report that keeps the
+		// old position is corrected again every tick, and the server rejects
+		// the bot's clicks while it does.
+		if m.PredictionType == packet.PredictionTypePlayer {
+			_, pitch, _, _ := p.get()
+			p.set(m.Position, pitch)
+		}
 	case *packet.SetActorLink:
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
 			switch {
@@ -179,8 +187,13 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, every
 			pitch, yaw = aim[0], aim[1]
 		}
 		flags := protocol.NewInputFlags(packet.InputFlagCount)
+		// As the crew units send: without them the server corrects a
+		// standing client every tick.
+		flags.Set(packet.InputFlagBlockBreakingDelayEnabled)
 		if vehicle != 0 {
 			flags.Set(packet.InputFlagClientPredictedVehicle)
+		} else {
+			flags.Set(packet.InputFlagVerticalCollision)
 		}
 		if ack {
 			flags.Set(packet.InputFlagHandledTeleport)

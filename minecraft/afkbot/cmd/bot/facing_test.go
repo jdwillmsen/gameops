@@ -184,3 +184,21 @@ func TestInputIsReportedEveryTickWithTheTickAdvancingByOne(t *testing.T) {
 		}
 	}
 }
+
+func TestServerCorrectionIsAdoptedAndReportedStanding(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r := recorder{got: make(chan *packet.PlayerAuthInput, 8)}
+	p := newPose()
+	p.set(mgl32.Vec3{128.5, 71.62, 229.5}, 3)
+	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypeVehicle, Position: mgl32.Vec3{1, 1, 1}}, 5, 1)
+	p.track(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypePlayer, Position: mgl32.Vec3{127.5, 71.62, 230.4}}, 5, 1)
+	go holdFacing(ctx, r, p, 89, time.Hour, newTickCounter())
+	pk := <-r.got
+	if pk.Position != (mgl32.Vec3{127.5, 71.62, 230.4}) || pk.Pitch != 3 {
+		t.Fatalf("reported %v pitch %v, want the corrected position", pk.Position, pk.Pitch)
+	}
+	if !pk.InputData.Load(packet.InputFlagVerticalCollision) || !pk.InputData.Load(packet.InputFlagBlockBreakingDelayEnabled) {
+		t.Fatal("standing report lacks the ground and break-delay flags")
+	}
+}
