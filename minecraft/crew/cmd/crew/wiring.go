@@ -6,6 +6,7 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/act"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/afk"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/config"
@@ -46,6 +47,9 @@ type unit struct {
 
 	act           *act.Actuator
 	correctionLog act.CorrectionLogger
+	// afk is the idle reflex, which reads packets the runner never passes
+	// it; nil in work mode.
+	afk *afk.Reflex
 }
 
 func newUnit(runtimeID uint64, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, conn packetWriter) *unit {
@@ -70,6 +74,9 @@ func (u *unit) apply(pk packet.Packet) error {
 	u.tracker.Apply(pk)
 	if u.life != nil {
 		u.life.Apply(pk)
+	}
+	if u.afk != nil {
+		u.afk.Apply(pk)
 	}
 	// The store is the only requester of sub-chunks, so it sees every
 	// packet whether or not the camera is on.
@@ -187,6 +194,32 @@ func (u *unit) end() {
 	if u.life != nil {
 		u.life.End()
 	}
+	if u.afk != nil {
+		u.afk.End()
+	}
+}
+
+// newIdleReflex is the idle unit's reflex, or nil in work mode. Life still
+// reads every packet in idle mode, so its entity table is the one the seat
+// is looked up in.
+func newIdleReflex(cfg config.Config, tracker *belief.Tracker, lf *life.Life, log afk.Logger) *afk.Reflex {
+	if !cfg.Idle() {
+		return nil
+	}
+	return afk.New(afk.Config{
+		Facing: cfg.Facing, HasFacing: cfg.HasFacing,
+		Stow: cfg.Stow,
+		Seat: cfg.Seat, HasSeat: cfg.HasSeat,
+	}, tracker.Snapshot, lf.EachEntity, log)
+}
+
+// unitReflex is what the runner falls back on. An idle unit gets the reflex
+// that cannot fight in place of life, rather than life with its flags off.
+func unitReflex(lf *life.Life, idle *afk.Reflex) task.Reflex {
+	if idle != nil {
+		return idle
+	}
+	return lf
 }
 
 // lifeConfig maps the settings onto what the unit does on its own. The kit is
@@ -248,10 +281,10 @@ func warriorRole(r config.Role) string {
 
 // newSquadClient builds the warrior's seat in its squad over the same
 // crew-control base URL and work token the task client uses. It returns nil
-// for a unit with no warrior role, or a warrior with no crew-control to
+// for an idle unit, a unit with no warrior role, or a warrior with no crew-control to
 // reach — that one still fights, but leads itself and hears no orders.
 func newSquadClient(cfg config.Config, snapshot func() belief.Snapshot, log squadclient.Logger) *squadclient.Client {
-	if !cfg.Role.IsWarrior() || cfg.ControlURL == nil {
+	if cfg.Idle() || !cfg.Role.IsWarrior() || cfg.ControlURL == nil {
 		return nil
 	}
 	c := squadclient.New(cfg.ControlURL, cfg.UnitID, cfg.Squad, "", squadmsg.Role(cfg.Role), cfg.ControlToken, log)

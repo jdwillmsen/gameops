@@ -28,6 +28,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
+	"github.com/jdwillmsen/gameops/minecraft/crew/internal/afk"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/arena"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/belief"
 	"github.com/jdwillmsen/gameops/minecraft/crew/internal/camera"
@@ -127,6 +128,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	hub, beginSession := newCamera(cfg, tracker, dec, log)
 	world := blocks.New(dec, storedSubChunks(cfg.ViewDistance))
 	lf := life.New(lifeConfig(cfg, world), world, tracker.Snapshot, logAdapter{log}, rand.New(rand.NewSource(time.Now().UnixNano())))
+	idle := newIdleReflex(cfg, tracker, lf, logAdapter{log})
 	guard := skill.Guard{Each: lf.EachEntity, Threat: life.Threat, Crew: arena.DefaultCrewNames}
 	runner := task.NewRunner(func(t task.Template) ([]skill.Skill, error) {
 		return task.Expand(t, world, tracker.Snapshot, skill.WithLogger(logAdapter{log}), skill.WithGuard(guard))
@@ -179,17 +181,17 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 	} else if cfg.Role.IsWarrior() {
 		log.Warn("squad_off", logging.Fields{"note": "CREW_ROLE is set but CONTROL_URL is not; the warrior leads itself and hears no orders"})
 	}
-	runner.SetReflex(lf)
+	runner.SetReflex(unitReflex(lf, idle))
 	go runner.Run(ctx)
 	plan, err := task.ParsePlan(cfg.WorkPlan)
 	if err != nil {
 		log.Error("config_invalid", logging.Fields{"error": "WORK_PLAN: " + err.Error()})
 		return exit(1)
 	}
-	if plan != nil {
+	if plan != nil && !cfg.Idle() {
 		go task.NewPlanner(runner, plan).Run(ctx)
 	}
-	if cfg.ControlURL != nil {
+	if cfg.ControlURL != nil && !cfg.Idle() {
 		go control.New(cfg.ControlURL, cfg.UnitID, cfg.ControlToken, runner, logAdapter{log}).Run(ctx)
 	}
 	auth, err := resolveAuth(ctx, cfg, open)
@@ -218,7 +220,7 @@ func run(ctx context.Context, stop context.CancelFunc, cfg config.Config, open t
 		},
 		gate,
 		func(ctx context.Context, spawned func()) error {
-			return session(ctx, cfg, auth, tracker, world, hub, runner, lf, beginSession, spawned, log)
+			return session(ctx, cfg, auth, tracker, world, hub, runner, lf, idle, beginSession, spawned, log)
 		},
 		tracker.Reset,
 		logAdapter{log},
@@ -307,7 +309,7 @@ func dialServer(ctx context.Context, cfg config.Config, auth authn, unitSkin ski
 	return conn, leave, nil
 }
 
-func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, beginSession func(ctx context.Context, addr string), spawned func(), log *logging.Logger) error {
+func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief.Tracker, world *blocks.Store, hub *camera.Hub, runner *task.Runner, lf *life.Life, idle *afk.Reflex, beginSession func(ctx context.Context, addr string), spawned func(), log *logging.Logger) error {
 	unitSkin := unitSkinFor(cfg, log)
 	addr := cfg.Address()
 
@@ -335,6 +337,10 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	u := newUnit(gd.EntityRuntimeID, tracker, world, hub, runner, lf, conn)
 	u.correctionLog = logAdapter{log}
 	u.items = gd.Items
+	if idle != nil {
+		idle.Begin(gd.EntityRuntimeID, gd.EntityUniqueID)
+		u.afk = idle
+	}
 	defer u.end()
 	beginSession(ctx, addr)
 	if hub != nil {
