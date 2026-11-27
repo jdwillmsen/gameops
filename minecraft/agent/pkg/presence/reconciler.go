@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/jdwillmsen/gameops/internal/presenceapi"
-	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
 )
 
-// Logger is the subset of *logging.Logger the reconciler writes to.
+// Logger is the subset of a structured logger the reconciler writes to. Its
+// fields are a plain map so each caller's named Fields type adapts to it.
 type Logger interface {
-	Info(event string, fields logging.Fields)
-	Warn(event string, fields logging.Fields)
-	Error(event string, fields logging.Fields)
+	Info(event string, fields map[string]any)
+	Warn(event string, fields map[string]any)
+	Error(event string, fields map[string]any)
 }
 
 // Reconciler acts on the last desired state the agent gave it.
@@ -122,7 +122,7 @@ func (r *Reconciler) set(state presenceapi.State, etag string) {
 	if state == r.desired {
 		return
 	}
-	r.log.Info("presence_changed", logging.Fields{"from": string(r.desired), "to": string(state)})
+	r.log.Info("presence_changed", map[string]any{"from": string(r.desired), "to": string(state)})
 	r.desired = state
 	close(r.changed)
 	r.changed = make(chan struct{})
@@ -202,7 +202,7 @@ func (s *streak) failed(log Logger, err error, actingOn presenceapi.State) {
 		return
 	}
 	s.kind = kind
-	fields := logging.Fields{"error": err.Error(), "acting_on": string(actingOn)}
+	fields := map[string]any{"error": err.Error(), "acting_on": string(actingOn)}
 	if status != 0 {
 		fields["status"] = status
 	}

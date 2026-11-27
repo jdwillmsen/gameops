@@ -13,7 +13,7 @@ import (
 	"github.com/jdwillmsen/gameops/internal/presenceapi"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/config"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/logging"
-	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/presence"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 )
 
 // fakeGate admits once per value sent on allow, and parks the current
@@ -166,9 +166,9 @@ func (r *recordingLog) add(event string, f logging.Fields) {
 	defer r.mu.Unlock()
 	r.lines = append(r.lines, fmt.Sprintf("%s %v", event, f))
 }
-func (r *recordingLog) Info(e string, f logging.Fields)  { r.add(e, f) }
-func (r *recordingLog) Warn(e string, f logging.Fields)  { r.add(e, f) }
-func (r *recordingLog) Error(e string, f logging.Fields) { r.add(e, f) }
+func (r *recordingLog) Info(e string, f map[string]any)  { r.add(e, f) }
+func (r *recordingLog) Warn(e string, f map[string]any)  { r.add(e, f) }
+func (r *recordingLog) Error(e string, f map[string]any) { r.add(e, f) }
 
 func TestPresenceGateOffIsAlwaysPresent(t *testing.T) {
 	log := &recordingLog{}

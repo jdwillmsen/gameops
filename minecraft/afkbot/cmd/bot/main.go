@@ -24,7 +24,7 @@ import (
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcauth"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcdial"
 	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/mcproto"
-	"github.com/jdwillmsen/gameops/minecraft/afkbot/internal/presence"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/presence"
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 	"github.com/sandertv/gophertunnel/minecraft"
 	"github.com/sandertv/gophertunnel/minecraft/protocol/login"
@@ -90,7 +90,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	gate, runPresence := presenceGate(cfg, log)
+	gate, runPresence := presenceGate(cfg, presenceLog{log})
 	if runPresence != nil {
 		go runPresence(ctx)
 	}
@@ -117,6 +117,15 @@ func presenceGate(cfg config.Config, log presence.Logger) (presence.Gate, func(c
 	})
 	return r, r.Run
 }
+
+// presenceLog exists because Go method sets do not unify the named
+// logging.Fields with the plain map the shared presence package is written
+// against.
+type presenceLog struct{ l *logging.Logger }
+
+func (a presenceLog) Info(e string, f map[string]any)  { a.l.Info(e, logging.Fields(f)) }
+func (a presenceLog) Warn(e string, f map[string]any)  { a.l.Warn(e, logging.Fields(f)) }
+func (a presenceLog) Error(e string, f map[string]any) { a.l.Error(e, logging.Fields(f)) }
 
 // redactedURL hides a URL's userinfo password before it reaches the log.
 // config.Load already proved p.URL parses, so the fallback here is normally
