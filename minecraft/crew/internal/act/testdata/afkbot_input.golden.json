@@ -1,0 +1,62 @@
+{
+  "seated": {
+    "Position": [
+      10.5,
+      65.62,
+      -3.5
+    ],
+    "Pitch": 10,
+    "Yaw": 90,
+    "HeadYaw": 90,
+    "InteractPitch": 10,
+    "InteractYaw": 90,
+    "InteractionModel": 2,
+    "InputMode": 1,
+    "Flags": [
+      "ClientPredictedVehicle",
+      "BlockBreakingDelayEnabled"
+    ],
+    "ClientPredictedVehicle": 42,
+    "VehicleRotation": [
+      10,
+      90
+    ]
+  },
+  "standing": {
+    "Position": [
+      10.5,
+      65.62,
+      -3.5
+    ],
+    "Pitch": 10,
+    "Yaw": 90,
+    "HeadYaw": 90,
+    "InteractPitch": 10,
+    "InteractYaw": 90,
+    "InteractionModel": 2,
+    "InputMode": 1,
+    "Flags": [
+      "BlockBreakingDelayEnabled",
+      "VerticalCollision"
+    ]
+  },
+  "teleported": {
+    "Position": [
+      20.5,
+      65.62,
+      5.5
+    ],
+    "Pitch": 10,
+    "Yaw": 90,
+    "HeadYaw": 90,
+    "InteractPitch": 10,
+    "InteractYaw": 90,
+    "InteractionModel": 2,
+    "InputMode": 1,
+    "Flags": [
+      "HandledTeleport",
+      "BlockBreakingDelayEnabled",
+      "VerticalCollision"
+    ]
+  }
+}
