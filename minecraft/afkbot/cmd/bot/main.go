@@ -265,10 +265,7 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	poseEvents := newPoseLog(log)
 	held.set(gd.PlayerPosition, gd.Pitch)
 	if cfg.HasFacing {
-		start := time.Now()
-		go holdFacing(ctx, conn, held, cfg.Facing, func() uint64 {
-			return uint64(time.Since(start) / (50 * time.Millisecond))
-		})
+		go holdFacing(ctx, conn, held, cfg.Facing, inputTick, newTickCounter())
 	}
 
 	var stow *stower
