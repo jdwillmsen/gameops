@@ -223,7 +223,7 @@ func holdFacing(ctx context.Context, w packetWriter, p *pose, yaw float32, every
 			InteractPitch:    pitch,
 			InteractYaw:      yaw,
 			InputMode:        packet.InputModeMouse,
-			InteractionModel: packet.InteractionModelCrosshair,
+			InteractionModel: packet.InteractionModelClassic,
 			Tick:             tick(),
 			InputData:        flags,
 		}
@@ -307,11 +307,25 @@ func (l *poseLog) event(pk packet.Packet, runtimeID uint64, uniqueID int64) {
 		}
 		if m.EntityType == seatKind && len(l.seats) < maxPoseKinds {
 			l.seats[m.EntityUniqueID] = seatActor{runtimeID: m.EntityRuntimeID, pos: m.Position}
+			// A seat that already has a rider refuses the bot without a
+			// word; its links are the only sign.
+			for _, link := range m.EntityLinks {
+				l.log.Info("seat_link", logging.Fields{
+					"seat": m.EntityUniqueID, "ridden": link.RiddenEntityUniqueID,
+					"rider": link.RiderEntityUniqueID, "type": link.Type, "self": link.RiderEntityUniqueID == uniqueID,
+				})
+			}
 		}
 	case *packet.RemoveActor:
 		delete(l.kinds, m.EntityUniqueID)
 		delete(l.seats, m.EntityUniqueID)
 	case *packet.SetActorLink:
+		if _, seat := l.seats[m.EntityLink.RiddenEntityUniqueID]; seat && m.EntityLink.RiderEntityUniqueID != uniqueID {
+			l.log.Info("seat_link", logging.Fields{
+				"seat": m.EntityLink.RiddenEntityUniqueID, "rider": m.EntityLink.RiderEntityUniqueID,
+				"type": m.EntityLink.Type, "rider_kind": l.kinds[m.EntityLink.RiderEntityUniqueID],
+			})
+		}
 		if m.EntityLink.RiderEntityUniqueID == uniqueID {
 			l.emit("ride_link", logging.Fields{
 				"ridden": m.EntityLink.RiddenEntityUniqueID, "type": m.EntityLink.Type,
