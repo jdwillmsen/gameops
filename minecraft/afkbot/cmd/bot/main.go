@@ -259,6 +259,12 @@ func session(ctx context.Context, cfg config.Config, ts oauth2.TokenSource, log 
 	}); err != nil {
 		return fmt.Errorf("request chunk radius: %w", err)
 	}
+	// Until the loading screen is ended BDS holds the bot under a
+	// loading-screen ability layer and silently drops its input: the facing
+	// and every seat click were ignored on FWB before this was sent.
+	if err := conn.WritePacket(&packet.ServerBoundLoadingScreen{Type: packet.LoadingScreenTypeEnd}); err != nil {
+		return fmt.Errorf("end loading screen: %w", err)
+	}
 
 	gd := conn.GameData()
 	held := newPose()

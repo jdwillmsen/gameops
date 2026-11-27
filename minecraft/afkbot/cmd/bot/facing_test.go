@@ -12,8 +12,13 @@ import (
 
 type recorder struct{ got chan *packet.PlayerAuthInput }
 
+// WritePacket drops reports the test has stopped reading, so a fast ticker
+// cannot block the reporting goroutine forever.
 func (r recorder) WritePacket(p packet.Packet) error {
-	r.got <- p.(*packet.PlayerAuthInput)
+	select {
+	case r.got <- p.(*packet.PlayerAuthInput):
+	default:
+	}
 	return nil
 }
 
