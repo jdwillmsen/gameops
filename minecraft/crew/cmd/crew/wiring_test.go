@@ -507,3 +507,24 @@ func TestRespawnMoveIsNotAcknowledgedAsATeleport(t *testing.T) {
 		t.Errorf("position = %v, want the respawn point", in.Position)
 	}
 }
+
+func TestUnitsRideReachesTheActuator(t *testing.T) {
+	tracker := belief.New(time.Now)
+	tracker.Spawn(7, mgl32.Vec3{0, 32768, 0}, 0, 0, 0)
+	tracker.SetUniqueID(-7)
+	conn := &recordingConn{}
+	runner := task.NewRunner(func(task.Template) ([]skill.Skill, error) { return nil, nil }, nil, tracker.Snapshot, time.Minute, nopLog{})
+	u := newUnit(7, tracker, blocks.New(noNames{}, 4), nil, runner, nil, conn)
+	// The link before the position: the actuator does not exist yet.
+	_ = u.apply(&packet.SetActorLink{EntityLink: protocol.EntityLink{RiddenEntityUniqueID: 42, RiderEntityUniqueID: -7, Type: protocol.EntityLinkRider}})
+	_ = u.apply(&packet.MovePlayer{EntityRuntimeID: 7, Position: mgl32.Vec3{1, 65.62, 2}, OnGround: true})
+	if u.actuator() == nil {
+		t.Fatal("actuator not started")
+	}
+	if err := u.actuator().Tick(act.Input{}); err != nil {
+		t.Fatal(err)
+	}
+	if v := u.actuator().Riding(); v != 42 {
+		t.Errorf("riding = %d, want 42", v)
+	}
+}
