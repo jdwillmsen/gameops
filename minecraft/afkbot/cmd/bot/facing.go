@@ -11,9 +11,8 @@ import (
 	"github.com/sandertv/gophertunnel/minecraft/protocol/packet"
 )
 
-// inputTick is how often the bot reports its input: every game tick, like a
-// client. A report every 5s with the tick jumping ~100 at a time was ignored
-// by BDS on FWB, rotations and entity clicks alike.
+// inputTick is how often the bot reports its input: every game tick, as a
+// client and the crew units do.
 const inputTick = 50 * time.Millisecond
 
 // newTickCounter numbers input reports 1, 2, 3... The server orders a client's
