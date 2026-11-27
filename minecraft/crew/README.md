@@ -12,7 +12,8 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `MC_OFFLINE` | `false` | Lab only: skip Microsoft sign-in and join with `MC_USERNAME` as a bare display name. Refused at start against a NetherNet `MC_HOST` |
 | `MC_PORT` | `19132` | RakNet port, or the signaling TCP port for NetherNet (ignored when `MC_HOST` already carries one) |
 | `AUTH_CACHE_DIR` | `/data/auth` | Where the unit's Microsoft token is cached; put it on the data volume. Unused with `MC_OFFLINE` |
-| `MC_VIEW_DISTANCE` | `8` | Chunk radius requested (1 to 32) |
+| `CREW_MODE` | `work` | `work` is crew as it runs on the lab; `idle` holds a player slot where an AFK bot used to (see Idle mode). Anything else is refused |
+| `MC_VIEW_DISTANCE` | `8`, `12` idle | Chunk radius requested (1 to 32) |
 | `STATUS_ADDR` | `127.0.0.1:8080` | Status API and camera listen address |
 | `TASKS_TOKEN` | unset | Bearer token for the task endpoints; unset leaves them out entirely (404) |
 | `CONTROL_URL`, `CONTROL_TOKEN` | unset | crew-control's base URL and its `WORK_TOKEN`; set both or neither. When set, the unit long-polls crew-control for tasks, stop and per-task `cancel_task` commands and reports their progress, with the contents of the last chest the task closed (dropped and resent once without them if crew-control answers 400 or 413). Unset, it takes tasks only from the Task API |
@@ -57,6 +58,11 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `HOME_POS` | unset | `x,y,z` of the unit's base. After a join or a death puts it at the world spawn it walks there on its own before it resumes its work (see Nights and home); unset leaves it where it is |
 | `WORK_PLAN` | unset | Standing work: a JSON array of 1 to 8 task bodies, as the Task API takes them, run in rotation whenever the unit has nothing queued or running. A failed step is skipped and the next one waits 30 s. Work from the Task API or crew-control cancels a running plan task and goes first. Stopping a plan task (a crew-control stop or a Task API cancel) pauses the plan for 10 minutes |
 | `JOIN_DELAY_S` | `0` | Seconds to wait before the first connect (0 to 600), so a rollout of many units staggers its logins |
+| `FACING` | unset | Idle mode only: the yaw held every tick, `north`, `south`, `east`, `west` or degrees in [0, 360) (0 south, 90 west). Unset keeps the rotation the server gave the unit |
+| `STOW` | `false` | Idle mode only: select an empty hotbar slot, never moving an item, and again whenever the server puts something in hand |
+| `SEAT` | unset | Idle mode only: `x,y,z` of a cushion to sit on, the nearest `minecraft:cushion` within 1.5 blocks. Implies `STOW` |
+| `PRESENCE_URL` | unset | Idle mode only: the server agent's base URL. Set, the unit joins only while the agent says it is present, and `PRESENCE_ACTOR_ID`, `PRESENCE_TOKEN` and `PRESENCE_DEFAULT` (`present` or `parked`, acted on until the agent first answers) are required |
+| `PRESENCE_POLL_MS` | `10000` | Idle mode only: how often the agent is asked (1000 to 600000) |
 | `CAMERA_ENABLED` | `false` | Serve the rendered camera |
 | `CAMERA_MAX_VIEWERS` | `4` | Concurrent camera viewers (1 to 64) |
 | `CAMERA_PACK_DIR` | unset | A resource pack's directory (the one holding `entity/`, `models/`, `render_controllers/`, `animations/` and `textures/`) whose own entities, such as `gameops:tiger`, the camera draws as their real models, textures by variant and animations included, instead of stand-in boxes. Read once at start; nothing is downloaded |
@@ -93,12 +99,24 @@ What a unit needs from its chart for NetherNet:
 - Egress from the unit to the signaling TCP port and to the server's NetherNet
   UDP range: signaling only exchanges the connection offer, and the game traffic
   then flows over ICE/DTLS on UDP, which a TCP-only egress rule would block.
-- A connect budget of 45 s rather than 30 s is applied automatically: signaling,
+- A connect budget of 45 s rather than 30 s (60 s in idle mode, afkbot's) is applied automatically: signaling,
   ICE, DTLS and SCTP all finish before a NetherNet connection is handed over.
 
 The camera's atlas version, the protocol the unit announces and the connect all
 follow the same address. NetherNet has no unconnected ping, so the server's
 version and protocol are read from its signaling status instead.
+
+## Idle mode
+
+`CREW_MODE=idle` turns a unit into what an FWB AFK bot was: it joins, holds
+its chunks at a radius of 12, and otherwise only sits and faces where it is
+told. Every behaviour of its own is off whatever its setting, a setting that
+would give it work or turn a behaviour on is refused at start, and its reflex
+cannot fight, swim or tend. With `PRESENCE_URL` it asks the server agent
+whether to be in the world, so players can `!park` it; a park leaves at once
+and the unit rejoins without a backoff on `!unpark`. It logs `ride_link`,
+`seat_link` and `chunk_radius_granted` as afkbot did. Design and cutover:
+`docs/idle-mode.md`.
 
 ## Idle life and defence
 
