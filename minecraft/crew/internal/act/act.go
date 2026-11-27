@@ -349,6 +349,11 @@ func (a *Actuator) Apply(pk packet.Packet) {
 	defer a.mu.Unlock()
 	switch p := pk.(type) {
 	case *packet.CorrectPlayerMovePrediction:
+		// A vehicle correction carries the vehicle's position and rotation,
+		// not the unit's feet.
+		if p.PredictionType != packet.PredictionTypePlayer {
+			return
+		}
 		metricCorrections.Inc()
 		if a.moves != nil {
 			a.moves.corrections.Add(1)

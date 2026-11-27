@@ -416,3 +416,12 @@ func TestSleepingFollowsOwnActorFlags(t *testing.T) {
 		t.Error("the unit still sleeps after the flag cleared")
 	}
 }
+
+func TestVehicleCorrectionLeavesTheUnitWhereItWas(t *testing.T) {
+	tr := spawned(t)
+	tr.Apply(&packet.CorrectPlayerMovePrediction{PredictionType: packet.PredictionTypeVehicle, Position: mgl32.Vec3{5, 66, 7}, Rotation: mgl32.Vec2{20, 40}})
+	s := tr.Snapshot()
+	if s.Position != [3]float32{1, 2, 3} || s.Pitch != 20 || s.Yaw != 10 {
+		t.Errorf("a vehicle correction moved the unit: %+v", s)
+	}
+}
