@@ -116,3 +116,32 @@ func TestDefaultFlagIsChecked(t *testing.T) {
 		t.Fatalf("exit %d, want 2", code)
 	}
 }
+
+// A restarted stub must not answer 304 to a tag from before the restart,
+// whatever state it now starts in.
+func TestETagChangesAcrossRestarts(t *testing.T) {
+	first := newServer(t, presenceapi.StatePresent)
+	_, tag, _ := fetch(t, first.URL, "")
+	second := newServer(t, presenceapi.StateParked)
+	p, _, code := fetch(t, second.URL, tag)
+	if code != http.StatusOK || p.Effective != presenceapi.StateParked {
+		t.Fatalf("after restart: %d %+v, want 200 parked", code, p)
+	}
+}
+
+func TestPollIsShown(t *testing.T) {
+	srv := newServer(t, presenceapi.StatePresent)
+	fetch(t, srv.URL, "")
+	resp, err := http.Get(srv.URL + "/stub/actors/idle-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var v view
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	if v.PolledAt == nil {
+		t.Fatalf("view = %+v, want polled_at", v)
+	}
+}
