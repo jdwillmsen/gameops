@@ -337,7 +337,7 @@ func TestPresenceGateOffIsAlwaysPresent(t *testing.T) {
 func TestPresenceGateLogsNeitherTheTokenNorAURLPassword(t *testing.T) {
 	log := &recordingLog{}
 	cfg := config.Config{Presence: config.Presence{
-		URL: "http://bot:YYYYYYYYYYYYYYYYYYYY@fwb-server-agent:8080", Token: "ZZZZZZZZZZZZZZZZZZZZ", ActorID: "afk-bot-1",
+		URL: "http://bot:fake-url-passwd@fwb-server-agent:8080", Token: "Fake-Presence-Tok", ActorID: "afk-bot-1",
 		Default: presenceapi.StateParked, PollMs: 10000,
 	}}
 	gate, run := presenceGate(cfg, log)
@@ -347,7 +347,7 @@ func TestPresenceGateLogsNeitherTheTokenNorAURLPassword(t *testing.T) {
 	if len(log.lines) != 1 || !strings.HasPrefix(log.lines[0], "presence_enabled ") {
 		t.Fatalf("lines = %v, want one presence_enabled", log.lines)
 	}
-	if strings.Contains(log.lines[0], "ZZZZZZZZZZZZZZZZZZZZ") || strings.Contains(log.lines[0], "YYYYYYYYYYYYYYYYYYYY") {
+	if strings.Contains(log.lines[0], "Fake-Presence-Tok") || strings.Contains(log.lines[0], "fake-url-passwd") {
 		t.Errorf("presence_enabled carries a secret: %s", log.lines[0])
 	}
 }

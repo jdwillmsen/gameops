@@ -123,7 +123,7 @@ func TestWorkModeRefusesIdleSettings(t *testing.T) {
 func setPresence(t *testing.T) {
 	t.Helper()
 	t.Setenv("PRESENCE_URL", "http://fwb-server-agent:8080/")
-	t.Setenv("PRESENCE_TOKEN", "ZZZZZZZZZZZZZZZZZZZZ")
+	t.Setenv("PRESENCE_TOKEN", "Fake-Presence-Tok")
 	t.Setenv("PRESENCE_ACTOR_ID", "afk-bot-1")
 	t.Setenv("PRESENCE_DEFAULT", "present")
 }
@@ -158,7 +158,7 @@ func TestLoadPresenceEnabled(t *testing.T) {
 	}
 	want := Presence{
 		URL:     "http://fwb-server-agent:8080",
-		Token:   "ZZZZZZZZZZZZZZZZZZZZ",
+		Token:   "Fake-Presence-Tok",
 		ActorID: "afk-bot-1",
 		Default: presenceapi.StatePresent,
 		PollMs:  10000,
@@ -229,13 +229,13 @@ func TestLoadPresencePollAtTheBounds(t *testing.T) {
 func TestLoadPresenceURLErrorRedactsUserinfo(t *testing.T) {
 	setIdle(t)
 	setPresence(t)
-	t.Setenv("PRESENCE_URL", "ftp://bot:ZZZZZZZZZZZZZZZZZZZZ@fwb-server-agent")
+	t.Setenv("PRESENCE_URL", "ftp://bot:Fake-Presence-Tok@fwb-server-agent")
 
 	_, err := Load()
 	if err == nil {
 		t.Fatal("ftp:// PRESENCE_URL was accepted")
 	}
-	if strings.Contains(err.Error(), "ZZZZZZZZZZZZZZZZZZZZ") {
+	if strings.Contains(err.Error(), "Fake-Presence-Tok") {
 		t.Errorf("error echoes the URL's password: %q", err)
 	}
 	if !strings.Contains(err.Error(), "PRESENCE_URL") {
@@ -249,13 +249,13 @@ func TestLoadPresenceErrorsNeverEchoTheToken(t *testing.T) {
 		t.Run(env, func(t *testing.T) {
 			setIdle(t)
 			setPresence(t)
-			t.Setenv(env, "ZZZZZZZZZZZZZZZZZZZZ")
+			t.Setenv(env, "Fake-Presence-Tok")
 
 			_, err := Load()
 			if err == nil {
 				t.Fatalf("%s set to the token was accepted", env)
 			}
-			if strings.Contains(err.Error(), "ZZZZZZZZZZZZZZZZZZZZ") {
+			if strings.Contains(err.Error(), "Fake-Presence-Tok") {
 				t.Errorf("error echoes a value that was set to the token: %q", err)
 			}
 		})
