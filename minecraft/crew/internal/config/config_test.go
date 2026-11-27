@@ -816,3 +816,24 @@ func TestHomePosRejectsWhatIsNotAPosition(t *testing.T) {
 		}
 	}
 }
+
+func TestSkinThemeIsOptionalAndCaseInsensitive(t *testing.T) {
+	setRequired(t)
+	cfg, err := Load()
+	if err != nil || cfg.SkinTheme != "" {
+		t.Fatalf("default SkinTheme = %q, err %v; want unset", cfg.SkinTheme, err)
+	}
+	t.Setenv("SKIN_THEME", " Dotablaze ")
+	cfg, err = Load()
+	if err != nil || cfg.SkinTheme != "dotablaze" {
+		t.Fatalf("SkinTheme = %q, err %v; want dotablaze", cfg.SkinTheme, err)
+	}
+}
+
+func TestSkinThemeRejectsAnUnknownTheme(t *testing.T) {
+	setRequired(t)
+	t.Setenv("SKIN_THEME", "pirate")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "SKIN_THEME") {
+		t.Fatalf("err = %v, want one naming SKIN_THEME", err)
+	}
+}

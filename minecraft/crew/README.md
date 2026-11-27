@@ -38,6 +38,7 @@ standing rules: `docs/specs/2026-10-14-crew-design.md`.
 | `CREW_LAB` | `false` | Must be `true` for a `mender` or `builder`, which refuse to start without it; the lab chart or compose sets it, the live server's never does |
 | `CREW_SQUAD` | `alpha` with a warrior role | The id of the squad a warrior joins through crew-control, lowercase like `alpha` or `bravo_2`; read but unused without one |
 | `CREW_UNIT_ROLE` | unset | The unit's job, which picks its skin outfit: `miner`, `chopper` (the lumberjack), `hauler`, `shaft`, `mender` or `builder`. Case-insensitive; unset or unknown keeps the plain name-coloured skin. A warrior's outfit follows `CREW_ROLE` instead. Same name and role always give the same skin; see `docs/crew-skins.md` |
+| `SKIN_THEME` | unset | A deployment look, `dotablaze`, `neon` or `sheriff`, worn instead of the `CREW_UNIT_ROLE` or warrior outfit so a unit taking over from an AFK bot looks the same. Case-insensitive; anything else is refused. A `SKIN_DIR` file still wins. Unset keeps the outfit |
 | `SKIN_DIR` | unset | Directory of hand-painted 64x64 PNG skins named `<MC_USERNAME>.png`; a valid file there replaces the generated outfit on the unit's next join, an invalid one is logged and ignored. Unset turns overrides off |
 | `KIT_CHEST` | unset | `x,y,z` of a chest to rearm from; unset leaves rearming off |
 | `KIT_FOOD` | `8` | Most food items one visit to the kit chest takes (1 to 64) |

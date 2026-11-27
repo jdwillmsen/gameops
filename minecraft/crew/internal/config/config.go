@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/mcproto"
+	"github.com/jdwillmsen/gameops/minecraft/agent/pkg/skin"
 )
 
 const (
@@ -142,6 +143,10 @@ type Config struct {
 	// outfit. A warrior's outfit follows Role instead. Empty or unknown gives
 	// the plain name-coloured skin.
 	SkinRole string
+	// SkinTheme dresses the unit in a deployment theme (dotablaze, neon,
+	// sheriff) instead of its role's outfit, so a unit taking over from an
+	// AFK bot keeps the look players know it by. Empty keeps the outfit.
+	SkinTheme string
 	// SkinDir holds hand-painted skins as <name>.png; a file there replaces
 	// the generated outfit on the unit's next join. Empty turns it off.
 	SkinDir string
@@ -354,6 +359,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	skinTheme := strings.ToLower(strings.TrimSpace(os.Getenv("SKIN_THEME")))
+	if skinTheme != "" && !skin.KnownTheme(skinTheme) {
+		return Config{}, fmt.Errorf("SKIN_THEME: unknown theme %q", skinTheme)
+	}
 	combat, err := combatSettings()
 	if err != nil {
 		return Config{}, err
@@ -416,6 +425,7 @@ func Load() (Config, error) {
 		InvSpareTools: invSpareTools,
 
 		SkinRole:     strings.ToLower(strings.TrimSpace(os.Getenv("CREW_UNIT_ROLE"))),
+		SkinTheme:    skinTheme,
 		SkinDir:      strings.TrimSpace(os.Getenv("SKIN_DIR")),
 		WorkPlan:     strings.TrimSpace(os.Getenv("WORK_PLAN")),
 		JoinDelayS:   joinDelay,

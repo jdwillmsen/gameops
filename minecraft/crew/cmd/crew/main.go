@@ -254,12 +254,7 @@ func dialServer(ctx context.Context, cfg config.Config, auth authn, unitSkin ski
 		// A headless unit never renders, so a world resource pack is dead
 		// weight that the login would otherwise wait on.
 		DownloadResourcePack: declinePack,
-		ClientData: login.ClientData{
-			SkinID:          unitSkin.ID,
-			SkinData:        unitSkin.Data,
-			SkinImageWidth:  unitSkin.Width,
-			SkinImageHeight: unitSkin.Height,
-		},
+		ClientData:           skinClientData(unitSkin),
 	}, addr, connectBudget(cfg), spawnTimeout)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial: %w", err)
@@ -355,10 +350,25 @@ func session(ctx context.Context, cfg config.Config, auth authn, tracker *belief
 	}
 }
 
+// skinClientData is the appearance half of the login. The arm size and
+// resource patch go with the texture because a slim skin, such as the sheriff
+// theme, is otherwise drawn on the wide model with its arm texture misplaced.
+func skinClientData(s skin.Skin) login.ClientData {
+	return login.ClientData{
+		SkinID:            s.ID,
+		SkinData:          s.Data,
+		SkinImageWidth:    s.Width,
+		SkinImageHeight:   s.Height,
+		ArmSize:           s.ArmSize(),
+		SkinResourcePatch: s.ResourcePatch(),
+	}
+}
+
 // unitSkinFor picks what the unit wears. A headless client uploads no skin of
 // its own, and without one it joins as a black silhouette under a fresh skin
-// ID every connect. A hand-painted file wins, then the role's outfit; a bad
-// file is logged and skipped so a typo cannot keep a unit out of the world.
+// ID every connect. A hand-painted file wins, then the deployment's theme,
+// then the role's outfit; a bad file is logged and skipped so a typo cannot
+// keep a unit out of the world.
 func unitSkinFor(cfg config.Config, log *logging.Logger) skin.Skin {
 	custom, found, err := skin.Override(cfg.SkinDir, cfg.Username)
 	if err != nil {
@@ -366,6 +376,9 @@ func unitSkinFor(cfg config.Config, log *logging.Logger) skin.Skin {
 	}
 	if found {
 		return custom
+	}
+	if themed, ok := skin.ForTheme(cfg.Username, cfg.SkinTheme); ok {
+		return themed
 	}
 	persona := skin.Persona{Role: cfg.SkinRole}
 	if cfg.Role.IsWarrior() {

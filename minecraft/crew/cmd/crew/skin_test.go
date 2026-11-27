@@ -58,3 +58,44 @@ func TestChopperUnitWearsChopperOutfitDeterministically(t *testing.T) {
 		t.Error("a chopper and a miner of the same name should differ")
 	}
 }
+
+func TestUnitSkinThemeSitsBetweenOverrideAndOutfit(t *testing.T) {
+	log := logging.New("")
+	dir := t.TempDir()
+	cfg := config.Config{Username: "Agate", SkinRole: "miner", Role: "ranger", SkinTheme: skin.ThemeDotablaze, SkinDir: dir}
+
+	themed, _ := skin.ForTheme("Agate", skin.ThemeDotablaze)
+	if got := unitSkinFor(cfg, log); got != themed {
+		t.Error("a theme should replace the role's and the warrior's outfit")
+	}
+
+	custom := skin.ForPersona("Other", skin.Persona{Role: "shaft"})
+	b, _ := custom.PNG()
+	if err := os.WriteFile(filepath.Join(dir, "Agate.png"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := unitSkinFor(cfg, log); got.Data != custom.Data {
+		t.Error("an override file should win over the theme")
+	}
+}
+
+// The sheriff is the theme's slim one: without the arm size and resource
+// patch its arm texture lands on the wide model.
+func TestSkinClientDataCarriesTheArmModel(t *testing.T) {
+	sheriff, ok := skin.ForTheme("Agate", skin.ThemeSheriff)
+	if !ok || !sheriff.Slim {
+		t.Fatal("the sheriff theme should give a slim skin")
+	}
+	cd := skinClientData(sheriff)
+	if cd.ArmSize != "slim" || cd.SkinResourcePatch != sheriff.ResourcePatch() || cd.SkinResourcePatch == "" {
+		t.Errorf("slim client data = arm %q patch %q", cd.ArmSize, cd.SkinResourcePatch)
+	}
+	if cd.SkinID != sheriff.ID || cd.SkinData != sheriff.Data || cd.SkinImageWidth != sheriff.Width || cd.SkinImageHeight != sheriff.Height {
+		t.Error("client data should carry the skin's texture as is")
+	}
+
+	wide := skinClientData(skin.ForPersona("Agate", skin.Persona{Role: "miner"}))
+	if wide.ArmSize != "wide" || wide.SkinResourcePatch != "" {
+		t.Errorf("wide client data = arm %q patch %q", wide.ArmSize, wide.SkinResourcePatch)
+	}
+}
