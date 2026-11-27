@@ -145,3 +145,22 @@ func TestPollIsShown(t *testing.T) {
 		t.Fatalf("view = %+v, want polled_at", v)
 	}
 }
+
+func TestMalformedActorIDIsRefused(t *testing.T) {
+	srv := newServer(t, presenceapi.StatePresent)
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/stub/actors/Bad%0AId?state=parked", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("got %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestLogSafeDropsLineBreaks(t *testing.T) {
+	if got := logSafe("a\nb\r\nc"); got != "abc" {
+		t.Fatalf("got %q", got)
+	}
+}
