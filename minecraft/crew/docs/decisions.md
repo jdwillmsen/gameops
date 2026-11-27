@@ -25,6 +25,8 @@ exercised.
 A unit joins on start and stays until it is stopped. That is wrong for FWB,
 which is why nothing here is deployed there.
 
+Superseded for idle units on 2026-11-27 (below).
+
 ## 2026-10-14: the status API defaults to loopback
 
 `/v1/state` reports the unit's position, and the camera streams its
@@ -400,3 +402,16 @@ slack, with two more waits for a slow server.
 stack id as the sim does; torch placement on a stair step; the break-and-collect
 of an ore beside the stair under the server's drop timing.
 
+## 2026-11-27: idle units ask the server agent whether to be in the world
+
+Crew's idle mode replaces afkbot on FWB (`docs/idle-mode.md`), and FWB's
+players park and unpark those bots through the server agent. An idle unit
+without that would be a bot nobody could send away, so the 2026-10-14 "no
+presence client yet" no longer holds for idle units: they take afkbot's
+presence client, moved to `agent/pkg/presence` rather than rewritten, with its
+fail-static polling and its gate in front of each connect.
+
+It still holds for workers. Config refuses `PRESENCE_*` in work mode, because
+crew-control owns when a worker joins, and two owners of that one decision is
+what the earlier entry avoided. A park is not a failure: it neither grows the
+reconnect backoff nor delays the rejoin.
