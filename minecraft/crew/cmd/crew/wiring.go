@@ -165,7 +165,8 @@ func (u *unit) died() {
 }
 
 // respawned moves the actuator to where the server put the unit, keeping its
-// tick counter so ticks keep rising across the death.
+// tick counter so ticks keep rising across the death. The move is a normal
+// one: only a teleport the server itself sent may be acknowledged.
 func (u *unit) respawned() {
 	if u.act == nil {
 		return
